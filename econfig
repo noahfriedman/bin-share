@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1994-10-26
 
-# $Id: econfig,v 1.8 1996/03/03 22:41:37 friedman Exp $
+# $Id: econfig,v 1.9 1996/03/03 22:49:05 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,11 +26,11 @@
 # Commentary:
 
 # If using this at splode.com, read the file
-# /usr/local/src/gnu/emacs/19dev/README
+# /usr/local/src/gnu/emacs/fsf-dev/README
 
 # Code:
 
-rootdir=/usr/local/src/gnu/emacs/19dev
+rootdir=/usr/local/src/gnu/emacs/fsf-dev
 srcdir=$rootdir/current
 prefix=/var/project/emacs
 
