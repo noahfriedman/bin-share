@@ -4,7 +4,7 @@
 # Created: 1992-02-10
 # Public domain
 
-# $Id: rotate-log,v 1.7 1995/09/23 22:09:34 friedman Exp friedman $
+# $Id: rotate-log,v 1.8 1995/10/03 05:17:05 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -42,9 +42,12 @@ Options are:
                               OWNER.GROUP and avoid using --group if the
                               ${bq}chown${eq} command supports this syntax).
 -s, --size-threshold    SIZE  Do not rotate unless working log file is SIZE
-                              bytes or larger.  By default no size checking
-                              is done.
--v, --verbose                 Chatter away while working.
+                              units or larger.  Units of kilobytes (${bq}k$eq)
+                              or megabytes (${bq}m$eq) may be specified,
+                              e.g. $bq-s 200k$eq.  If no unit is specified,
+                              the size is interpreted as bytes. By default
+                              no minimum size is required for rotation.
+-v, --verbose                 Report renaming of files as they occur.
 "
 
 # Usage: eval "$getopt"; value=$optarg
@@ -161,7 +164,28 @@ while : ; do
      ;;
     -s | --size-threshold* | --s* )
       eval "$getopt"
-      size_threshold="$optarg"
+      size_threshold=
+      size_unit=
+      eval `echo "$optarg" \
+            | sed -ne '/^[0-9]*[0-9km]$/!{
+                         s/.*/size_unit=invalid/
+                         p
+                         q
+                       }
+                       /[km]$/!{s/$/1/;}
+                       s/^/size_threshold=/
+                       s/\(.\)$/ size_unit=\1/
+                       p'`
+
+      case "$size_unit" in
+        invalid )
+          echo "$progname: $optarg: Invalid size specifier." 1>&2
+          exit 1
+         ;;
+        1 ) : ;;
+        [Kk] ) size_threshold=`expr $size_threshold '*' 1024` ;;
+        [Mm] ) size_threshold=`expr $size_threshold '*' 1024 '*' 1024` ;;
+      esac
      ;;
     -v | --verbose | --v* )
       verbose=t
