@@ -1,5 +1,5 @@
 #! /bin/sh
-# $Id: find-ssh-agent,v 1.1 1999/11/04 22:26:50 friedman Exp $
+# $Id: find-ssh-agent,v 1.2 2000/04/10 09:12:02 friedman Exp $
 
 listkeys=
 case "$1" in
@@ -7,7 +7,9 @@ case "$1" in
   -e ) printeval=t ;;
 esac
 
-for try in /tmp/ssh-${LOGNAME-${USER-`whoami`}}/ssh-*-agent; do
+for try in /tmp/ssh-${LOGNAME-${USER-`whoami`}}/ssh-*-agent \
+           /tmp/ssh-*/agent.*
+do
   got=`SSH_AUTHENTICATION_SOCKET=$try SSH_AUTH_SOCK=$try ssh-add -l 2>/dev/null`
   case "$got" in
     '' ) : ;;

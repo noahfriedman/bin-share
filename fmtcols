@@ -9,7 +9,7 @@ exec ${PERL-perl} -wSx $0 ${1+"$@"}
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-08-02
 
-# $Id: fmtcols,v 2.5 2001/01/12 20:28:05 friedman Exp $
+# $Id: fmtcols,v 2.6 2001/01/21 03:02:03 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -81,17 +81,20 @@ sub map_over_file_contents ($@)
     }
 }
 
-sub read_input ($@)
+sub read_input ($$@)
 {
   my $fieldsep = shift;
+  my $numfields = shift;
   my @line;
   my @maxwidth;
+
+  $numfields = -1 unless (defined $numfields);
 
   map_over_file_contents
     sub {
       while (${$_[0]} =~ m/(.*)\n/gmo)
         {
-          my @fields = split (/$fieldsep/o, $1, -1);
+          my @fields = split (/$fieldsep/o, $1, $numfields);
           my $i = 0;
 
           push @line, \@fields;
@@ -142,12 +145,14 @@ sub parse_options ()
 {
   my $fieldsep    = "[ \t]+";
   my $outsep      = " ";
+  my $num_fields;
   my $width_limit;
   my %right_justify;
   my @rightcols;
 
   Getopt::Long::config ('bundling', 'autoabbrev');
-  GetOptions ("m|max-field-width=i",  \$width_limit,
+  GetOptions ("n|num-fields=i",       \$num_fields,
+              "m|max-field-width=i",  \$width_limit,
               "r|right-justify=s@",   \@rightcols,
               "S|output-separator=s", \$outsep,
               "s|separator=s",        \$fieldsep,
@@ -159,7 +164,7 @@ sub parse_options ()
       $right_justify{$col} = 1;
     }
 
-  return ($fieldsep, $outsep, $width_limit, \%right_justify);
+  return ($fieldsep, $outsep, $width_limit, $num_fields, \%right_justify);
 }
 
 sub usage ()
@@ -174,6 +179,9 @@ Options are:
                                 The default field separator is any number of
                                 tabs and spaces, i.e. \"[ \\t]+\".
 -S, --output-separator SEP      Output separator between fields.  Default \" \".
+-n, --num-fields       NUM      Assume there are no more than NUM fields.
+                                If there are more, last column contains all
+                                remaining elements.
 -m, --max-field-width  MAX      Truncate fields on output that are larger than
                                 this limit.  By default, there is no limit.\n";
   exit (1);
@@ -181,9 +189,9 @@ Options are:
 
 sub main
 {
-  my ($fieldsep, $outsep, $width_limit, $align) = parse_options ();
+  my ($fieldsep, $outsep, $width_limit, $numfields, $align) = parse_options ();
   push @ARGV, "-" unless (scalar @ARGV > 0);
-  my ($lines, $maxwidth) = read_input ($fieldsep, @ARGV);
+  my ($lines, $maxwidth) = read_input ($fieldsep, $numfields, @ARGV);
   print_output ($lines, $fieldsep, $outsep, $maxwidth, $width_limit, $align);
 }
 
