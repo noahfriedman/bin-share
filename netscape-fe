@@ -3,7 +3,7 @@
 
 # Copyright (C) 1996, 1997 Noah S. Friedman
 
-# $Id$
+# $Id: netscape-fe,v 2.1 1997/06/10 08:13:02 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -74,7 +74,7 @@ mozprefix="$prefix/netscape-"
 # This may not work correctly if the version number has more than 4 levels
 # of minor versions (e.g. "1.2.3.4.5" may cause problems).
 
-availversions=`ls -1d $mozprefix*/netscape 2> /dev/null \
+availversions=`ls -1d $mozprefix${MOZMAJORVERSION}*/netscape 2> /dev/null \
                 | sed -n \
                       -e "s#^$mozprefix\([0-9b.][0-9b.]*\)/netscape.*#\1#" \
                       -e '/b/{
@@ -166,6 +166,13 @@ MOZILLA_HOME="$mozprefix$version"
 CLASSPATH="$MOZILLA_HOME/java/classes:$MOZILLA_HOME:$CLASSPATH"
 PATH="$PATH:$MOZILLA_HOME"
 export MOZILLA_HOME CLASSPATH PATH
+
+case "${MOZPRINT+set}" in
+  set )
+    echo "$MOZILLA_HOME/netscape"
+    exit 0
+   ;;
+esac
 
 set fnord $MOZILLA_HOME/netscape ${1+"$@"}
 shift
