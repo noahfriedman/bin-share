@@ -4,9 +4,13 @@
 # Created: 1992-01-10
 # Public domain
 
-# $Id: mkdirhier,v 1.4 1995/09/23 17:39:03 friedman Exp friedman $
+# $Id: mkdirhier,v 1.5 1995/09/23 22:03:10 friedman Exp friedman $
 
 # Commentary:
+
+# David MacKenzie <djm@gnu.ai.mit.edu> reports that IFS=/ does not work on
+# i386-sequent-dynix.
+
 # Code:
 
 # Name by which this script was invoked.
@@ -97,8 +101,9 @@ for file in ${1+"$@"}; do
   shift
 
   case "$file" in
-    /* ) pathcomp=/ ;;
-    *  ) pathcomp=  ;;
+    /* ) pathcomp='/'  ;;
+    -* ) pathcomp='./' ;;
+    *  ) pathcomp=''   ;;
   esac
 
   for d in ${1+"$@"}; do
