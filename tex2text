@@ -1,0 +1,24 @@
+#! /bin/sh
+# tex2text --- convert TeX to ascii
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1996-01-11
+# Public domain
+
+# $Id$
+
+for texfile in ${1+"$@"}; do
+  base=`basename $texfile .tex`
+  tex $texfile
+  dvi2tty $base.dvi \
+   | sed -ne '/\*$/!{p;d;}
+              h
+              n
+              H
+              x
+              s/\*\n \*//
+              p
+             ' > $base.txt
+  rm -f $base.dvi $base.log
+done
+
+# tex2text ends here
