@@ -1,0 +1,23 @@
+#!/bin/sh
+# $Id$
+
+ssh1keys='
+  friedman@splode.com
+  friedman@inktomi.com
+'
+
+openssh_dsakeys='
+  friedman@splode.com
+  friedman@inktomi.com
+'
+
+for key in $ssh1keys; do
+  ssh-add $HOME/etc/certs/ssh1/$key/identity
+done
+
+cd $HOME/etc/certs/openssh
+for key in $openssh_dsakeys; do
+  ssh-add $key/id_dsa
+done
+
+# eof
