@@ -1,0 +1,3 @@
+#!/bin/sh
+# $Id$
+exec groff -pet -Tascii -mgs ${1+"$@"}
