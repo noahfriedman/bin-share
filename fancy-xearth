@@ -1,23 +1,34 @@
 #! /bin/sh
 
-# $Id: fancy-xearth,v 1.1 1996/03/05 22:03:26 friedman Exp friedman $
+# $Id: fancy-xearth,v 1.2 1996/06/14 05:37:46 friedman Exp $
 
-exec with --display ${DISPLAY-:0.0} \
-          --no-tty \
-          --priority=19  \
-          xearth -nolabel \
-                 -stars \
-                 -onepix \
-                 -nomarkers \
-                 -night 15 \
-                 -wait 3600 \
-                 -nice 19 \
-                 -mag 0.25 \
-                 -shift -250,-150 \
-                 -pos sunrel,24.64,41.3 \
-                 -gamma 2.6 \
-                 -rot 21 \
-                 -proj orthographic \
-                 -bigstars 20
+exec > /dev/null 2>&1 < /dev/null
+DISPLAY=${DISPLAY-:0.0}
+export DISPLAY
 
-# eof
+if xearth -version 2> /dev/null; then
+  xearth -nolabel \
+         -stars \
+         -onepix \
+         -nomarkers \
+         -night 15 \
+         -wait 3600 \
+         -nice 19 \
+         -mag 0.25 \
+         -shift -250,-150 \
+         -pos sunrel,24.64,41.3 \
+         -gamma 2.6 \
+         -rot 21 \
+         -proj orthographic \
+         -bigstars 20 \
+         ${1+"$@"} &
+
+  bitmapdir=$HOME/lib/bitmaps
+  cursorfile="$bitmapdir/ent.d.cbm"
+  maskfile="$bitmapdir/ent.m.cbm"
+  if [ -f "$cursorfile" ] && [ -f "$maskfile" ]; then
+    xsetroot -cursor "$cursorfile" "$maskfile"
+  fi
+fi
+
+# fancy-xearth ends here
