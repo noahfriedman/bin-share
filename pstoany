@@ -4,7 +4,7 @@
 # Created: 1994-10-17
 # Public domain.
 
-# $Id: pstogif,v 1.3 1995/09/23 22:08:57 friedman Exp friedman $
+# $Id: pstogif,v 1.4 1995/09/24 05:46:02 friedman Exp friedman $
 
 # Commentary:
 
@@ -17,7 +17,7 @@
 # Code:
 
 # This string is expanded by RCS automatically when this file is checked out.
-rcs_revision='$Revision: 1.3 $'
+rcs_revision='$Revision: 1.4 $'
 
 # Name by which this script was invoked.
 progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
@@ -36,6 +36,8 @@ xmag=1
 ymag=1
 
 format=gif8
+
+GS="${GS-gs}"
 
 revision=`set fnord $rcs_revision; echo $3`
 
@@ -56,6 +58,9 @@ Options are:
                              The default is $bq$format$eq.
 -m, --magnify         STEP   Magnify x and y sizes by a factor of STEP.
                              Default is xmag=$xmag, ymag=$ymag
+-o, --output-file     FILE   Use FILE as the output file name.
+                             This is only appropriate when used with a
+                             single input file to convert.
 -q, --quiet                  Do not report progress during conversion.
 -r, --resolution      RES    Input image resolution for both x and y
                              coordinates, in dots per inch.  You probably
@@ -128,6 +133,7 @@ debug=
 force=
 verbose=t
 gs_quiet=
+outfile=
 
 # Parse command line arguments.
 # Make sure that all wildcarded options are long enough to be unambiguous.
@@ -147,7 +153,7 @@ while : ; do
       force=t
       shift
      ;;
-    -h | --help | --h )
+    -h | --help | --h* )
       echo "$usage" 1>&2
       exit 0
      ;;
@@ -159,6 +165,10 @@ while : ; do
       eval "$getopt"
       xmag="$optarg"
       ymag="$optarg"
+     ;;
+    -o | --output-file* | --o* )
+      eval "$getopt"
+      outfile="$optarg"
      ;;
     -q | --quiet | --q* )
       verbose=
@@ -239,6 +249,15 @@ esac
 file_exists_hint_given_p=
 
 for file in ${1+"$@"}; do
+
+  case "$file" in
+    - ) tmpfile="/tmp/$progname$$.ps"
+        trap 'rm -f "$tmpfile"' 0 1 2 3 15
+        cat > "$tmpfile"
+        file="$tmpfile"
+     ;;
+  esac
+
   basename=`echo "$file" \
              | sed -e 's/\/*$//
                        s/.*\///
@@ -316,6 +335,7 @@ __EOF__
       lly=$4; ury=$6
      ;;
   esac
+
   # Some bourne shells do not allow shift to take an arg, so we can't use
   # `shift $#' here.
   set fnord
@@ -324,6 +344,7 @@ __EOF__
   xsize=`echo "$bcinit ($urx - $llx) * $xmag" \
           | bc \
           | sed -e 's/\..*//'`
+
   ysize=`echo "$bcinit ($ury - $lly) * $ymag" \
           | bc \
           | sed -e 's/\..*//'`
@@ -331,18 +352,18 @@ __EOF__
   xres=`echo "$bcinit ($xres * $xmag)" | bc`
   yres=`echo "$bcinit ($yres * $ymag)" | bc`
 
-  echo $progname: gs -sDEVICE=${format} \
-                     -sOutputFile="$basename%03d.$format" \
-                     -g${xsize}x${ysize} \
-                     -r${xres}x${yres} \
-                     $gs_quiet "$file"
+  echo $progname: "$GS" -sDEVICE=$format \
+                        -sOutputFile="$basename%03d.$format" \
+                        -g${xsize}x${ysize} \
+                        -r${xres}x${yres} \
+                        $gs_quiet "$file"
 
   echo "$llx neg $lly neg translate" \
-   | gs -sDEVICE=${format} \
-        -sOutputFile="$basename%03d.$format" \
-        -g${xsize}x${ysize} \
-        -r${xres}x${yres} \
-        $gs_quiet - "$file"
+   | "$GS" -sDEVICE=$format \
+           -sOutputFile="$basename%03d.$format" \
+           -g${xsize}x${ysize} \
+           -r${xres}x${yres} \
+           $gs_quiet - "$file"
 
   set fnord `ls -1d "$basename"*".$format" 2> /dev/null`
   shift
@@ -354,6 +375,7 @@ __EOF__
      ;;
     1 )
       newname=`echo "$1" | sed -e "s/001\.$format\$/.$format/"`
+      echo $progname: mv "$1" "$newname"
       mv "$1" "$newname"
       set fnord "$newname"
       shift
@@ -363,14 +385,27 @@ __EOF__
   case "$format" in
     gif* )
       for f in ${1+"$@"}; do
-       gif=`echo "$f" | sed -e "s/\.$format\$/.gif/"`
-       mv "$f" "$gif" \
-        && echo "$progname: created $gif"
+       case "$outfile" in
+         '' ) gif=`echo "$f" | sed -e "s/\.$format\$/.gif/"` ;;
+         *  ) gif="$outfile" ;;
+       esac
+
+       case "$f" in
+         "$gif" ) : ;;
+         * )
+           echo $progname: mv "$f" "$gif"
+           mv "$f" "$gif"
+          ;;
+        esac \
+         && echo "$progname: created $gif"
       done
      ;;
     ppm* )
       for f in ${1+"$@"}; do
-       gif=`echo "$f" | sed -e "s/\.$format\$/.gif/"`
+       case "$outfile" in
+         '' ) gif=`echo "$f" | sed -e "s/\.$format\$/.gif/"` ;;
+         *  ) gif="$outfile" ;;
+       esac
        echo "$progname: running ppmtogif on $bq$f$eq"
        ppmtogif "$f" > "$gif" \
         && rm -f "$f" \
