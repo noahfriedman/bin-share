@@ -8,7 +8,7 @@ exec ${PERL-perl} -wSx $0 ${1+"$@"}
 # Created: 2001-01-11
 # Public domain.
 
-# $Id: mdf,v 1.1 2001/01/12 13:41:29 friedman Exp $
+# $Id: mdf,v 1.2 2001/01/12 14:11:18 friedman Exp $
 
 # Commentary:
 # Code:
@@ -101,12 +101,17 @@ sub main ()
   push @ARGV, "-k" unless (scalar @ARGV > 0);
   my $dfout = qx{ $dfcmd @ARGV };
 
-  $dfout =~ s/Mounted on/Mountpoint/o;
-  $dfout =~ s/\n\s+/ /go;
-  $dfout =~ s=\.$domain:/=:/=go if (defined $domain);
+  my ($header, $rest) = split (/\n/o, $dfout, 2);
+  $header =~ s/mounted on/Mountpoint/io;
+  $header =~ s/available/Avail/io;
+  $header =~ s/capacity/Use%/io;
 
-  my ($lines, $fieldsep) = parse_input ([split (/\n/o, $dfout)], $fieldsep);
-  my $header = shift @$lines;
+  $rest =~ s/\n\s+/ /go;
+  $rest =~ s=\.$domain:/=:/=go if (defined $domain);
+
+  my ($lines, $fieldsep) = parse_input ([$header, split (/\n/o, $rest)],
+                                        $fieldsep);
+  $header = shift @$lines;
   $lines = [sort { $a->[5] cmp $b->[5] } @$lines];
   unshift @$lines, $header;
   print_output ($lines, $fieldsep);
