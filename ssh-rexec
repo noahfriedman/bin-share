@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: ssh-rexec,v 1.1 2004/02/25 10:40:28 friedman Exp $
+# $Id: ssh-rexec,v 1.2 2004/02/25 10:41:34 friedman Exp $
 
 params='
   FallBackToRsh=no
@@ -29,6 +29,18 @@ for param in $params ; do
      ;;
   esac
 done
+
+for ident in $SSH_REXEC_IDENTITIES ; do
+  set fnord -i $ident ${1+"$@"}
+  shift
+done
+
+case ${SSH_REXEC_CONFIG+set} in
+  set )
+    set fnord -F "$SSH_REXEC_CONFIG" ${1+"$@"}
+    shift
+   ;;
+esac
 
 exec ${SSH_REXEC-ssh} ${1+"$@"}
 
