@@ -1,0 +1,28 @@
+#! /bin/sh
+# $Id$
+
+listkeys=
+case "$1" in
+  -k ) listkeys=t ;;
+esac
+
+for try in /tmp/ssh-${LOGNAME-${USER-`whoami`}}/ssh-*-agent; do
+  got=`SSH_AUTHENTICATION_SOCKET=$try SSH_AUTH_SOCK=$try ssh-add -l 2>/dev/null`
+  case "$got" in
+    '' ) : ;;
+    * )
+      echo $try
+      case "$listkeys" in
+        t )
+          echo "$got" \
+            | sed -e '/^[0-9][0-9]*  *[0-9][0-9]*  *[0-9][0-9]*  */{
+                        s///
+                      }
+                      s/^/   /
+                     '
+          echo
+       ;;
+      esac
+     ;;
+  esac
+done
