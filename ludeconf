@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-06-03
 
-# $Id: ludeconf,v 2.5 1998/05/05 17:52:13 friedman Exp $
+# $Id: ludeconf,v 2.6 1998/06/23 20:08:56 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -34,7 +34,7 @@ bq='`'
 eq="'"
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 2.5 $'
+rcs_revision='$Revision: 2.6 $'
 revision=`set fnord $rcs_revision; echo $3`
 
 usage="Usage: $progname {$progname-options} {-- {configure-options}}
@@ -249,6 +249,7 @@ case "$lude_depot" in
   '' )
     depots='
       /tools/ns
+      /opt/lude
       /opt/local
       /opt/X11
       /opt/gnu
