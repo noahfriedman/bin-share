@@ -1,8 +1,8 @@
 #! /bin/sh
 # texi2dvi --- smartly produce DVI files from texinfo sources
-# $Id: texi2dvi,v 0.7 1998/02/25 20:26:26 karl Exp $
+# $Id: texi2dvi,v 0.8 1998/02/26 21:13:13 karl Exp $
 #
-# Copyright (C) 1992, 93, 94, 95, 96, 98, 98 Free Software Foundation, Inc.
+# Copyright (C) 1992, 93, 94, 95, 96, 97, 98 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -40,12 +40,12 @@
 #       there are no arguments to shift.
 #
 # Code:
-#
+
 # Name by which this script was invoked.
 progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.7 $'
+rcs_revision='$Revision: 0.8 $'
 version=`set - $rcs_revision; echo $2`
 
 # To prevent hairy quoting and escaping later.
@@ -93,8 +93,9 @@ export TEXINPUTS
 # It's a good idea to document the full long option name in each case.
 # Long options which take arguments will need a `*' appended to the
 # canonical name to match the value appended after the `=' character.
-while : ; do
-  case $# in 0) break ;; esac
+while :; do
+  test $# -eq 0 && break
+  
   case "$1" in
     -b | --batch | --b* ) batch=t; shift ;;
     -c | --clean | --c* ) clean=t; shift ;;
@@ -112,8 +113,7 @@ For more information about these matters, see the files named COPYING."
     --verb* )            verbose=echo; shift ;;
     -- )     # Stop option processing
       shift
-      break
-     ;;
+      break ;;
     -* )
       case "$1" in
         --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
@@ -122,11 +122,8 @@ For more information about these matters, see the files named COPYING."
       exec 1>&2
       echo "$progname: Unknown or ambiguous option $bq$arg$eq."
       echo "$progname: Try $bq--help$eq for more information."
-      exit 1
-     ;;
-    * )
-      break
-     ;;
+      exit 1 ;;
+    * ) break ;;
    esac
 done
 
@@ -142,14 +139,14 @@ fi
 test "$debug" = t && set -x
 
 # Texify files
-for command_line_filename in ${1+"$@"} ; do
+for command_line_filename in ${1+"$@"}; do
   $verbose "Processing $command_line_filename ..."
 
   # See if file exists.  If it doesn't we're in trouble since, even
   # though the user may be able to reenter a valid filename at the tex
   # prompt (assuming they're attending the terminal), this script won't
   # be able to find the right index files and so forth.
-  if test ! -r "${command_line_filename}" ; then
+  if test ! -r "${command_line_filename}"; then
     echo "$0: Could not read ${command_line_filename}." >&2
     continue
   fi
@@ -173,11 +170,13 @@ for command_line_filename in ${1+"$@"} ; do
   tmp_dir2=${tmp_dir}.2
   filename_tmp2=$tmp_dir2/$filename_noext.texi
   mkdir $tmp_dir $tmp_dir2
+  # Always remove the temporary directories.
+  trap "rm -rf $tmp_dir $tmp_dir2" 1 2 15
 
   # If directory and file are the same, then it's probably because there's
   # no pathname component.  Set dirname to `.', the current directory.
-  if test "z${directory}" = "z${command_line_filename}" ; then
-     directory=.
+  if test "z${directory}" = "z${command_line_filename}"; then
+    directory=.
   fi
 
   # Source file might @include additional texinfo sources.  Put `.' and
@@ -232,17 +231,17 @@ for command_line_filename in ${1+"$@"} ; do
     # is actually the cross-references file, but we need to keep track of
     # that too.
     possible_index_files="`eval echo ${filename_noext}.?? ${filename_noext}.aux`"
-    for this_file in ${possible_index_files} ; do
-       # If file is empty, forget it.
-       test -s "${this_file}" || continue
+    for this_file in ${possible_index_files}; do
+      # If file is empty, forget it.
+      test -s "${this_file}" || continue
 
-       # Examine first character of file.  If it's not suitable to be an
-       # index or xref file, don't process it.
-       first_character="`sed -n '1s/^\(.\).*$/\1/p;q' ${this_file}`"
-       if test "x${first_character}" = "x\\" \
-          || test "x${first_character}" = "x'"; then
-         definite_index_files="${definite_index_files} ${this_file}"
-       fi
+      # Examine first character of file.  If it's not suitable to be an
+      # index or xref file, don't process it.
+      first_character="`sed -n '1s/^\(.\).*$/\1/p;q' ${this_file}`"
+      if test "x${first_character}" = "x\\" \
+         || test "x${first_character}" = "x'"; then
+        definite_index_files="${definite_index_files} ${this_file}"
+      fi
     done
     orig_index_files="${definite_index_files}"
     orig_index_files_sans_aux="`echo ${definite_index_files} \
@@ -252,7 +251,7 @@ for command_line_filename in ${1+"$@"} ; do
     # Now save copies of original index files so we have some means of
     # comparison later.
     $verbose "Backing up current index files: $orig_index_files ..."  
-    for index_file_to_save in ${orig_index_files} ; do
+    for index_file_to_save in ${orig_index_files}; do
       cp "${index_file_to_save}" "${index_file_to_save}${backup_extension}"
     done
 
@@ -260,9 +259,9 @@ for command_line_filename in ${1+"$@"} ; do
     # after running TeX a first time the index files don't change, then
     # there's no reason to run TeX again.  But we won't know that if the
     # index files are out of date or nonexistent.
-    if test -n "${orig_index_files_sans_aux}" ; then
-       $verbose "Running $texindex $orig_index_files_sans_aux ..."
-       ${texindex} ${orig_index_files_sans_aux}
+    if test -n "${orig_index_files_sans_aux}"; then
+      $verbose "Running $texindex $orig_index_files_sans_aux ..."
+      ${texindex} ${orig_index_files_sans_aux}
     fi
 
     # Finally, run TeX.
@@ -280,7 +279,7 @@ for command_line_filename in ${1+"$@"} ; do
     definite_index_files=
     # Get list of new index files.
     possible_index_files="`eval echo ${filename_noext}.?? ${filename_noext}.aux`"
-    for this_file in ${possible_index_files} ; do
+    for this_file in ${possible_index_files}; do
        # If file is empty, forget it.
        test -s "${this_file}" || continue
 
@@ -303,17 +302,17 @@ for command_line_filename in ${1+"$@"} ; do
     # file or another has definitely changed.
     $verbose "Original index files =$orig_index_files"
     $verbose "New index files =$new_index_files"
-    if test "z${orig_index_files}" != "z${new_index_files}" ; then
+    if test "z${orig_index_files}" != "z${new_index_files}"; then
       index_files_changed_p=t
     else
       # File list is the same.  We must compare each file until we find a
       # difference.
       index_files_changed_p=
-      for this_file in ${new_index_files} ; do
+      for this_file in ${new_index_files}; do
         $verbose "Comparing index file $this_file ..."
         # cmp -s will return nonzero exit status if files differ.
         cmp -s "${this_file}" "${this_file}${backup_extension}"
-        if test $? -ne 0 ; then
+        if test $? -ne 0; then
           # We only need to keep comparing until we find *one* that
           # differs, because we'll have to run texindex & tex no
           # matter what.
@@ -328,7 +327,7 @@ for command_line_filename in ${1+"$@"} ; do
 
     # If index files have changed since TeX has been run, or if the aux
     # file wasn't present originally, run texindex and TeX again.
-    if test "${index_files_changed_p}" ; then :; else
+    if test "${index_files_changed_p}"; then :; else
       # Nothing changed.  We're done with TeX.
       break
     fi
@@ -336,12 +335,11 @@ for command_line_filename in ${1+"$@"} ; do
 
   # If we were in clean mode, compilation was in a tmp directory.
   # Copy the DVI file into the directory where the compilation
-  # has been done.  We don't move because some Unixes don't support
-  # mv across file systems.
-  # We also return the the original pwd so that
-  # - the next file is proccessed in correct conditions
+  # has been done.  (The temp dir is about to get removed anyway.)
+  # We also return to the original directory so that
+  # - the next file is processed in correct conditions
   # - the temporary file can be removed
-  if test "$clean"; then
+  if test -n "$clean"; then
     $verbose "Copying DVI file from `pwd` to $orig_pwd"
     cp -p $filename_noext.dvi $orig_pwd
     cd $orig_pwd || exit 1
@@ -353,7 +351,7 @@ for command_line_filename in ${1+"$@"} ; do
   for file in ${orig_index_files}; do
     file_list="${file_list} ${file}${backup_extension}"
   done
-  if test -n "${file_list}" ; then
+  if test -n "${file_list}"; then
     $verbose "Removing $file_list $tmp_dir $tmp_dir2 ..."
     rm -f ${file_list}
     rm -rf $tmp_dir $tmp_dir2
