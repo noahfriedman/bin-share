@@ -1,0 +1,82 @@
+#!/bin/sh
+# $Id$
+
+# This is still under construction
+
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl
+
+use Fcntl;
+use Symbol;
+
+# This function assumes process is running as root at can change uids
+sub file_writable_by_uid ($$)
+{
+  my ($file, $uid) = @_;
+
+  if (fork == 0)
+    {
+      # Set real and effect uid to $uid
+      $< = $> = $uid;
+      exit (-w $file);
+    }
+  wait;
+  return $?;
+}
+
+sub copy_file ($$;$$$)
+{
+  my ($from, $to, $perm, $uid, $uidperm) = @_;
+  my $fh_from = gensym;
+  my $fh_to   = gensym;
+
+  sysopen ($fh_from, $from, O_RDONLY) || return undef;
+  if (!sysopen ($fh_to, $to,
+                O_WRONLY | O_CREAT | O_EXCL | O_TRUNC,
+                $perm || 0600))
+    {
+      print STDERR "open: $to: $!\n";
+      close ($fh_from);
+      return undef;
+    };
+
+  my $data;
+  while (my $len = sysread ($fh_from, $data, 65536))
+    {
+      print $fh_to $data;
+    }
+
+  my @tostat = stat ($fh_to);
+  close ($fh_from);
+  close ($fh_to);
+
+  chown ($uid, $tostat[5], $to) || chmod ($uidperm&umask, $to);
+}
+
+sub main
+{
+  my $gnuserv_port_base = 21490;
+  my $uid = getpwnam ($ENV{LOGNAME} || $ENV{USER});
+
+  my $port = $ENV{GNU_PORT} || $gnuserv_port_base + $uid;
+  my $host = $ENV{GNU_HOST} || "localhost";
+
+  # If we are running as root and file to be edited is not a file normally
+  # writable by our login id, copy it to a tmp file that is writable.
+  if ($#ARGV == 0 && -f $ARGV[0]
+      && ($uid != $< || $uid != $>)
+      && ! file_writable_by_uid ($ARGV[0], $uid))
+    {
+      my $tmpfile = "/tmp/gnuedit$$";
+      unlink ($tmpfile);
+      copy_file ($ARGV[0], $tmpfile, 0600, $uid, 0666);
+      system ("gnuclient", "-h", $host, "-p", $port, $tmpfile);
+      unlink ($tmpfile);
+      exit (1);
+    }
+
+  exec ("gnuclient", "-h", $host, "-p", $port, @ARGV);
+  print STDERR "gnuclient: $!\n";
+}
+
+main ();
