@@ -1,0 +1,76 @@
+#!/bin/sh
+# changelog-extract - extract entries from ChangeLog files.
+# Created 26-Mar-93 by Noah Friedman <friedman@prep.ai.mit.edu>
+# Last modified 30-Mar-93
+# Public domain.
+#
+# Usage: changelog-extract {--regexp} entry1 entry2 ... < ChangeLog
+#        cat ChangeLog1 ChangeLog2 ... | changelog-extract ...
+#
+# --regexp [-r] option means entryN are regular expressions instead of
+# exact patterns.
+#
+
+re_quote=''
+
+case "z$1" in
+   z)
+      cat
+      exit $?
+     ;;
+   z-r | z--regexp | z--r* )
+      re_quote='s/\\\/\\\/g;s/\([][*.\/?+&|^$]\)/\\\\\1/g;'
+      shift
+     ;;
+   z-- )
+      shift
+     ;;
+esac
+
+re_filenames="`for f in ${1+\"$@\"} ; do echo \"${f}\"; done \
+                | sed -ne \"${re_quote}\"'
+                           H;${x;s/^\n//;s/\n/|/g;/|/s/\(.*\)/(\1\)/;p;}'`"
+
+awk 'BEGIN {
+        ChangeLog_entry = "";
+        old_ChangeLog_entry = "";
+        entry_found="";
+        lines_index = 0;
+        lines["array_initializer"] = "" ;
+        delete lines["array_initializer"];
+     }
+
+     /^[^ \t]/ {
+        old_ChangeLog_entry = ChangeLog_entry;
+        ChangeLog_entry = $0;
+        next;
+     }
+
+     /(^$)|(^[ \t]*$)/ {
+        if (entry_found) {
+           if (ChangeLog_entry != old_ChangeLog_entry) {
+             print ChangeLog_entry "\n";
+             old_ChangeLog_entry = ChangeLog_entry;
+           }
+           for (i = 0; i < lines_index ; i++)
+              print lines[i];
+           print "";
+        }
+        for (i in lines)
+           delete lines[i];
+        entry_found="";
+        lines_index=0;
+        next;
+     }
+
+     /^[ \t][ \t]*[^ \t]/ {
+        lines[lines_index] = $0;
+        lines_index++;
+     }
+
+     /[ \t,]'"${re_filenames}"'([ \t,].*:|:)/ { 
+        entry_found="yes"; 
+        next; 
+     }'
+
+# eof
