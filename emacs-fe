@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-09-11
 
-# $Id: emacs-fe,v 1.5 1996/03/03 22:50:35 friedman Exp $
+# $Id: emacs-fe,v 1.6 1996/03/07 03:57:12 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -55,6 +55,29 @@ progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 # To prevent hairy quoting and escaping later.
 bq='`'
 eq="'"
+
+case "$progname" in
+  emacs-fe-print )
+    case $# in
+      1 ) : ;;
+      * ) 
+        echo "$progname: Exactly one argument is required." 1>&2
+        exit 1
+       ;;
+    esac
+
+    # sed is more portable than `dirname'
+    dir=`echo "$0" | sed -e 's/\/*$//' -e 's/\/[^\/]*$//'`
+    if test -f "$dir/$1"; then
+      EMACS_FE_PRINT=t
+      export EMACS_FE_PRINT
+      exec "$dir/$1"
+    fi
+
+    echo "$progname: $bq$dir/$1$eq does not seem to exist." 1>&2
+    exit 1
+  ;;
+esac
 
 DEFAULTVERSION="${DEFAULTVERSION-NEWEST}"
 VARIANT="${EMACSVARIANT-emacs}"
@@ -264,7 +287,16 @@ searchdirs="
 for dir in $searchdirs ; do
   for p in $progname-$version $progname ; do
     if [ -f $prefix/$eprefix$version/$dir/$p ] ; then
-      exec $prefix/$eprefix$version/$dir/$p ${1+"$@"}
+      prog="$prefix/$eprefix$version/$dir/$p"
+
+      case "${EMACS_FE_PRINT+set}" in
+        set )
+          echo "$prog"
+          exit 0
+         ;;
+      esac
+
+      exec "$prog" ${1+"$@"}
     fi
   done
 done
