@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-01-19
 
-# $Id: from,v 1.18 1996/10/21 19:56:31 friedman Exp $
+# $Id: from,v 1.19 1996/10/21 23:52:42 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -491,7 +491,7 @@ sub main
                   if (defined ($ENV{$envvar}))
                     {
                       $user = $ENV{$envvar};
-                      break;
+                      last;
                     }
                 }
             }
@@ -1402,10 +1402,6 @@ sub htonl
   $h = pack ('C4', $o[3], $o[2], $o[1], $o[0]);
   return $h;
 }
-
-__EOF__
-
-# tcpconnect ends here.
 
 __EOF__
 
