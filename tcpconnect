@@ -1,4 +1,4 @@
-#! /usr/local/bin/perl
+#! /bin/sh
 # tcpconnect --- connect via TCP to a specified host and port
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-04-15
@@ -13,27 +13,200 @@
 
 # Code:
 
-$0 =~ s/.*\///;
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 
-&tcpconnect(@ARGV);
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options} [host {port}]
+
+Options are:
+-D, --debug           Turn on interactive debugging in perl.
+-h, --help            You're looking at it.
+-H, --no-sigup        Do not kill child processes with SIGHUP on EOF.
+-I, --include   DIR   Include DIR in @INC path for perl.
+                      This option may be specified multiple times to append
+                      search paths to perl.
+-d, --no-dynload      Do not attempt to use perl5 dynamic loaded libraries.
+                      This option is automatic if you are using perl4 or older.
+-R, --no-resolve      Do not attempt to reverse-resolve numeric IP
+                      addresses if specified on the command line.
+"
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+includes=
+perl=${TCPCONNECT_PERL-${PERL-perl}}
+TCPCONNECT_DYNLOAD=
+TCPCONNECT_RESREV=
+TCPCONNECT_SIGHUP=
+
+# Usage: eval "$getopt"; value=$optarg
+# or     optarg_optional=t; eval "$getopt"; value=$optarg
+#
+# This function automatically shifts the positional args as appropriate.
+# The argument to an option is optional if the variable `optarg_optional'
+# is non-empty.  Otherwise, the argument is required and getopt will cause
+# the program to exit on an error.  optarg_optional is reset to be empty
+# after every call to getopt.  The argument (if any) is stored in the
+# variable `optarg'.
+#
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument
+# won't get used if first long option syntax was used.
+#
+# Note: because of broken bourne shells, using --foo=bar syntax can
+# actually screw the quoting of args that end with trailing newlines.
+# Specifically, most shells strip trailing newlines from substituted
+# output, regardless of quoting.
+getopt='
+  {
+    optarg=
+    case "$1" in
+      --*=* )
+        optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
+        shift
+       ;;
+      * )
+        case ${2+set} in
+          set )
+            optarg="$2"
+            shift
+            shift
+           ;;
+          * )
+            case "$optarg_optional" in
+              "" )
+                case "$1" in
+                  --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
+                  * ) option="$1" ;;
+                esac
+                exec 1>&2
+                echo "$progname: option $bq$option$eq requires argument."
+                echo "$progname: use $bq--help$eq to list option syntax."
+                exit 1
+               ;;
+           esac
+         ;;
+        esac
+     ;;
+    esac
+    optarg_optional=
+  }'
+
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
+    -D | --debug | --de* )
+      debug=-d
+      shift
+      set -x
+     ;;
+    -d | --no-dynamic-loading | --no-dynload | --no-d* )
+      TCPCONNECT_DYNLOAD=nil
+      export TCPCONNECT_DYNLOAD
+      shift
+     ;;
+    -H | --no-sighup | --no-s* )
+      TCPCONNECT_SIGHUP=nil
+      export TCPCONNECT_SIGHUP
+      shift
+     ;;
+    -h | --help | --he* )
+      echo "$usage" 1>&2
+      exit 0
+     ;;
+    -I | --include* | --i* )
+      eval "$getopt"
+      includes="$includes -I$optarg"
+     ;;
+    -R | --no-resolve | --no-reverse-resolve | --no-r* )
+      TCPCONNECT_REVRES=nil
+      export TCPCONNECT_REVRES
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+case $# in
+  0 )
+    echo "$usage" 1>&2
+    exit 1
+   ;;
+esac
+
+case $# in
+  0 )
+    echo "$usage" 1>&2
+    exit 1
+   ;;
+esac
+
+TCPCONNECT_PROGNAME="$progname"
+export TCPCONNECT_PROGNAME
+
+# By using a here-document to include the source of the perl script (to
+# avoid command line length limits), we usurp the normal stdin the inferior
+# process might have expected.  So dup stdin onto fd 9, and before the
+# inferior process is started, it will be reduped back onto fd 0.
+exec $perl $debug $includes - ${1+"$@"} 9<&0 <<'__EOF__'
+
+&main;
+
+sub main
+{
+  $progname = $ENV{TCPCONNECT_PROGNAME};
+  $0 = "$progname ($0)";
+
+  # See comments preceding perl invocation for an explanation.
+  if (! open (STDIN, "<&9"))
+    {
+      printf (STDERR "$0: cannot recover stdin from fd 9: $!\n");
+      exit (1);
+    }
+  close (9);
+
+  &initialize_sockvars;
+  &tcpconnect (@ARGV);
+}
 
 # Args: host, port
 sub tcpconnect
 {
-  local ($rhost, $port) = @_;
+  local ($rhostname, $port) = @_;
   local ($proto, $name, $aliases, $type, $len, $thisaddr, $rhostaddr);
   local ($in, $out);
   # This is made global so that do_shutdown can use it.
   #local ($child);
 
-  local ($sockaddr) = "S n a4 x8";
+  $0 = "$progname ($rhostname:$port)";
 
-  # So we don't have to include socket.ph
-  # These are probably correct, but not guaranteed to be.
-  local ($AF_INET) = 2;
-  local ($SOCK_STREAM) = 1;
-
-  local ($hostname) = `hostname`;
+  $hostname = `hostname`;
   chop $hostname;
 
   ($name, $aliases, $proto) = getprotobyname ("tcp");
@@ -45,32 +218,66 @@ sub tcpconnect
 
   ($name, $aliases, $type, $len, $thisaddr) = gethostbyname ($hostname);
 
-  if ($rhost =~ /^[0-9.][0-9.]*$/)
+  if ($rhostname =~ /^[0-9.][0-9.]*$/)
     {
-      local (@octet) = split (/[.]/, $rhost);
-      $rhostaddr = pack ('C4', @octet);
+      local (@octet) = split (/[.]/, $rhostname);
+      @rhostaddr = (pack ('C4', @octet));
+      $canon_rhostname = &my_gethostbyaddr ($rhostname, $rhostaddr[0], $type);
     }
   else
     {
-      ($name, $aliases, $type, $len, $rhostaddr) = gethostbyname ($rhost);
+      ($name, $aliases, $type, $len, @rhostaddr) = gethostbyname ($rhostname);
       if ($name eq "")
         {
-          print (STDERR "$0: cannot resolve $rhost\n");
+          print (STDERR "$progname: cannot resolve $rhostname\n");
           exit (1);
         }
+      $canon_rhostname = $name;
     }
 
-  $thishost = pack ($sockaddr, $AF_INET, 0, $thisaddr);
-  $rhost    = pack ($sockaddr, $AF_INET, $port, $rhostaddr);
+  # Do not use Socket::sockaddr_in even if available, since it does not
+  # work for sparc-sun-solaris2.4.  In particular, the pack structure it
+  # uses is "S n C4 x8", which is wrong.
+  $sockaddr = "S n a4 x8";
+  $thishost = pack ($sockaddr, &AF_INET, 0, $thisaddr);
 
-  # Make socket filehandle.
-  socket (S, $AF_INET, $SOCK_STREAM, $proto) || die ("$0: socket: $!");
+  $ok = 0;
+  while ($ok == 0 && $#rhostaddr > -1)
+    {
+      $rhost = pack ($sockaddr, &AF_INET, $port, $rhostaddr[0]);
+      close (S);
 
-  # Give the socket an address.
-  bind (S, $thishost) || die ("$0: bind: $!");
+      # Make socket filehandle.
+      socket (S, &AF_INET, &SOCK_STREAM, $proto)
+        || die ("$progname: socket: $!");
 
-  # Connect to server.
-  connect (S, $rhost) || die ("$0: connect: $!");
+      # Give the socket an address.
+      bind (S, $thishost)
+        || die ("$progname: bind: $!");
+
+      # Connect to server.
+      if (! connect (S, $rhost))
+        {
+          &errmsg ("connect",
+                   "$canon_rhostname [" . &ipaddr2string ($rhostaddr[0]) . "]",
+                   "$!");
+
+          shift (@rhostaddr);
+          if ($#rhostaddr >= 0)
+            {
+              &errmsg ("trying " . &ipaddr2string ($rhostaddr[0]) . "...");
+              next;
+            }
+          else
+            {
+              exit (1);
+            }
+        }
+      else
+        {
+          $ok = 1;
+        }
+    }
 
   # Avoid deadlock by forking.
   $child = fork ();
@@ -78,25 +285,30 @@ sub tcpconnect
   # Set file handles to be command buffered.
   # Since we do unbuffered sysreads and syswrites this may actually be
   # unnecessary.
-  select (S); $| = 1; select (STDOUT); $| = 1;
+  select (S);      $| = 1;
+  select (STDIN);  $| = 1;
+  select (STDOUT); $| = 1;
 
   if ($child == 0)
     {
+      $0 = "$0 [PPID=" . getppid() . "]";
       $SIG{'HUP'} = 'shutdown_child';
       ($in, $out) = (STDIN, S);
     }
   else
     {
       $SIG{'HUP'} = 'shutdown_parent';
-      ($in, $out) = (S, STDIN);
+      $SIG{'CHLD'} = 'parent_SIGCHLD_handler';
+      ($in, $out) = (S, STDOUT);
     }
+
+  local ($fn) = $SIG{'HUP'};
 
   while ($len = sysread ($in, $_, 16384))
     {
       syswrite ($out, $_, $len);
     }
 
-  local ($fn) = $SIG{'HUP'};
   &$fn;
 }
 
@@ -105,13 +317,18 @@ sub shutdown_child
 {
   local ($ppid) = getppid ();
 
-  # 2 == shut down both send and receive.
-  shutdown (S, 2);
-  close (S);
-
-  if ($ppid != 1)
+  if ($ppid != 1 && $ENV{'TCPCONNECT_SIGHUP'} eq "nil")
     {
-      kill 1, $ppid;
+      # Sleep for a second to allow time for parent to set up handlers.
+      # This is usually only critical if sending input from a pipeline.
+      # Users are slow as paste.
+      sleep (1);
+      shutdown (S, $SHUTDOWN_SEND);
+    }
+  else
+    {
+      shutdown (S, $SHUTDOWN_SEND);
+      kill ('SIGHUP', $ppid);
     }
 
   exit (0);
@@ -120,11 +337,95 @@ sub shutdown_child
 # Called by parent
 sub shutdown_parent
 {
-  # 2 == shut down both send and receive.
-  shutdown (S, 2);
+  shutdown (S, $SHUTDOWN_RECEIVE);
   close (S);
-  kill 1, $child;
+  if ($ENV{'TCPCONNECT_SIGHUP'} ne "nil")
+    {
+      kill ('SIGHUP', $child);
+    }
   exit (0);
 }
+
+# This just reaps the child
+sub parent_SIGCHLD_handler
+{
+  wait;
+}
+
+sub initialize_sockvars
+{
+  # Args to shutdown.
+  $SHUTDOWN_RECEIVE = 0;
+  $SHUTDOWN_SEND    = 1;
+  $SHUTDOWN_BOTH    = 2;
+
+  if ( int ($]) <= 4 || $ENV{'TCPCONNECT_DYNLOAD'} eq "nil" )
+    {
+      # Push some include dirs which are pretty standard, just in case.
+      # Perl5 does not usually install .ph files.
+      push (@INC, "$ENV{HOME}/lib/perl",
+                  "/usr/local/gnu/lib/perl",
+                  "/usr/local/lib/perl",
+                  "/usr/lib/perl"
+           );
+
+      if (! &require_soft ("sys/socket.ph"))
+        {
+          # Backdown if socket.ph cannot be found.
+          # These are probably correct, but not guaranteed to be.
+          # For example, on sparc-sun-solaris2.4, SOCK_STREAM is 2, not 1.
+          sub AF_INET     { return 2; }
+          sub SOCK_STREAM { return 1; }
+        }
+    }
+  else
+    {
+      eval "use Socket;";
+    }
+}
+
+sub require_soft
+{
+  local ($f) = @_;
+
+  foreach $dir (@INC)
+    {
+      if (-f "$dir/$f")
+        {
+          require "$f";
+          return "$dir";
+        }
+    }
+  return 0;
+}
+
+sub my_gethostbyaddr
+{
+  local ($addrstring, $addr, $type) = @_;
+  local ($name) = "";
+
+  if ("$ENV{TCPCONNECT_REVRES}" ne "nil")
+    {
+      $name = gethostbyaddr($addr, $type);
+    }
+
+  if ($name eq "")
+    {
+      return $addrstring;
+    }
+  return $name;
+}
+
+sub ipaddr2string
+{
+  return sprintf ("%d.%d.%d.%d", unpack ("C4", $_[0]));
+}
+
+sub errmsg
+{
+  printf (STDERR join(": ", $progname, @_) . "\n");
+}
+
+__EOF__
 
 # tcpconnect ends here.
