@@ -1,24 +1,44 @@
 #!/bin/sh
+exec ${PERL-perl} -wSx $0 ${1+"$@"}
+#!perl
+
 # mdf --- df wrapper to align columns for legibility
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2001-01-11
 # Public domain.
 
-# $Id$
+# $Id: mdf,v 1.1 2001/01/12 13:41:29 friedman Exp $
 
 # Commentary:
 # Code:
 
-exec ${PERL-perl} -Sx $0 ${1+"$@"}
-#!perl
-
+use POSIX qw(uname);
 use strict;
+
+my $domain = dnsdomain ();
 
 my $fieldsep = "[ \t]+";
 my %right_justify = ( 1 => 1, 2 => 1, 3 => 1, 4 => 1);
 my $width_limit;  # not currently used
 my $widthpad = 1; # extra padding to add between columns
+
+sub dnsdomain ()
+{
+  my @uname = uname ();
+  my $nodename = $uname[1];
+
+  unless ($nodename =~ /\./o)
+    {
+      use Socket;
+      my $addr = gethostbyname ($nodename);
+      $nodename = gethostbyaddr ($addr, AF_INET);
+    }
+  return undef unless ($nodename =~ /\./o);
+
+  $nodename =~ s/^[^.]+\.//o;
+  return $nodename;
+}
 
 sub parse_input ($$)
 {
@@ -38,7 +58,8 @@ sub parse_input ($$)
       foreach $f (@fields)
         {
           my $l = length $f;
-          $maxwidth[$i] = $l if ($l > $maxwidth[$i]);
+          $maxwidth[$i] = $l
+            if (!defined $maxwidth[$i] || $l > $maxwidth[$i]);
           $i++;
         }
     }
@@ -78,17 +99,16 @@ sub main ()
 {
   my $dfcmd = exists $ENV{DF} ? $ENV{DF} : 'df';
   push @ARGV, "-k" unless (scalar @ARGV > 0);
-  my @dfout = qx{ $dfcmd @ARGV };
+  my $dfout = qx{ $dfcmd @ARGV };
 
-  my $header = shift @dfout;
-  $header =~ s/Mounted on/Mountpoint/o;
-
-  my $dfout = join ("", @dfout);
+  $dfout =~ s/Mounted on/Mountpoint/o;
   $dfout =~ s/\n\s+/ /go;
-  @dfout = sort split (/\n/o, $dfout);
-  unshift @dfout, $header;
+  $dfout =~ s=\.$domain:/=:/=go if (defined $domain);
 
-  my ($lines, $fieldsep) = parse_input (\@dfout, $fieldsep);
+  my ($lines, $fieldsep) = parse_input ([split (/\n/o, $dfout)], $fieldsep);
+  my $header = shift @$lines;
+  $lines = [sort { $a->[5] cmp $b->[5] } @$lines];
+  unshift @$lines, $header;
   print_output ($lines, $fieldsep);
 }
 
