@@ -9,7 +9,7 @@ exec ${PERL-perl} -Swx $0 ${1+"$@"}
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-04-15
 
-# $Id: tcpconnect,v 1.10 1996/06/06 08:34:53 friedman Exp $
+# $Id: tcpconnect,v 1.11 2001/09/09 09:34:19 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -151,7 +151,7 @@ sub open_network_stream ($$;$)
   else
     {
       @rhostaddr = netstream_gethostbyname ($rhostname);
-      return undef unless (defined @rhostaddr);
+      return undef unless (scalar @rhostaddr > 0);
       # try to get fully-qualified name.
       $rhostname = $rhostaddr[0]
         if (length ($rhostaddr[0]) > length ($rhostname));
