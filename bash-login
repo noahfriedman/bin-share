@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1996-10-11
 
-# $Id: bash-login,v 1.4 1996/11/14 23:00:58 friedman Exp $
+# $Id: bash-login,v 1.5 1997/01/09 22:09:16 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -42,8 +42,10 @@ pathdirs='
   /usr/local/bin
   /usr/local/gnubin
   /usr/local/gnu/bin
-  /tools/ns/bin
+  /tools/contrib/bin
+  /opt/local/bin
   /opt/gnu/bin
+  /tools/ns/bin
 '
 
 for d in $pathdirs; do
