@@ -1,0 +1,2337 @@
+#!/usr/bin/perl -w
+# Scheme in Perl? (sp?)
+# Public domain. No strings attached.
+
+#use strict;
+
+(my $version = '$Revision: 2.6 $') =~ /: (\d+\.\d+)/;
+
+#------
+#-- Basic data types.
+#------
+
+# There are three places that know about data type representation:
+# 1. The &TYPE function.
+# 2. The basic functions for that type in this section.
+# 3. The equivalence routines (eq?, eqv?, and equal?).
+# Any change in representation needs to look at all these.
+
+my %TYPEname;
+
+sub TYPES
+{
+  for (my $k = 0; $k < scalar @_; $k += 2)
+    {
+      $_[$k] = $k;
+      $TYPEname{$_[$k]} = $_[$k + 1];
+    }
+}
+
+TYPES ( $T_NONE,	'nothing',
+	$T_NIL,		'a null list',
+	$T_BOOLEAN,	'a boolean',
+	$T_NUMBER,	'a number',
+	$T_CHAR,	'a character',
+	$T_STRING,	'a string',
+	$T_PAIR,	'a pair',
+	$T_VECTOR,	'a vector',
+	$T_TABLE,	'a table',
+	$T_SYMBOL,	'a symbol',
+	$T_INPUT,	'an input port',
+	$T_OUTPUT,	'an output port',
+	$T_FORM,	'a special form',
+	$T_SUBR,	'a built-in procedure',
+	# Some derived types.  See &CHKtype.
+	$T_LIST,	'a list',
+	$T_PROCEDURE,	'a procedure',
+	$T_ANY,		'anything');
+
+# Scheme object -> type.
+sub TYPE
+{
+  local $_ = shift;
+
+  if    (/^$/)		{ $T_NIL; }
+  elsif (/^[01]/)	{ $T_BOOLEAN; }
+  elsif (/^N/)		{ $T_NUMBER; }
+  elsif (/^C/)		{ $T_CHAR; }
+  elsif (/^Z::S/)	{ $T_STRING; }
+  elsif (/^Z::P/)	{ $T_PAIR; }
+  elsif (/^Z::V/)	{ $T_VECTOR; }
+  elsif (/^Z::T/)	{ $T_TABLE; }
+  elsif (/^Y/)		{ $T_SYMBOL; }
+  elsif (/^FORM/)	{ $T_FORM; }
+  elsif (/^SUBR/)	{ $T_SUBR; }
+  elsif (/^Z::IP/)	{ $T_INPUT; }
+  elsif (/^Z::OP/)	{ $T_OUTPUT; }
+  else			{ $T_NONE; }
+}
+
+#-- More derived types.
+
+# A closure is a vector that looks like
+#	#(CLOSURE env listarg nargs arg... code...)
+# See &lambda and &applyN.
+my $CLOSURE = Y ('CLOSURE');
+
+# A promise is a vector that looks like
+#	#(PROMISE env forced? value code...)
+# See &delay and &force.
+my $PROMISE = Y ('PROMISE');
+
+#-- Booleans.
+
+# Scheme booleans and Perl booleans are designed to be equivalent.
+
+my $NIL   = '';
+my $TRUE  = 1;
+my $FALSE = 0;
+
+#-- Numbers.
+
+# Perl number -> Scheme number.
+sub N
+{
+  'N' . $_[0];
+}
+
+# Scheme number -> Perl number.
+sub Nval
+{
+  ERRbad_type ($_[0], $T_NUMBER) if $_[0] !~ /^N/o;
+  $';
+}
+
+#-- Characters.
+
+# Perl character -> Scheme character.
+sub C
+{
+  'C' . $_[0];
+}
+
+# Scheme character -> Perl character.
+sub Cval
+{
+  ERRbad_type ($_[0], $T_CHAR) if $_[0] !~ /^C/o;
+  $';
+}
+
+#-- Strings.
+# Strings are encapsulated so that eqv? works properly.
+
+# Perl string -> Scheme string.
+sub S
+{
+  my ($sip) = @_;
+  local(*s) = local($z) = "Z::S" . ++$Z::S;
+	$s = $sip;
+	$z;
+}
+
+# Scheme string -> Perl string.
+sub Sval {
+	&ERRbad_type($_[0], $T_STRING) if $_[0] !~ /^Z::S/;
+	local(*s) = @_;
+	$s;
+}
+
+# Scheme string <= start, length, new Perl string.
+sub Sset {
+	&ERRbad_type($_[0], $T_STRING) if $_[0] !~ /^Z::S/;
+	local(@sip) = @_;
+	local(*s, $p, $l, $n) = @sip;
+	substr($s, $p, $l) = $n;
+}
+
+#-- Pairs and lists.
+
+# Perl vector (A, D) -> Scheme pair (A . D).
+sub P {
+	local(@sip) = @_;
+	local(*p) = local($z) = "Z::P" . ++$Z::P;
+	@p = @sip;
+	$z;
+}
+
+# Scheme pair (A . D) -> Perl list (A, D).
+sub Pval {
+	&ERRbad_type($_[0], $T_PAIR) if $_[0] !~ /^Z::P/;
+	local(*p) = @_;
+	@p;
+}
+
+# Scheme pair (sexp0 . sexp1) <= index, new Scheme value.
+sub Pset {
+	&ERRbad_type($_[0], $T_PAIR) if $_[0] !~ /^Z::P/;
+	local(@sip) = @_;
+	local(*p, $k, $n) = @sip;
+	$p[$k] = $n;
+}
+
+# Perl vector -> Scheme list.
+sub L {
+	local(@v) = @_;
+	local($list) = $NIL;
+	$list = pop @v, pop @v if @v > 2 &&  $v[$#v - 1] eq '.';
+	$list = &P(pop @v, $list) while @v;
+	$list;
+}
+
+# Scheme list -> Perl vector.  XXX Doesn't do improper or recursive lists.
+sub Lval {
+	local($list) = @_;
+	local($x, @v);
+	while ($list ne $NIL) {
+		($x, $list) = &Pval($list);
+		push(@v, $x);
+	}
+	@v;
+}
+
+#-- Vectors.
+
+# Perl vector -> Scheme vector.
+sub V {
+	local(@sip) = @_;
+	local(*v) = local($z) = "Z::V" . ++$Z::V;
+	@v = @sip;
+	$z;
+}
+
+# Scheme vector -> Perl vector.
+sub Vval {
+	&ERRbad_type($_[0], $T_VECTOR) if $_[0] !~ /^Z::V/;
+	local(*v) = @_;
+	@v;
+}
+
+# Scheme vector <= start, length, new Perl vector.
+sub Vset {
+	&ERRbad_type($_[0], $T_VECTOR) if $_[0] !~ /^Z::V/;
+	local(@sip) = @_;
+	local(*v, $s, $l, @n) = @sip;
+	splice(@v, $s, $l, @n);
+}
+
+#-- Tables.
+
+# XXX Tables could use a "default value".
+
+# -> Scheme table.
+sub T {
+	"Z::T" . ++$Z::T;
+}
+
+# Scheme table, Scheme symbol -> Scheme value.
+sub Tval {
+	&ERRbad_type($_[0], $T_TABLE) if $_[0] !~ /^Z::T/;
+	&ERRbad_type($_[1], $T_SYMBOL) if $_[1] !~ /^Y/;
+	local(*t) = @_;
+	$t{$'};
+}
+
+# Scheme table <= Perl string, new Scheme value.
+sub Tset {
+	&ERRbad_type($_[0], $T_TABLE) if $_[0] !~ /^Z::T/;
+	&ERRbad_type($_[1], $T_SYMBOL) if $_[1] !~ /^Y/;
+	local(@sip) = @_;
+	local(*t) = @sip;
+	$t{$'} = $sip[2];
+}
+
+# Scheme table -> Perl vector of keys.
+sub Tkeys {
+	&ERRbad_type($_[0], $T_TABLE) if $_[0] !~ /^Z::T/;
+	local(*t) = @_;
+	keys %t;
+}
+
+#-- Symbols.
+
+%OBLIST = ();
+$OBLIST = &REF("Z::Toblist", 'OBLIST');
+
+# Perl string -> Scheme symbol.
+sub Y {
+	'Y' . $_[0];
+}
+
+# Scheme symbol -> Perl string.
+sub Yname {
+	&ERRbad_type($_[0], $T_SYMBOL) if $_[0] !~ /^Y/;
+	$';
+}
+
+# Scheme symbol -> global Scheme value.
+sub Yval {
+	&ERRbad_type($_[0], $T_SYMBOL) if $_[0] !~ /^Y/;
+	$OBLIST{$'};
+}
+
+# Scheme symbol <= new global Scheme value.
+sub Yset {
+	&ERRbad_type($_[0], $T_SYMBOL) if $_[0] !~ /^Y/;
+	$OBLIST{$'} = $_[1];
+}
+
+# Perl string symbol name <= new global Scheme value.
+sub DEF {
+	$OBLIST{$_[0]} = $_[1];
+}
+
+# Create an aliased object.
+sub REF {
+	local(@sip) = @_;
+	local($a, $b) = @sip;
+	eval "*$a = *$b" || die "ALIAS: $@.\n";
+	$a;
+}
+
+&SUBR0('global-environment');
+sub global_environment {
+	$OBLIST;
+}
+
+#-- Input and output ports.
+
+%IPbuffer = ();
+
+# Perl string filename -> Scheme input port.
+sub IP {
+	local($f) = @_;
+	local($z) = "Z::IP" . ++$Z::IP;
+	open($z, "< $f\0") || return $NIL;
+	$IPbuffer{$z} = '';
+	$z;
+}
+
+# Scheme input port -> Perl filehandle.
+sub IPval {
+	&ERRbad_type($_[0], $T_INPUT) if $_[0] !~ /^Z::IP/;
+	$_[0];
+}
+
+# Scheme input port => Perl string.
+sub IPget {
+	&ERRbad_type($_[0], $T_INPUT) if $_[0] !~ /^Z::IP/;
+	local($ip) = @_;
+	local($_) = $IPbuffer{$ip};
+	$_ ne '' ? ($IPbuffer{$ip} = '') : ($_ = <$ip>);
+	$_;
+}
+
+# Like &IPget, but skip leading whitespace and comments.
+sub IPgetns {
+	&ERRbad_type($_[0], $T_INPUT) if $_[0] !~ /^Z::IP/;
+	local($ip) = @_;
+	local($_) = $IPbuffer{$ip};
+	$_ ne '' ? ($IPbuffer{$ip} = '') : ($_ = <$ip>);
+	$_ = <$ip> while $_ ne '' && /^\s*;|^\s*$/;
+	s/^\s+//;
+print "input = $_\n";
+	$_;
+}
+
+# Scheme input port <= Perl string.
+sub IPput {
+	&ERRbad_type($_[0], $T_INPUT) if $_[0] !~ /^Z::IP/;
+	$IPbuffer{$_[0]} .= $_[1];
+}
+
+# Perl string filename -> Scheme output port.
+sub OP {
+	local($f) = @_;
+	local($z) = "Z::OP" . ++$Z::OP;
+	open($z, "> $f\0") || return $NIL;
+	$z;
+}
+
+# Scheme output port -> Perl filehandle.
+sub OPval {
+	&ERRbad_type($_[0], $T_OUTPUT) if $_[0] !~ /^Z::OP/;
+	$_[0];
+}
+
+# Scheme output port <= Perl string.
+sub OPput {
+	&ERRbad_type($_[0], $T_OUTPUT) if $_[0] !~ /^Z::OP/;
+	local(@sip) = @_;
+	local($fh) = shift @sip;
+	print $fh @sip;
+}
+
+sub IOinit {
+	open($stdin  = "Z::IPstdin",  "<&STDIN");
+	open($stdout = "Z::OPstdout", ">&STDOUT");
+	open($stderr = "Z::OPstderr", ">&STDERR");
+	select($stderr); $| = 1;
+	$ttyin  = &IP('/dev/tty');
+	$ttyout = &OP('/dev/tty');
+}
+
+sub IOshutdown {
+	close($stdin);
+	close($stdout);
+	close($stderr);
+	close($ttyin);
+	close($ttyout);
+}
+
+&SUBR0('standard-input');  sub standard_input  { $stdin;  }
+&SUBR0('standard-output'); sub standard_output { $stdout; }
+&SUBR0('standard-error');  sub standard_error  { $stderr; }
+&SUBR0('terminal-input');  sub terminal_input  { $ttyin;  }
+&SUBR0('terminal-output'); sub terminal_output { $ttyout; }
+
+#-- Special forms.
+
+# Define Scheme special form <= name.
+sub FORM {
+	local($sub) = local($name) = $_[0];
+	$sub =~ tr/->?!*/_2PIX/;
+	&DEF($name, 'FORM' . $sub);
+}
+
+# Scheme special form -> Perl subroutine name.
+sub FORMval {
+	&ERRbad_type($_[0], $T_FORM) if $_[0] !~ /^FORM/;
+	$';
+}
+
+#-- Builtin functions (subrs).
+
+%SUBRmin = ();
+%SUBRmax = ();
+%SUBRtypes = ();
+
+# Define Scheme builtin <= name, minargs, maxargs, type list.
+sub SUBR
+{
+  my @sip = @_;
+  my ($name, $min, $max, @types) = @sip;
+  my $sub = $name;
+  $sub =~ tr/->?!*/_2PIX/;
+  $SUBRmin{$sub} = $min;
+  $SUBRmax{$sub} = $max;
+  $SUBRtypes{$sub} = pack('L*', @types);
+  &DEF($name, 'SUBR' . $sub);
+}
+
+# Scheme builtin function -> Perl sub name, minargs, maxargs, type list.
+sub SUBRval {
+	&ERRbad_type($_[0], $T_SUBR) if $_[0] !~ /^SUBR/;
+	($', $SUBRmin{$'}, $SUBRmax{$'}, unpack('L*', $SUBRtypes{$'}));
+}
+
+# Some convenient aliases...
+sub SUBR0 { &SUBR(shift, 0, 0); }
+sub SUBR1 { &SUBR(shift, 1, 1, @_); }
+sub SUBR2 { &SUBR(shift, 2, 2, @_); }
+sub SUBR3 { &SUBR(shift, 3, 3, @_); }
+sub SUBRN { &SUBR(shift, 0, -1, @_); }
+
+# A convenient macro...
+sub CMP_SUBR {
+	local(@sip) = @_;
+	local($name, $longname, $type, $acc, $cmp) = @sip;
+	local($s) = &SUBR($longname, 0, -1, $type);
+	&DEF($name, $s);
+	eval 'sub ' . (&SUBRval($s))[0] . ' {
+		local(@sip) = @_;
+		local($r) = 1;
+		for (; $r && @sip > 1; shift @sip) {
+			$r = '.$acc.'($sip[0]) '.$cmp.' '.$acc.'($sip[1]);
+		}
+		$r;
+	}';
+}
+
+#-- Miscellany.
+
+&SUBR0('*show-memory-use');
+sub Xshow_memory_use {
+	print $stderr 'memory use: s', $Z::S+0, ' p', $Z::P+0, ' v', $Z::V+0;
+	print $stderr ' t', $Z::T+0, ' ip', $Z::IP+0, ' op', $Z::OP+0;
+	print $stderr "\n";
+}
+
+#------
+#-- Environments and frames.
+#------
+
+# @ENVcurrent is a Perl vector that gets modified in place, for efficiency.
+# $ENVcache is a Scheme vector that's a copy of the current environment.
+
+@ENVcurrent = ();
+$ENVcache = $FALSE;
+@ENVstack = ();
+
+# Returns the current environment.
+sub ENVcurrent {
+	$ENVcache = &V(@ENVcurrent) if ! $ENVcache;
+	$ENVcache;
+}
+
+# Push to a new environment.
+sub ENVpush {
+	local($new) = @_;
+	push(@ENVstack, $ENVcache || &V(@ENVcurrent));
+	@ENVcurrent = &Vval($new);
+	$ENVcache = $new;
+}
+
+# Pop to the old environment.
+sub ENVpop {
+	$ENVcache = pop @ENVstack;
+	@ENVcurrent = &Vval($ENVcache);
+}
+
+# Pop to the global environment.
+sub ENVreset {
+	@ENVstack = ();
+	$ENVcache = $FALSE;
+	@ENVcurrent = ();
+}
+
+# Get a value from the current environment.
+sub ENVval {
+	local($sym) = @_;
+	local($x);
+	for $f (@ENVcurrent) {
+		return $x if defined($x = &Tval($f, $sym));
+	}
+	defined($x = &Yval($sym)) || &ERRunbound($sym);
+	$x;
+}
+
+# Set a value in the current environment.
+sub ENVset {
+	local(@sip) = @_;
+	local($sym, $val) = @sip;
+	local($x);
+	for $f (@ENVcurrent) {
+		return &Tset($f, $sym, $val) if defined($x = &Tval($f, $sym));
+	}
+	return &Yset($sym, $val);
+}
+
+# Push a new frame onto the current environment.
+sub ENVpush_frame {
+	$ENVcache = $FALSE;
+	unshift(@ENVcurrent, &T());
+}
+
+# Remove the top frame from the current environment.
+sub ENVpop_frame {
+	$ENVcache = $FALSE;
+	shift @ENVcurrent;
+}
+
+# Bind new values in the top frame of the current environment.
+sub ENVbind {
+	local(@syms) = @_;
+	local(@vals) = splice(@syms, @syms / 2, @syms / 2);
+	if (@ENVcurrent == 0) {
+		&Yset(shift @syms, shift @vals) while @syms;
+	} else {
+		local($t) = $ENVcurrent[0];
+		&Tset($t, shift @syms, shift @vals) while @syms;
+	}
+}
+
+&DEF('current-environment', &SUBR0('ENVcurrent'));
+
+#------
+#-- Error handling.
+#------
+
+sub ERR {
+	print $stderr '** ', @_, "\n";
+	goto TOP;
+}
+
+sub ERRbad_type {
+	local(@sip) = @_;
+	local($it, $what) = @sip;
+	$what = $TYPEname{$what} || "type $what";
+	print $stderr "** Internal type error, $it is not $what.\n";
+	goto TOP;
+}
+
+sub ERRtype {
+	local(@sip) = @_;
+	local($it, $what, $where) = @_;
+	$what = $TYPEname{$what} || "type $what";
+	print $stderr "** Type error, ";
+	print $stderr "in $where, " if $where ne '';
+	&write($it);
+	print " is not $what.\n";
+	goto TOP;
+}
+
+sub CHKtype {
+	local(@sip) = @_;
+	local($t0) = &TYPE($sip[0]);
+	local($t1) = $sip[1];
+	&ERRtype(@_) unless
+		$t1 == $T_ANY ||
+		$t0 == $t1 ||
+		($t1 == $T_LIST &&
+			($t0 == $T_PAIR || $t0 == $T_NIL)) ||
+		($t1 == $T_PROCEDURE &&
+			($t0 == $T_SUBR || $t0 == $T_VECTOR))
+		;
+}
+
+sub ERRdomain {
+	local(@sip) = @_;
+	local($where) = shift @sip;
+	print $stderr "** Domain error, ";
+	print $stderr "in $where, " if $where ne '';
+	print $stderr @sip, "\n";
+	goto TOP;
+}
+
+sub ERRunbound {
+	local($sym) = @_;
+	print $stderr '** Symbol ', &Yname($sym), " is unbound.\n";
+	goto TOP;
+}
+
+#------
+#-- Booleans.
+#------
+
+&DEF('t', $TRUE);
+&DEF('nil', $FALSE);
+
+&SUBR1('boolean?');
+sub booleanP {
+	$_[0] eq $TRUE || $_[0] eq $FALSE;
+}
+
+&SUBR1('not');
+sub not {
+	$_[0] ? $FALSE : $TRUE;
+}
+
+#------
+#-- Equivalence.
+#------
+
+# Perl ($x eq $y) means the same thing as Scheme (eq? x y).
+
+&SUBR2('eq?');
+sub eqP {
+	$_[0] eq $_[1];
+}
+
+&SUBR2('eqv?');
+sub eqvP {
+	return $TRUE if $_[0] eq $_[1];
+	local(@sip) = @_;
+	local($t) = &TYPE($sip[0]);
+	if ($t != &TYPE($sip[1])) {
+		$FALSE;
+	} elsif ($t == $T_NUMBER) {
+		&Nval($sip[0]) == &Nval($sip[1]);
+	} elsif ($t == $T_STRING) {
+		&Sval($sip[0]) eq '' && &Sval($sip[1]) eq '';
+	} elsif ($t == $T_VECTOR) {
+		&Vval($sip[0]) == 0 && &Vval($sip[1]) == 0;
+	} else {
+		$FALSE;
+	}
+}
+
+# XXX Fails to terminate for recursive types.
+&SUBR2('equal?');
+sub equalP {
+	return $TRUE if $_[0] eq $_[1];
+	local(@sip) = @_;
+	local($t) = &TYPE($sip[0]);
+	if ($t != &TYPE($sip[1])) {
+		$FALSE;
+	} elsif ($t == $T_STRING) {
+		&Sval($sip[0]) eq &Sval($sip[1]);
+	} elsif ($t == $T_PAIR) {
+		local($a0, $d0) = &Pval($sip[0]);
+		local($a1, $d1) = &Pval($sip[1]);
+		&equalP($a0, $a1) && &equalP($d0, $d1);
+	} elsif ($t == $T_VECTOR) {
+		local(@v) = &Vval($sip[0]);
+		local(@u) = &Vval($sip[1]);
+		return $FALSE if @v != @u;
+		while (@v) {
+			return $FALSE if ! &equalP(shift @v, shift @u);
+		}
+		$TRUE;
+	} else {
+		&eqvP($sip[0], $sip[1]);
+	}
+}
+
+#------
+#-- Pairs and lists.
+#------
+
+&SUBR1('pair?');
+sub pairP {
+	&TYPE($_[0]) == $T_PAIR;
+}
+
+&DEF('cons', &SUBR2('P'));
+
+&SUBR1('car');
+sub car {
+# XXX Patchlevel 41 broke something; &car(&car($x)) doesn't work if this
+# XXX line is uncommented.
+#	&CHKtype($_[0], $T_PAIR, 'car');
+	(&Pval($_[0]))[0];
+}
+
+&SUBR1('cdr', $T_PAIR);
+sub cdr {
+# XXX See comment for car.
+#	&CHKtype($_[0], $T_PAIR, 'cdr');
+	(&Pval($_[0]))[1];
+}
+
+&SUBR2('set-car!', $T_PAIR);
+sub set_carI {
+	&Pset($_[0], 0, $_[1]);
+}
+
+&SUBR2('set-cdr!', $T_PAIR);
+sub set_cdrI {
+	&Pset($_[0], 1, $_[1]);
+}
+
+&SUBR1('caar'); sub caar { &car(&car($_[0])); }
+&SUBR1('cadr'); sub cadr { &car(&cdr($_[0])); }
+&SUBR1('cdar'); sub cdar { &cdr(&car($_[0])); }
+&SUBR1('cddr'); sub cddr { &cdr(&cdr($_[0])); }
+
+# XXX caaar and friends.
+
+&SUBR1('null?');
+sub nullP {
+	$_[0] eq $NIL;
+}
+
+&DEF('list', &SUBRN('L'));
+
+&SUBR1('length', $T_LIST);
+sub length {
+	local($p) = @_;
+	local($n) = 0;
+	$n += 1, $p = &cdr($p) while $p ne $NIL;
+	&N($n);
+}
+
+&SUBRN('append');
+sub append {
+	local(@v) = @_;
+	local($p) = pop @v;
+	for $a (reverse @v) {
+		&CHKtype($a, $T_LIST, 'append');
+		for $b (reverse &Lval($a)) {
+			$p = &P($b, $p);
+		}
+	}
+	$p;
+}
+
+&SUBR1('reverse', $T_LIST);
+sub reverse {
+	&L(reverse(&Lval($_[0])));
+}
+
+&SUBR2('list-tail', $T_LIST, $T_NUMBER);
+sub list_tail {
+	local(@sip) = @_;
+	local($p) = $sip[0];
+	local($k) = &Nval($sip[1]);
+	$p = &cdr($p) while $k--;
+	$p;
+}
+
+&SUBR2('list-ref', $T_LIST, $T_NUMBER);
+sub list_ref {
+	local(@sip) = @_;
+	local(@v) = &Lval($sip[0]);
+	local($n) = &Nval($sip[1]);
+	0 < $n && $n < @v ? $v[$n] : $NIL;	# XXX error?
+}
+
+&SUBR1('last-pair', $T_LIST);
+sub last_pair {
+	local($p) = @_;
+	local($d);
+	$p = $d while &TYPE($d = &cdr($p)) == $T_PAIR;
+	$p;
+}
+
+&SUBR2('memq', $T_ANY, $T_LIST);
+sub memq {
+	local(@sip) = @_;
+	local($x, $p) = @sip;
+	local($a, $d);
+	for (; $p ne $NIL; $p = $d) {	# XXX improper lists
+		($a, $d) = &Pval($p);
+		return $p if $x eq $a;
+	}
+	return $FALSE;
+}
+
+&SUBR2('memv', $T_ANY, $T_LIST);
+sub memv {
+	local(@sip) = @_;
+	local($x, $p) = @sip;
+	local($a, $d);
+	for (; $p ne $NIL; $p = $d) {	# XXX improper lists
+		($a, $d) = &Pval($p);
+		return $p if &eqvP($x, $a);
+	}
+	return $FALSE;
+}
+
+&SUBR2('member', $T_ANY, $T_LIST);
+sub member {
+	local(@sip) = @_;
+	local($x, $p) = @sip;
+	local($a, $d);
+	for (; $p ne $NIL; $p = $d) {	# XXX improper lists
+		($a, $d) = &Pval($p);
+		return $p if &equalP($x, $a);
+	}
+	return $FALSE;
+}
+
+&SUBR2('assq', $T_ANY, $T_LIST);
+sub assq {
+	local(@sip) = @_;
+	local($x, $p) = @_;
+	local($a);
+	while ($p ne $NIL) {	# XXX improper lists
+		($a, $p) = &Pval($p);
+		return $a if $x eq &car($a);
+	}
+	return $FALSE;
+}
+
+&SUBR2('assv', $T_ANY, $T_LIST);
+sub assv {
+	local(@sip) = @_;
+	local($x, $p) = @_;
+	local($a);
+	while ($p ne $NIL) {	# XXX improper lists
+		($a, $p) = &Pval($p);
+		return $a if &eqvP($x, &car($a));
+	}
+	return $FALSE;
+}
+
+&SUBR2('assoc', $T_ANY, $T_LIST);
+sub assoc {
+	local(@sip) = @_;
+	local($x, $p) = @_;
+	local($a);
+	while ($p ne $NIL) {	# XXX improper lists
+		($a, $p) = &Pval($p);
+		return $a if &equalP($x, &car($a));
+	}
+	return $FALSE;
+}
+
+#------
+#-- Symbols.
+#------
+
+&SUBR1('symbol?');
+sub symbolP {
+	&TYPE($_[0]) == $T_SYMBOL;
+}
+
+&SUBR1('symbol->string', $T_SYMBOL);
+sub symbol_2string {
+	&S(&Yname($_[0]));
+}
+
+&SUBR1('string->symbol', $T_STRING);
+sub string_2symbol {
+	&Y(&Sval($_[0]));
+}
+
+#------
+#-- Numbers.
+#------
+
+&SUBR1('number?');
+sub numberP {
+	&TYPE($_[0]) == $T_NUMBER;
+}
+
+&SUBR1('complex?');
+sub complexP {
+	&TYPE($_[0]) == $T_NUMBER;
+}
+
+&SUBR1('real?');
+sub realP {
+	&TYPE($_[0]) == $T_NUMBER;
+}
+
+&SUBR1('rational?');
+sub rationalP {
+	&integerP($_[0]);
+}
+
+&SUBR1('integer?');
+sub integerP {
+	return $FALSE if &TYPE($_[0]) != $T_NUMBER;
+	local($n) = &Nval($_[0]);
+	$n == int($n);
+}
+
+&SUBR1('zero?', $T_NUMBER);
+sub zeroP {
+	&Nval($_[0]) == 0;
+}
+
+&SUBR1('positive?', $T_NUMBER);
+sub positiveP {
+	&Nval($_[0]) > 0;
+}
+
+&SUBR1('negative?', $T_NUMBER);
+sub negativeP {
+	&Nval($_[0]) < 0;
+}
+
+&SUBR1('odd?', $T_NUMBER);
+sub oddP {
+	&integerP($_[0]) && (&Nval($_[0]) & 1) == 1;
+}
+
+&SUBR1('even?', $T_NUMBER);
+sub evenP {
+	&integerP($_[0]) && (&Nval($_[0]) & 1) == 0;
+}
+
+&CMP_SUBR('=', 'number-eq?', $T_NUMBER, '&Nval', '==');
+&CMP_SUBR('<', 'number-lt?', $T_NUMBER, '&Nval', '<');
+&CMP_SUBR('>', 'number-gt?', $T_NUMBER, '&Nval', '>');
+&CMP_SUBR('<=', 'number-le?', $T_NUMBER, '&Nval', '<=');
+&CMP_SUBR('>=', 'number-ge?', $T_NUMBER, '&Nval', '>=');
+
+&SUBR('max', 1, -1, $T_NUMBER);
+sub max {
+	local(@sip) = @_;
+	local($x) = &Nval(shift @sip);
+	for (; @sip; shift @sip) {
+		$x = &Nval($sip[0]) if &Nval($sip[0]) > $x;
+	}
+	&N($x);
+}
+
+&SUBR('min', 1, -1, $T_NUMBER);
+sub min {
+	local(@sip) = @_;
+	local($x) = &Nval(shift @sip);
+	for (; @sip; shift @sip) {
+		$x = &Nval($sip[0]) if &Nval($sip[0]) < $x;
+	}
+	&N($x);
+}
+
+&DEF('+', &SUBRN('add', $T_NUMBER));
+sub add {
+	local(@sip) = @_;
+	local($x) = 0;
+	$x += &Nval(shift @sip) while @sip;
+	&N($x);
+}
+
+&DEF('-', &SUBR('subtract', 1, -1, $T_NUMBER));
+sub subtract {
+	local(@sip) = @_;
+	local($x) = &Nval(shift @sip);
+	$x = -$x if !@sip;
+	$x -= &Nval(shift @sip) while @sip;
+	&N($x);
+}
+
+&DEF('*', &SUBRN('multiply', $T_NUMBER));
+sub multiply {
+	local(@sip) = @_;
+	local($x) = 1;
+	$x *= &Nval(shift @sip) while @sip;
+	&N($x);
+}
+
+&DEF('/', &SUBR('divide', 1, -1, $T_NUMBER));
+sub divide {
+	local(@sip) = @_;
+	local($x) = &Nval(shift @sip);
+	if (@sip == 0) {
+		&ERRdomain('/', 'division by zero.') if $x == 0;
+		$x = 1 / $x;
+	} else {
+		local($y);
+		while (@sip) {
+			$y = &Nval(shift @sip);
+			&ERRdomain('/', 'division by zero.') if $y == 0;
+			$x /= $y;
+		}
+	}
+	&N($x);
+}
+
+&DEF('1+', &SUBR1('inc', $T_NUMBER));
+sub inc {
+	&N(&Nval($_[0]) + 1);
+}
+
+&DEF('-1+', &SUBR1('dec', $T_NUMBER));
+sub dec {
+	&N(&Nval($_[0]) - 1);
+}
+
+&SUBR1('abs', $T_NUMBER);
+sub abs {
+	local($x) = &Nval($_[0]);
+	&N($x > 0 ? $x : -$x);
+}
+
+&SUBR2('quotient', $T_NUMBER, $T_NUMBER);
+sub quotient {
+	local(@sip) = @_;
+	local($y) = &Nval($sip[1]);
+	&ERRdomain('quotient', 'division by zero.') if $y == 0;
+	&N(int(&Nval($sip[0]) / $y));
+}
+
+&SUBR2('remainder', $T_NUMBER, $T_NUMBER);
+sub remainder {
+	local(@sip) = @_;
+	local($x) = &Nval($sip[0]);
+	local($y) = &Nval($sip[1]);
+	&ERRdomain('remainder', 'division by zero.') if $y == 0;
+	&N($x - $y * int($x / $y));
+}
+
+&SUBR2('modulo', $T_NUMBER, $T_NUMBER);
+sub modulo {
+	local(@sip) = @_;
+	local($x) = &Nval($sip[0]);
+	local($y) = &Nval($sip[1]);
+	&ERRdomain('modulo', 'division by zero.') if $y == 0;
+	local($r) = $x - $y * int($x / $y);
+	$r += $y if ($y < 0 && $r > 0) || ($y > 0 && $r < 0);
+	&N($r);
+}
+
+# XXX SUBR numerator, denominator (rationals)
+
+# XXX SUBR gcd, lcm
+
+&SUBR1('floor', $T_NUMBER);
+sub floor {
+	local($n) = &Nval($_[0]);
+	if ($n == int($n)) {
+		&N($n);
+	} else {
+		$n < 0 ? &N($n - 1) : &N($n);
+	}
+}
+
+&SUBR1('ceiling', $T_NUMBER);
+sub ceiling {
+	local($n) = &Nval($_[0]);
+	if ($n == int($n)) {
+		&N($n);
+	} else {
+		$n < 0 ? &N($n) : &N($n + 1);
+	}
+}
+
+&SUBR1('truncate', $T_NUMBER);
+sub truncate {
+	&N(int(&Nval($_[0])));
+}
+
+&SUBR1('round', $T_NUMBER);
+sub round {
+	local($n) = &Nval($_[0]);
+	if ($n + .5 == int($n + .5)) {
+		if ($n < 0) {
+			1 & (-$n - .5) ? &N($n - .5) : &N($n + .5);
+		} else {
+			1 & ($n + .5) ? &N($n - .5) : &N($n + .5);
+		}
+	} else {
+		$n < 0 ? &N(int($n - .5)) : &N(int($n + .5));
+	}
+}
+
+# XXX SUBR rationalize
+
+&SUBR1('exp', $T_NUMBER);
+sub exp {
+	&N(CORE::exp(&Nval($_[0])));
+}
+
+&SUBR1('log', $T_NUMBER);
+sub log {
+	local($x) = &Nval($_[0]);
+	&ERRdomain('log', 'singularity at zero.') if $x == 0;
+	&N(CORE::log($x));
+}
+
+&SUBR1('sin', $T_NUMBER);
+sub sin {
+	&N(CORE::sin(&Nval($_[0])));
+}
+
+&SUBR1('cos', $T_NUMBER);
+sub cos {
+	&N(CORE::cos(&Nval($_[0])));
+}
+
+&SUBR1('tan', $T_NUMBER);
+sub tan {
+	local($x) = &Nval($_[0]);
+	&N(CORE::sin($x)/CORE::cos($x));	# XXX domain error
+}
+
+&SUBR1('asin', $T_NUMBER);
+sub asin {
+	local($x) = &Nval($_[0]);
+	&ERRdomain('asin', $x, ' is not in [-1, 1].') if $x < -1 || $x > 1;
+	&N(atan2($x, sqrt(1 - $x * $x)));
+}
+
+&SUBR1('acos', $T_NUMBER);
+sub acos {
+	local($x) = &Nval($_[0]);
+	&ERRdomain('acos', $x, ' is not in [-1, 1].') if $x < -1 || $x > 1;
+	&N(atan2(sqrt(1 - $x * $x), $x));
+}
+
+&SUBR('atan', 1, 2, $T_NUMBER, $T_NUMBER);
+sub atan {
+	local(@sip) = @_;
+	local($x) = &Nval($_[0]);
+	local($y) = @_ > 1 ? &Nval($_[1]) : 1;
+	&N(atan2($x, $y));	# XXX domain error
+}
+
+&SUBR1('sqrt', $T_NUMBER);
+sub sqrt {
+	&N(sqrt(&Nval($_[0])));	# XXX domain error
+}
+
+&SUBR2('expt', $T_NUMBER, $T_NUMBER);
+sub expt {
+	local(@sip) = @_;
+	local($x) = &Nval($_[0]);
+	local($y) = &Nval($_[1]);
+	if ($x == 0 && $y == 0) {
+		&N(1);	# required in R3RS.
+	} else {
+		&N($x ** $y);	# XXX domain error.
+	}
+}
+
+# XXX SUBR make-rectangular, make-polar, real-part, imag-part,
+# XXX SUBR magnitude, angle
+# XXX SUBR exact->inexact, inexact->exact
+
+# XXX SUBR number->string, string->number
+
+#------
+#-- Characters.
+#------
+
+&SUBR1('char?');
+sub charP {
+	&TYPE($_[0]) == $T_CHAR;
+}
+
+&CMP_SUBR('char=?', 'char-eq?', $T_CHAR, '&Cval', 'eq');
+&CMP_SUBR('char<?', 'char-lt?', $T_CHAR, '&Cval', 'lt');
+&CMP_SUBR('char>?', 'char-gt?', $T_CHAR, '&Cval', 'gt');
+&CMP_SUBR('char<=?', 'char-le?', $T_CHAR, '&Cval', 'le');
+&CMP_SUBR('char>=?', 'char-ge?', $T_CHAR, '&Cval', 'ge');
+
+sub ciCval {
+	local($_) = &Cval($_[0]);
+	tr/A-Z/a-z/;
+	$_;
+}
+&CMP_SUBR('char-ci=?', 'char-ci-eq?', $T_CHAR, '&ciCval', 'eq');
+&CMP_SUBR('char-ci<?', 'char-ci-lt?', $T_CHAR, '&ciCval', 'lt');
+&CMP_SUBR('char-ci>?', 'char-ci-gt?', $T_CHAR, '&ciCval', 'gt');
+&CMP_SUBR('char-ci<=?', 'char-ci-le?', $T_CHAR, '&ciCval', 'le');
+&CMP_SUBR('char-ci>=?', 'char-ci-ge?', $T_CHAR, '&ciCval', 'ge');
+
+&SUBR1('char-alphabetic?', $T_CHAR);
+sub char_alphabeticP {
+	&Cval($_[0]) =~ /[a-zA-Z]/ ? $TRUE : $FALSE;
+}
+
+&SUBR1('char-numeric?', $T_CHAR);
+sub char_numericP {
+	&Cval($_[0]) =~ /[0-9]/ ? $TRUE : $FALSE;
+}
+
+&SUBR1('char-whitespace?', $T_CHAR);
+sub char_whitespaceP {
+	&Cval($_[0]) =~ /\s/ ? $TRUE : $FALSE;
+}
+
+&SUBR1('char-upper-case?', $T_CHAR);
+sub char_upper_caseP {
+	&Cval($_[0]) =~ /[A-Z]/ ? $TRUE : $FALSE;
+}
+
+&SUBR1('char-lower-case?', $T_CHAR);
+sub char_lower_caseP {
+	&Cval($_[0]) =~ /[a-z]/ ? $TRUE : $FALSE;
+}
+
+&SUBR1('char->integer', $T_CHAR);
+sub char_2integer {
+	&N(ord(&Cval($_[0])));
+}
+
+&SUBR1('integer->char', $T_NUMBER);
+sub integer_2char {
+	&C(sprintf("%c", &Nval($_[0])));
+}
+
+&SUBR1('char-upcase', $T_CHAR);
+sub char_upcase {
+	local($c) = &Cval($_[0]);
+	$c =~ tr/a-z/A-Z/;
+	&C($c);
+}
+
+&SUBR1('char-downcase', $T_CHAR);
+sub char_downcase {
+	local($c) = &Cval($_[0]);
+	$c =~ tr/A-Z/a-z/;
+	&C($c);
+}
+
+#------
+#-- Strings.
+#------
+
+&SUBR1('string?');
+sub stringP {
+	&TYPE($_[0]) == $T_STRING;
+}
+
+&SUBR('make-string', 1, 2, $T_NUMBER, $T_CHAR);
+sub make_string {
+	local(@sip) = @_;
+	local($c) = @sip > 1 ? &Cval($sip[1]) : '.';
+	&S($c x &Nval($sip[0]));
+}
+
+&SUBR1('string-length', $T_STRING);
+sub string_length {
+	&N(CORE::length(&Sval($_[0])));
+}
+
+&SUBR2('string-ref', $T_STRING, $T_NUMBER);
+sub string_ref {
+	&C(substr(&Sval($_[0]), &Nval($_[1]), 1));
+}
+
+&SUBR3('string-set!', $T_STRING, $T_NUMBER, $T_CHAR);
+sub string_setI {
+	&Sset($_[0], &Nval($_[1]), 1, &Cval($_[2]));	# XXX domain error.
+	$TRUE;
+}
+
+&CMP_SUBR('string=?', 'string-eq?', $T_STRING, '&Sval', 'eq');
+&CMP_SUBR('string<?', 'string-lt?', $T_STRING, '&Sval', 'lt');
+&CMP_SUBR('string>?', 'string-gt?', $T_STRING, '&Sval', 'gt');
+&CMP_SUBR('string<=?', 'string-le?', $T_STRING, '&Sval', 'le');
+&CMP_SUBR('string>=?', 'string-ge?', $T_STRING, '&Sval', 'ge');
+
+sub ciSval {
+	local($_) = &Sval($_[0]);
+	tr/A-Z/a-z/;
+	$_;
+}
+&CMP_SUBR('string-ci=?', 'string-ci-eq?', $T_STRING, '&ciSval', 'eq');
+&CMP_SUBR('string-ci<?', 'string-ci-lt?', $T_STRING, '&ciSval', 'lt');
+&CMP_SUBR('string-ci>?', 'string-ci-gt?', $T_STRING, '&ciSval', 'gt');
+&CMP_SUBR('string-ci<=?', 'string-ci-le?', $T_STRING, '&ciSval', 'le');
+&CMP_SUBR('string-ci>=?', 'string-ci-ge?', $T_STRING, '&ciSval', 'ge');
+
+&SUBR3('substring', $T_STRING, $T_NUMBER, $T_NUMBER);
+sub substring {
+	local(@sip) = @_;
+	local($p) = &Nval($sip[1]);
+	&S(substr(&Sval($sip[0]), $p, &Nval($sip[2]) - $p));
+}
+
+&SUBRN('string-append', $T_STRING);
+sub string_append {
+	local(@sip) = @_;
+	local($s) = '';
+	$s .= &Sval(shift @sip) while @sip;
+	&S($s);
+}
+
+&SUBR1('string->list', $T_STRING);
+sub string_2list {
+	local(@sip) = @_;
+	local($p) = $NIL;
+	for $c (CORE::reverse split(//, &Sval($sip[0]))) {
+		$p = &P(&C($c), $p);
+	}
+	$p;
+}
+
+&SUBR1('list->string', $T_LIST);
+sub list_2string {
+	local($p) = @_;
+	local($s) = '';
+	local($a);
+	while ($p ne $NIL) {	# XXX improper lists.
+		($a, $p) = &Pval($p);
+		&CHKtype($a, $T_CHAR, 'list->string');
+		$s = $s . &Cval($a);
+	}
+	&S($s);
+}
+
+&SUBR1('string-copy', $T_STRING);
+sub string_copy {
+	&S(&Sval($_[0]));
+}
+
+&SUBR2('string-fill!', $T_STRING, $T_CHAR);
+sub string_fillI {
+	local(@sip) = @_;
+	local($s, $c) = @sip;
+	local($len) = CORE::length(&Sval($s));
+	&Sset($s, 0, $len, &Cval($c) x $len);
+	$TRUE;
+}
+
+#------
+#-- Vectors.
+#------
+
+&SUBR1('vector?');
+sub vectorP {
+	&TYPE($_[0]) == $T_VECTOR;
+}
+
+&SUBR('make-vector', 1, 2, $T_NUMBER);
+sub make_vector {
+	local(@sip) = @_;
+	local($n) = &Nval($sip[0]);
+	local($x) = @sip > 1 ? $sip[1] : $FALSE;
+	local(@v);
+	$#v = $n - 1;
+	for $k (@v) { $k = $x; }
+	&V(@v);
+}
+
+&DEF('vector', &SUBRN('V'));
+
+&SUBR1('vector-length', $T_VECTOR);
+sub vector_length {
+	&N(&Vval($_[0]) + 0);
+}
+
+&SUBR2('vector-ref', $T_VECTOR, $T_NUMBER);
+sub vector_ref {
+	(&Vval($_[0]))[&Nval($_[1])];
+}
+
+&SUBR3('vector-set!', $T_VECTOR, $T_NUMBER, $T_ANY);
+sub vector_setI {
+	&Vset($_[0], &Nval($_[1]), 1, $_[2]);
+}
+
+&SUBR1('vector-copy', $T_VECTOR);
+sub vector_copy {
+	&V(&Vval($_[0]));
+}
+
+&SUBR1('vector->list', $T_VECTOR);
+sub vector_2list {
+	&L(&Vval($_[0]));
+}
+
+&SUBR1('list->vector', $T_LIST);
+sub list_2vector {
+	&V(&Lval($_[0]));	# XXX improper lists.
+}
+
+#------
+#-- Tables.  (extension)
+#------
+
+&SUBR1('table?');
+sub tableP {
+	&TYPE($_[0]) == $T_TABLE;
+}
+
+&DEF('make-table', &SUBR0('T'));
+
+&SUBR3('table-set!', $T_TABLE, $T_SYMBOL);
+sub table_setI {
+	&Tset($_[0], $_[1], $_[2]);
+	$TRUE;
+}
+
+&SUBR2('table-ref', $T_TABLE, $T_SYMBOL);
+sub table_ref {
+	&Tval($_[0], $_[1]);
+}
+
+&SUBR1('table-keys', $T_TABLE);
+sub table_keys {
+	local(@v) = &Tkeys($_[0]);
+	for $k (@v) {
+		$k = &Y($k);
+	}
+	&V(@v);
+}
+
+#------
+#-- Syntactic keywords, special forms.
+#------
+
+$ARROW = &Y('=>');
+$ELSE = &Y('else');
+$QUOTE = &Y('quote');
+$QUASIQUOTE = &Y('quasiquote');
+$UNQUOTE = &Y('unquote');
+$UNQUOTE_SPLICING = &Y('unquote-splicing');
+
+&FORM('quote');
+sub quote {
+	$_[0];
+}
+
+# XXX wrote quasiquote in a delirium.  it may not work correctly.
+&FORM('quasiquote');
+sub quasiquote {
+	&QQ($_[0], 0);
+}
+
+sub QQ {
+	local(@sip) = @_;
+	local($it, $n) = @sip;
+	local($t) = &TYPE($it);
+	if ($t == $T_VECTOR) {
+		return &QQvector($it, $n);
+	} elsif ($t == $T_PAIR) {
+		return &QQlist($it, $n);
+	} else {
+		return $it;
+	}
+}
+
+sub QQvector {
+	local(@sip) = @_;
+	local($it, $n) = @sip;
+	return &list_2vector(&QQlist(&vector_2list($it), $n));
+}
+
+sub QQlist {
+	local(@sip) = @_;
+	local($it, $n) = @sip;
+	local($a, $d) = &Pval($it);
+	if ($a eq $QUASIQUOTE) {
+		return &L($QUASIQUOTE, &QQ(&car($d), $n + 1));
+	} elsif ($a eq $UNQUOTE) {
+		return $n == 0
+			? &eval(&car($d))
+			: &L($UNQUOTE, &QQ(&car($d), $n - 1));
+	}
+
+	if (&pairP($a) && &car($a) eq $UNQUOTE_SPLICING) {
+		$a = ($n == 0)
+			? &eval(&cadr($a))
+			: &L($UNQUOTE_SPLICING, &QQ(&cadr($a), $n - 1));
+	} else {
+		$a = &L(&QQ($a, $n));
+	}
+	if ($d ne $NIL) {
+		return &append($a, &QQ($d, $n));
+	} else {
+		return $a;
+	}
+}
+
+&FORM('delay');
+sub delay {
+	&V($PROMISE, $NIL, $NIL, &ENVcurrent(), @_);
+}
+
+&FORM('lambda');
+sub lambda {
+	local(@code) = @_;
+	local($args) = shift @code;
+	local($a, @syms);
+	while (&pairP($args)) {
+		($a, $args) = &Pval($args);
+		&CHKtype($a, $T_SYMBOL, 'lambda');
+		push(@syms, $a);
+	}
+	&CHKtype($args, $T_SYMBOL, 'lambda') if $args ne $NIL;
+	&V($CLOSURE, &ENVcurrent(), $args, &N(@syms + 0), @syms, @code);
+}
+
+# XXX named let form
+&FORM('let');
+sub let {
+	local(@code) = @_;
+	local(@bindings) = &Lval(shift @code);
+	local(@syms, @vals);
+	for $x (@bindings) {
+		push(@syms, &car($x));
+		push(@vals, &eval(&cadr($x)));
+	}
+	&ENVpush_frame();
+	&ENVbind(@syms, @vals);
+	local($x) = &begin(@code);
+	&ENVpop_frame();
+	$x;
+}
+
+&FORM('let*');
+sub letX {
+	local(@code) = @_;
+	local(@bindings) = &Lval(shift @code);
+	local($x);
+	&ENVpush(&ENVcurrent());
+	for $b (@bindings) {
+		$x = &eval(&cadr($b));
+		&ENVpush_frame();
+		&ENVbind(&car($b), $x);
+	}
+	$x = &begin(@code);
+	&ENVpop();
+	$x;
+}
+
+&FORM('letrec');
+sub letrec {
+	local(@code) = @_;
+	local(@bindings) = &Lval(shift @code);
+	local($x, @syms, @vals);
+	for $x (@bindings) {
+		push(@syms, &car($x));
+	}
+	&ENVpush_frame();
+	&ENVbind(@syms, @syms);
+	for $x (@bindings) {
+		push(@vals, &eval(&cadr($x)));
+	}
+	&ENVbind(@syms, @vals);
+	local($x) = &begin(@code);
+	&ENVpop_frame();
+	$x;
+}
+
+&FORM('do');
+sub do {
+	local(@code) = @_;
+	local($bindings) = shift @code;
+	local($y, $v, $n, @syms, @vals, @nexts);
+	for $x (&Lval($bindings)) {
+		($y, $v, $n) = &Lval($x);
+		if (defined $n) {
+			unshift(@syms, $y);
+			unshift(@vals, &eval($v));
+			unshift(@nexts, $n);
+		} else {
+			push(@syms, $y);
+			push(@vals, &eval($v));
+		}
+	}
+	&ENVpush_frame();
+	&ENVbind(@syms, @vals);
+
+	$#syms = $#nexts;
+
+	local($test, @exit) = &Lval(shift @code);
+
+	while (!&eval($test)) {
+		&begin(@code);
+	} continue {
+		@vals = ();
+		for $x (@nexts) {
+			push(@vals, &eval($x));
+		}
+		&ENVbind(@syms, @vals);
+	}
+	local($x) = &begin(@exit);
+	&ENVpop_frame();
+	$x;
+}
+
+&FORM('set!');
+sub setI {
+	&CHKtype($_[0], $T_SYMBOL, 'set!');
+	# XXX argcount, syntax error.
+	# XXX error if unbound?
+	&ENVset($_[0], &eval($_[1]));
+	$TRUE;
+}
+
+&FORM('define');
+sub define {
+	local(@sip) = @_;
+	local($sym) = shift @sip;
+	local($t) = &TYPE($sym);
+	if ($t == $T_SYMBOL) {
+		&ENVbind($sym, &eval($sip[0]));
+	} elsif ($t == $T_PAIR) {
+		local($args);
+		($sym, $args) = &Pval($sym);
+		&CHKtype($sym, $T_SYMBOL, 'define');
+		&ENVbind($sym, &lambda($args, @sip));
+	} else {
+		&ERRtype($sym, 'a symbol or a pair', 'define');
+	}
+	$TRUE;
+}
+
+&FORM('begin');
+sub begin {
+	local(@sip) = @_;
+	local($x) = $NIL;
+	$x = &eval(shift @sip) while @sip;
+	$x;
+}
+
+&FORM('and');
+sub and {
+	local(@sip) = @_;
+	local($x) = $TRUE;
+	$x = &eval(shift @sip) while $x && @sip;
+	$x;
+}
+
+&FORM('or');
+sub or {
+	local(@sip) = @_;
+	local($x) = $FALSE;
+	$x = &eval(shift @sip) while !$x && @sip;
+	$x;
+}
+
+&FORM('if');
+sub if {
+	# XXX argcount, syntax error.
+	if (&eval($_[0])) {
+		&eval($_[1]);
+	} elsif ($_[2] ne '') {
+		&eval($_[2]);
+	} else {
+		$NIL;
+	}
+}
+
+&FORM('cond');
+sub cond {
+	local(@sip) = @_;
+	local($a, $d, $x);
+	for $it (@sip) {
+		&CHKtype($it, $T_PAIR, 'cond');
+		($a, $d) = &Pval($it);
+		if ($a eq $ELSE || ($x = &eval($a))) {
+			&CHKtype($it, $T_PAIR, 'cond');
+			local(@v) = &Lval($d);
+			if ($v[0] eq $ARROW) {
+				# XXX syntax error, @v > 2;
+				return &applyN(&eval($v[1]), $x);
+			} else {
+				return &begin(@v);
+			}
+		}
+	}
+	return $NIL;
+}
+
+&FORM('case');
+sub case {
+	local(@sip) = @_;
+	local($x) = &eval(shift @sip);
+	local($a, $d);
+	for $it (@sip) {
+		&CHKtype($it, $T_PAIR, 'case');
+		($a, $d) = &Pval($it);
+		if ($a eq $ELSE || &memv($x, $a)) {	# XXX pair? $a
+			&CHKtype($d, $T_PAIR, 'case');
+			return &begin(&Lval($d));
+		}
+	}
+	return $NIL;
+}
+
+&FORM('*time-execution');
+sub Xtime_execution {
+	local(@code) = @_;
+	local($x);
+	local($u0, $s0, $cu0, $cs0, $t0);
+	local($u1, $s1, $cu1, $cs1, $t1);
+	$t0 = time;
+	($u0, $s0, $cu0, $cs0) = times;
+	$x = &begin(@code);
+	($u1, $s1, $cu1, $cs1) = times;
+	$t1 = time;
+	printf $stderr "\ntimes: %.3f user, %.3f system, %d:%02d real.\n",
+		$u1 - $u0 + $cu1 - $cu1,
+		$s1 - $s0 + $cs1 - $cu1,
+		($t1 - $t0) / 60, ($t1 - $t0) % 60;
+}
+
+#------
+#-- Input and output ports.
+#------
+
+@IPstack = ();
+@OPstack = ();
+
+$IPcurrent = $stdin;
+$OPcurrent = $stdout;
+
+# Restore I/O to a sane state.
+sub IOreset {
+	@IPstack = ();
+	@OPstack = ();
+	$IPcurrent = $stdin;
+	$OPcurrent = $stdout;
+	select(&OPval($stdout));
+	$| = 1;
+}
+
+&SUBR1('input-port?');
+sub input_portP {
+	&TYPE($_[0]) == $T_INPUT;
+}
+
+&SUBR1('output-port?');
+sub output_portP {
+	&TYPE($_[0]) == $T_OUTPUT;
+}
+
+&SUBR0('current-input-port');
+sub current_input_port {
+	$IPcurrent;
+}
+
+&SUBR0('current-output-port');
+sub current_output_port {
+	$OPcurrent;
+}
+
+&SUBR2('with-input-from-file', $T_STRING, $T_PROCEDURE);
+sub with_input_from_file {
+	local(@sip) = @_;
+	local($f) = &IP(&Sval($sip[0]));
+	return $NIL if !$f;	# XXX open error
+
+	push(@IPstack, $IPcurrent);
+	$IPcurrent = $f;
+	local($x) = &applyN($sip[1]);
+	$IPcurrent = pop @IPstack;
+	close(&IPval($f));
+	$x;
+}
+
+&SUBR2('with-output-to-file', $T_STRING, $T_PROCEDURE);
+sub with_output_to_file {
+	local(@sip) = @_;
+	local($f) = &OP(&Sval($sip[0]));
+	return $NIL if !$f;	# XXX open error.
+
+	push(@OPstack, $OPcurrent);
+	$OPcurrent = $f;
+	local($x) = &applyN($sip[1]);
+	$OPcurrent = pop @OPstack;
+	close(&OPval($f));
+	$x;
+}
+
+&SUBR1('open-input-file', $T_STRING);
+sub open_input_file {
+	&IP(&Sval($_[0]));	# XXX open error.
+}
+
+&SUBR1('open-output-file', $T_STRING);
+sub open_output_file {
+	&OP(&Sval($_[0]));	# XXX open error.
+}
+
+&SUBR1('close-input-port', $T_INPUT);
+sub close_input_port {
+	close(&IPval($_[0]));	# XXX should destroy port.
+	&IPget($_[0]);	# flush the input buffer.
+	$TRUE;
+}
+
+&SUBR1('close-output-port', $T_OUTPUT);
+sub close_output_port {
+	close(&OPval($_[0]));	# XXX should destroy port.
+	$TRUE;
+}
+
+#------
+#-- Input.
+#------
+
+$EOF = &Y('#EOF');	# eof object.
+
+&SUBR1('eof-object?');
+sub eof_objectP {
+	$_[0] eq $EOF;
+}
+
+&SUBR('read-char', 0, 1, $T_INPUT);
+sub read_char {
+	local($ip) = @_ ? @_ : $IPcurrent;
+	local($_) = &IPget($ip);
+	return $EOF if $_ eq '';
+	local($c) = substr($_, 0, 1);
+	&IPput($ip, substr($_, 1, CORE::length($_) - 1));
+	&C($c);
+}
+
+&SUBR('char-ready?', 0, 1, $T_INPUT);
+sub char_readyP {
+	local($ip) = @_ ? @_ : $IPcurrent;
+	$IPbuffer{$ip} ne '';	# XXX shouldn't refer to IPbuffer directly.
+}
+
+&SUBR('read-line', 0, 1, $T_INPUT);	# (extension)
+sub read_line {
+	local($ip) = @_ ? @_ : $IPcurrent;
+	local($_) = &IPget($ip);
+	$_ eq '' ? $EOF : &S($_);
+}
+
+&SUBR('read', 0, 1, $T_INPUT);
+sub read {
+	local($ip) = @_ ? @_ : $IPcurrent;
+	local($_) = &IPgetns($ip);
+
+	if ($_ eq '') {
+		$EOF;
+	} elsif (/^\(/) {
+		&IPput($ip, $');
+		&L(&RDvec($ip));
+	} elsif (/^'/) {
+		&IPput($ip, $');
+		&P($QUOTE, &P(&read($ip), $NIL));
+	} elsif (/^`/) {
+		&IPput($ip, $');
+		&P($QUASIQUOTE, &P(&read($ip), $NIL));
+	} elsif (/^,@/) {
+		&IPput($ip, $');
+		&P($UNQUOTE_SPLICING, &P(&read($ip), $NIL));
+	} elsif (/^,/) {
+		&IPput($ip, $');
+		&P($UNQUOTE, &P(&read($ip), $NIL));
+	} elsif (/^"/) {
+		&IPput($ip, $');
+		&S(&RDstring($ip));
+	} elsif (/^#\(/) {
+		&IPput($ip, $');
+		&V(&RDvec($ip));
+	} elsif (/^(#\\\w\w+)\s*/) {
+		local($x) = $1;
+		&IPput($ip, $');
+		&RDtoken($x);
+	} elsif (/^#\\([\0-\377])\s*/) {
+		local($c) = $1;
+		&IPput($ip, $');
+		&C($c);
+	} elsif (/^([^()"',\s]+)\s*/) {
+		local($x) = $1;
+		&IPput($ip, $');
+		&RDtoken($x);
+	} else {
+		&ERR("failure in READ, can't understand $_");
+	}
+}
+
+sub RDtoken {
+	local($_) = @_;
+	$_ =~ tr/A-Z/a-z/;
+
+	if    (/^\.$/)		{ '.'; }	# read hack.
+	elsif (/^#t$/)		{ $TRUE; }
+	elsif (/^#f$/)		{ $FALSE; }
+	elsif (/^#\\space$/)	{ &C(' '); }
+	elsif (/^#\\newline$/)	{ &C("\n"); }
+	elsif (/^#\\tab$/)	{ &C("\t"); }
+
+	elsif (/^#/) {
+		&ERR("read, bad token $_");
+	} elsif (/^[-+]?(\d+\.?\d*|\d*\.\d+)(e[-+]?\d+)?$/) {
+		&N($_ + 0);
+	} elsif (/^[-+]?(\d+)\/(\d+)$/) {
+		&N($1 / $2);
+	} else {
+		&Y($_);
+	}
+}
+
+sub RDvec {
+	local($ip) = @_;
+	local($_, @v);
+	while (($_ = &IPgetns($ip)) ne '') {
+		&IPput($ip, $'), last if /^\)\s*/;
+		&IPput($ip, $_);
+		push(@v, &read($ip));
+	}
+	if ($_ eq '') {
+		&ERR("EOF while reading list or vector.");
+	}
+	return @v;
+}
+
+sub RDstring {
+	local($ip) = @_;
+	local($s) = "";
+	$_ = &IPget($ip);
+	while ($_ ne '') {
+		&IPput($ip, $'), last if /^"\s*/;
+		if (/^\\([\0-\377])/) {
+			$s .= $1; $_ = $';
+		} elsif (/^[^"\\]+/) {
+			$s .= $&; $_ = $';
+		} else {
+			$s .= $_; $_ = '';
+		}
+		$_ = &IPget($ip) if $_ eq '';
+	}
+	return $s;
+}
+
+#------
+#-- Output.
+#------
+
+&SUBR('newline', 0, 1, $T_OUTPUT);
+sub newline {
+	&OPput(@_ ? $_[0] : $OPcurrent, "\n");
+}
+
+&SUBR('write-char', 1, 2, $T_CHAR, $T_OUTPUT);
+sub write_char {
+	&OPput(@_ > 1 ? $_[1] : $OPcurrent, &Cval($_[0]));
+}
+
+$WRquoted = 0;
+%WRmark = ();
+
+&SUBR('write', 1, 2, $T_ANY, $T_OUTPUT);
+sub write {
+	$WRquoted = 1;
+	&WR(@_);
+}
+
+&SUBR('display', 1, 2, $T_ANY, $T_OUTPUT);
+sub display {
+	$WRquoted = 0;
+	&WR(@_);
+}
+sub WR {
+	local(@sip) = @_;
+	local($fh) = &OPval(@_ > 1 ? $_[1] : $OPcurrent);
+	local($oldfh) = select($fh);
+	%WRmark = ();
+	&WR1($_[0]);
+	select($oldfh);
+	$TRUE;
+}
+
+sub WR1 {
+	local($it) = @_;
+	local($t) = &TYPE($it);
+	if    ($t == $T_NIL)	{ print '()'; }
+	elsif ($t == $T_BOOLEAN){ print $it ? '#t' : '#f'; }
+	elsif ($t == $T_NUMBER)	{ print &Nval($it); }
+	elsif ($t == $T_CHAR)	{ &WRchar($it); }
+	elsif ($t == $T_SYMBOL)	{ print &Yname($it); }
+	elsif ($t == $T_STRING)	{ &WRstring($it); }
+	elsif ($t == $T_VECTOR)	{ &WRvector($it); }
+	elsif ($t == $T_TABLE)	{ &WRtable($it); }
+	elsif ($t == $T_PAIR)	{ &WRlist($it); }
+
+	elsif ($t == $T_INPUT) {
+		print '#<input port ', &IPval($it), '>';
+	} elsif ($t == $T_OUTPUT) {
+		print '#<output port ', &OPval($it), '>';
+	} elsif ($t == $T_SUBR) {
+		print '#<built-in ', (&SUBRval($it))[0], '>';
+	} elsif ($t == $T_FORM) {
+		print '#<keyword ', (&FORMval($it))[0], '>';
+	} else {
+		print "#<strange object: $it>";
+	}
+}
+
+sub WRstring {
+	local($s) = &Sval($_[0]);
+	if (!$WRquoted) {
+		print $s;
+	} else {
+		$s =~ s/\\/\\\\/g;
+		$s =~ s/"/\\"/g;
+		print '"', $s, '"';
+	}
+}
+
+sub WRchar {
+	local($c) = &Cval($_[0]);
+	if    (!$WRquoted)	{ print $c; }
+	elsif ($c eq ' ')	{ print '#\space'; }
+	elsif ($c eq "\n")	{ print '#\newline'; }
+	elsif ($c eq "\t")	{ print '#\tab'; }
+	else			{ print "#\\$c"; }
+}
+
+# XXX Can't read a written table.
+sub WRtable {
+	local($it) = @_;
+	return print '{...}' if $WRmark{$it};
+	$WRmark{$it} += 3;	# strong bias against printing tables again.
+
+	print '{';
+	local(@keys) = &Tkeys($it);
+	if (@keys) {
+		local($k) = pop @keys;
+		print $k, ' => ';
+		&WR1(&Tval($it, &Y($k)));
+	}
+	for $k (@keys) {
+		print ', ', $k, ' => ';
+		&WR1(&Tval($it, &Y($k)));
+	}
+	print '}';
+
+	$WRmark{$it} -= 3;
+}
+
+sub WRvector {
+	local($it) = @_;
+	return print '#(...)' if $WRmark{$it};
+	++$WRmark{$it};
+
+	local(@v) = &Vval($it);
+	print '#(';
+	&WR1(shift @v) if @v;
+	while (@v) {
+		print ' ';
+		&WR1(shift @v);
+	}
+	print ')';
+
+	--$WRmark{$it};
+}
+
+sub WRlist {
+	local($it) = @_;
+	return print '(...)' if $WRmark{$it};
+	local(%save) = %WRmark;
+	++$WRmark{$it};
+
+	local($a, $d) = &Pval($it);
+	print "(";
+	&WR1($a);
+	while ($d ne $NIL) {
+		if ($WRmark{$d}) {
+			print ' ...';
+			last;
+		} elsif (&TYPE($d) != $T_PAIR) {
+			print ' . ';
+			&WR1($d);
+			last;
+		} else {
+			++$WRmark{$d};
+			($a, $d) = &Pval($d);
+			print ' ';
+			&WR1($a);
+		}
+	}
+	print ')';
+
+	%WRmark = %save;
+}
+
+#------
+#-- Control features.
+#------
+
+# XXX SUBR call-with-current-continuation
+
+&SUBR1('procedure?');
+sub procedureP {
+	local($it) = @_;
+	local($t) = &TYPE($it);
+	$t == $T_SUBR ||
+	($t == $T_VECTOR && (&Vval($it))[0] eq $CLOSURE);
+}
+
+&SUBR1('force');
+sub force {
+	&ERRtype($_[0], 'a promise', 'force') if &TYPE($_[0]) ne $T_VECTOR;
+	local($thunk) = @_;
+	local($k, $forced, $val, $env, @code) = &Vval($thunk);
+	&ERRtype($thunk, 'a promise', 'force') if $k ne $PROMISE;
+	if (!$forced) {
+		&ENVpush($env);
+		$val = &begin(@code);
+		&ENVpop();
+		&Vset($thunk, 1, 2, $TRUE, $val);
+	}
+	$val;
+}
+
+&SUBRN('apply');
+sub apply {
+	local(@sip) = @_;
+	local($f, @args) = @_;
+	&CHKtype($args[$#args], $T_LIST, 'apply');
+	push(@args, &Lval(pop @args));
+	&applyN($f, @args);
+}
+
+sub applyN {
+	local(@args) = @_;
+	local($f) = shift @args;
+	local($t) = &TYPE($f);
+
+	if ($t == $T_SUBR) {
+		local($f, $min, $max, @t) = &SUBRval($f);
+		if (@args < $min) {
+			&ERR("Error, $f needs at least $min arguments.");
+		} elsif ($max >= 0 && @args > $max) {
+			&ERR("Error, $f wants at most $max arguments.");
+		}
+		if ($max < 0 && $t[0]) {
+			for $x (@args) {
+				&CHKtype($x, $t[0], $f);
+			}
+		} elsif (@t) {
+			local($k) = $#t < $#args ? $#t : $#args;
+			for (; $k >= 0; --$k) {
+				&CHKtype($args[$k], $t[$k], $f);
+			}
+		}
+		return &$f (@args);
+
+	} elsif ($t == $T_VECTOR) {
+		local($k, $env, $nsym, $n, @code) = &Vval($f);
+		&ERRtype($f, $T_PROCEDURE, 'applyN') if $k ne $CLOSURE;
+		$n = &Nval($n);
+		if (@args < $n) {
+			&ERR('not enough args to procedure.');
+		} elsif (@args > $n && $nsym eq $NIL) {
+			&ERR('too many args to procedure.');
+		}
+		&ENVpush($env);
+		&ENVpush_frame();
+		if ($n > 0) {
+			&ENVbind(splice(@code, 0, $n), splice(@args, 0, $n));
+		}
+		if ($nsym ne $NIL) {
+			&ENVbind($nsym, &L(@args));
+		}
+		local($x) = &begin(@code);
+		&ENVpop();
+		return $x;
+
+	} else {
+		&ERRtype($f, $T_PROCEDURE, 'applyN');
+	}
+}
+
+&SUBRN('map');
+sub map {
+	local(@lists) = @_;
+	local($f) = &eval(shift @lists);
+	local(@result, @args, $a);
+	&CHKtype($f, $T_PROCEDURE, 'map');
+	# XXX CHKtype lists. and all lists must be same length.
+	while ($lists[0] ne $NIL) {
+		@args = ();
+		for $x (@lists) {
+			($a, $x) = &Pval($x);
+			push(@args, $a);
+		}
+		push(@result, &applyN($f, @args));
+	}
+	&L(@result);
+}
+
+&SUBRN('for-each');
+sub for_each {
+	local(@lists) = @_;
+	local($f) = &eval(shift @lists);
+	local(@args, $a);
+	&CHKtype($f, $T_PROCEDURE, 'for-each');
+	# XXX CHKtype lists. and all lists must be same length.
+	while ($lists[0] ne $NIL) {
+		@args = ();
+		for $x (@lists) {
+			($a, $x) = &Pval($x);
+			push(@args, $a);
+		}
+		&applyN($f, @args);
+	}
+	$TRUE;
+}
+
+
+sub eval {
+	local($it) = @_;
+	local($t) = &TYPE($it);
+
+	if ($t == $T_SYMBOL) {
+		return &ENVval($it);
+	} elsif ($t != $T_PAIR) {
+		return $it;
+	}
+
+	local($f, $args) = &Pval($it);
+
+	$t = &TYPE($f);
+	if ($t == $T_SYMBOL) {
+		$f = &ENVval($f);
+		$t = &TYPE($f);
+	} elsif ($t == $T_PAIR) {
+		$f = &eval($f);
+		$t = &TYPE($f);
+	}
+
+	if ($t == $T_FORM) {
+		$f = &FORMval($f);
+		return &$f (&Lval($args));
+	}
+
+	if ($t != $T_SUBR && $t != $T_VECTOR) {
+		&ERRtype(&car($_[0]), $T_PROCEDURE, 'eval');
+	}
+
+	local(@args) = &Lval($args);
+	for $a (@args) { $a = &eval($a); }
+	&applyN($f, @args);
+}
+
+#------
+#-- User interface.
+#------
+
+&SUBR1('load', $T_STRING);
+sub load {
+	local($f) = &Sval($_[0]);
+	local($ip) = &IP($f . '.sp') || &IP($f) ||
+		&ERR("load, neither $f nor $f.sp found.");
+
+	print $stderr "Loading $f...\n";
+
+	local($x, $y);
+	while (($x = &read($ip)) ne $EOF) {
+		$y = &eval($x);
+	}
+	close(&IPval($ip));
+
+	$y;
+}
+
+# XXX SUBR transcript-on, transcript-off
+
+&SUBR('exit', 0, 1, $T_NUMBER);
+sub exit {
+	local($x) = @_ ? &Nval($_[0]) : 0;
+	&DB'prof_dump if defined &DB'prof_dump;
+	exit $x;
+}
+
+&SUBR0('sp-version');
+sub sp_version {
+	&N($version);
+}
+
+sub repl
+{
+  while (1)
+    {
+      print "> ";
+      my $x = &read();
+      last if $x eq $EOF;
+print "x = $x\n";
+      $x = &eval($x);
+      print "\n";
+      &write($x);
+      print "\n";
+    }
+}
+
+#------
+#-- Main program.
+#------
+
+$# = '%.15g';	# the default, %.20g, is a little too many digits.
+
+sub main
+{
+ INIT:
+  &IOinit();
+  $TOPjmp = 0;
+
+ TOP:
+  &IOreset();
+  &ENVreset();
+
+  if ($TOPjmp) {
+    print $stderr "\nContinuing from top...\n";
+  } else {
+    $TOPjmp = 1;
+    print $stderr "Scheme in Perl? (sp?)\n";
+    print $stderr "  version $version\n";
+  }
+
+  if (! @ARGV) {
+    $SIG{INT} = \&catch_interrupt;
+    &repl();
+  } else {
+    $dodump = ($ARGV[0] eq '-D') && shift @ARGV;
+    for $x (@ARGV) {
+      &load(&S($x));
+    }
+    if ($dodump) {
+      &IOshutdown();
+      dump INIT;
+    }
+  }
+
+  &exit();
+}
+
+sub catch_interrupt {
+	print $stderr "Interrupt\n";
+	goto TOP;	# Not quite a safe thing to do.
+}
+
+main ();
