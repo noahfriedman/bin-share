@@ -4,7 +4,7 @@
 # Created: 1995-08-14
 # Public domain
 
-# $Id: with,v 1.4 1995/10/29 19:52:07 friedman Exp friedman $
+# $Id: with,v 1.5 1996/01/13 20:08:44 friedman Exp friedman $
 
 # Commentary:
 
@@ -292,9 +292,13 @@ sub main
   # Perl5 does not usually install .ph files.
   $home = &getenv ('HOME');
   push (@INC, "$home/lib/perl",
+              "$home/lib/perl/include",
               "/usr/local/gnu/lib/perl",
+              "/usr/local/gnu/lib/perl/include",
               "/usr/local/lib/perl",
-              "/usr/lib/perl"
+              "/usr/local/lib/perl/include",
+              "/usr/lib/perl",
+              "/usr/lib/perl/include"
        );
 
   # Duped in case we use &notty to close stderr but the program turns out
