@@ -2,8 +2,9 @@
 # xon --- run remote X application
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1993-03-08
-# Last modified: 1994-03-16
 # Public domain
+
+# $Id$
 
 # Commentary:
 # Code:
@@ -15,7 +16,7 @@ progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 bq='`'
 eq="'"
 
-usage="Usage: $progname {options} [rhost] [rmd] {args...}
+usage="Usage: $progname {options} [rhost] [cmd] {args...}
 
 Options are:
 -D, --debug                  Turn on shell debugging (${bq}set -x$eq).
@@ -149,8 +150,11 @@ case $# in 0 | 1 )
  ;;
 esac
 
-USER=${USER-${LOGNAME-`(whoami) 2> /dev/null \
-                       || id | sed -ne 's/.*uid=[0-9]*(//;s/).*//;p'`}}
+USER=${USER-${LOGNAME-`{ id | sed -ne 's/.*uid=[0-9]*(//
+                                       s/).*//
+                                       p'
+                       } \
+                       || { (whoami) 2> /dev/null; }`}}
 export USER
 
 rhost=$1
@@ -282,18 +286,21 @@ esac
        ;;
     esac 
 
-    DISPLAY="$DISPLAY"
+    DISPLAY='$DISPLAY'
     export DISPLAY
 
-    case "$XAUTHORITY" in
-      '' ) XAUTHORITY="\$HOME/.Xauthority" ;;
-    esac
-    export XAUTHORITY
-
-    case "$XUSERFILESEARCHPATH" in
+    case '$XAUTHORITY' in
       '' ) : ;;
       * ) 
-        XUSERFILESEARCHPATH="$XUSERFILESEARCHPATH"
+        XAUTHORITY='$XAUTHORITY'
+        export XAUTHORITY
+       ;;
+    esac
+
+    case '$XUSERFILESEARCHPATH' in
+      '' ) : ;;
+      * ) 
+        XUSERFILESEARCHPATH='$XUSERFILESEARCHPATH'
         export XUSERFILESEARCHPATH
        ;;
     esac
