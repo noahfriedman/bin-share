@@ -1,30 +1,30 @@
 #!/bin/sh
 
-oIFS="${IFS}"; IFS=':'; set $*; IFS="${oIFS}"
+sedcmd='h
+        s/[^:]*://
+        H
+        g
+        s/\n.*//
+        s/:.*//
+        s/^\///
+        s/^[^@]*@//
+        s/^/@/
+        :1
+        s/\([^@]*\)@\(.*\)\.\([^.][^.]*\)$/\1\/\3@\2/
+        t 1
+        s/@/\//
+        x
+        s/.*\n//
+        H
+        x
+        s/\n//
+        s/^/\/alex/
+        p'
 
-host="$1"; shift
-file="$1"; shift
-
-for i in ${1+"$@"} ; do
-   file="${file}:${i}"
-done
-
-oIFS="${IFS}"; IFS='@'; set $host; IFS="${oIFS}"
-if test $# -ne 1 ; then
-   shift
-   host="$1"; shift
-   for i in ${1+"$@"} ; do
-      host="${i}@${host}"
-   done
+if test $# -eq 0 ; then
+   exec sed -n "${sedcmd}"
+else
+   echo ${1+"$@"} | sed -n "${sedcmd}"
 fi
-
-oIFS="${IFS}"; IFS='.'; set $host; IFS="${oIFS}"
-
-rhost="$1"; shift
-for i in ${1+"$@"} ; do
-   rhost="${i}/${rhost}"
-done
-
-echo "/alex/${rhost}${file}"
 
 # eof
