@@ -1,0 +1,8 @@
+#!/bin/sh
+if test $# -eq 0 ; then
+   sed -e '1,/^[:#]/d' | sh
+else
+   for f in ${1+"$@"} ; do
+      sed -e '1,/^[:#]/d' "$f" | sh
+   done
+fi
