@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-01-19
 
-# $Id: from,v 1.14 1996/03/06 18:49:58 friedman Exp $
+# $Id: from,v 1.15 1996/10/12 00:57:24 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -55,7 +55,9 @@ Options are:
                              truncation is done.  The default is
                              the current width of the terminal.
 -D, --debug                  Enable interactive debugging.
--E, --extract                Print the body of each matched message.
+-E, --extract      {LINES}   Print the body of each matched message.
+                             If the optional argument LINES is supplied,
+                             print only the first LINES number of lines.
 -e, --envelope               Show message envelope instead of headers.
                              This causes any formatting options (e.g.
                              $bq--columns$eq, $bq--numbered$eq) to be ignored.
@@ -64,28 +66,22 @@ Options are:
 -h, --help                   You're looking at it.
 -H, --help-format            Get documentation about the format of the FMT
                              argument to $bq--format$eq.
--L, --limit-extract LINES    Show no more than LINES lines of the beginning
-                             of extracted messages.  If not specified,
-                             there is no limit.
--M, --match-headers HEADERS  Seach only headers matching the regexp HEADERS
-                             for patterns specified with $bq--match$eq.
-                             This option may be specified multiple times to
-                             add names of headers to search.  By default,
-                             the only header searched is ${bq}From$eq.
+-M, --match-header  HEADERS  Seach only headers named HEADER for patterns
+                             specified with $bq--match$eq.
+                             By default, the header searched is ${bq}From$eq.
 -m, --match         REGEXP   Only print messages in which REGEXP could be
                              found in the ${bq}From$eq header, or those
-                             specified with $bq--match-headers$eq.  This
-                             option may be specified multiple times.  No -m
-                             arguments means match everything.
+                             specified with $bq--match-headers$eq.
 -n, --numbered               Show number of message with respect to the
                              current folder.  See also $bq--help-format$eq.
--p, --no-parse               Do not do fancy parsing of From and Date fields.
+-s, --sender        ADDR     Show only messages sent from ADDR.
+                             This is equivalent to specifying the options
+                             $bq--match=From --match-headers=ADDR$eq.
+-P, --no-parse               Do not do fancy parsing of From and Date fields.
 -U, --user          USER     Show headers of USER's spooled messages.
 -u, --unread-only            Only show information about unread messages
                              (i.e. those that do not have a ${bq}R$eq in
-                             the Status header field).  This is equivalent
-                             to passing these args to this program:
-                             -M status -m '^[^R]*$'
+                             the Status header field).
 "
 
 format_usage="$progname format usage: --format='%{{-}{n}{.m}}[header] ...' ...
@@ -161,8 +157,8 @@ FROMRC=${FROMRC-$HOME/.fromrc}
 FROM_COUNTP=
 FROM_EXTRACTP=
 FROM_LINELIMIT=
-FROM_RE_HDR=
-FROM_RE_TXT=
+FROM_MATCH_HEADER=
+FROM_MATCH_REGEXP=
 FROM_PARSEP=t
 FROM_UNREAD_ONLY_P=
 FROM_USER=$USER
@@ -195,8 +191,10 @@ fi
 # after every call to getopt.  The argument (if any) is stored in the
 # variable `optarg'.
 #
-# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument
-# won't get used if first long option syntax was used.
+# Long option syntax is `--foo=bar' or `--foo bar'.
+# For optional args, you must use the `--foo=bar' long option syntax
+# if the argument starts with `-', otherwise the argument will be ignored
+# and treated as the next option.
 #
 # Note: because of broken bourne shells, using --foo=bar syntax can
 # actually screw the quoting of args that end with trailing newlines.
@@ -206,34 +204,28 @@ getopt='
   {
     optarg=
     case "$1" in
-      --*=* )
-        optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
-        shift
-       ;;
-      * )
-        case ${2+set} in
-          set )
-            optarg="$2"
-            shift
-            shift
+      --*=* ) optarg=`echo "$1" | sed -e "1s/^[^=]*=//"` ; shift ;;
+      -* )
+        case "${2+set}:$optarg_optional" in
+          set: ) optarg="$2" ; shift ; shift ;;
+          set:?* )
+            case "$2" in
+              -* ) shift ;;
+              * )  optarg="$2"; shift; shift ;;
+            esac
            ;;
-          * )
-            case "$optarg_optional" in
-              "" )
-                case "$1" in
-                  --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
-                  * ) option="$1" ;;
-                esac
-                exec 1>&2
-                echo "$progname: option $bq$option$eq requires argument."
-                echo "$progname: use $bq--help$eq to list option syntax."
-                exit 1
-               ;;
-           esac
-           shift
-         ;;
+          : )
+            option="$1"
+            case "$option" in
+              --*=* ) option=`echo "$option" | sed -e "1s/=.*//;q"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$progname: use $bq--help$eq to list option syntax." 1>&2
+            exit 1
+           ;;
+          * ) shift ;;
         esac
-     ;;
+       ;;
     esac
     optarg_optional=
   }'
@@ -258,9 +250,14 @@ while : ; do
       debug=-d
       shift
      ;;
-    -E | --extract | --ex* )
+    -E | --extract* | --ex* )
       FROM_EXTRACTP=t
-      shift
+      optarg_optional=t
+      eval "$getopt"
+      case "$optarg" in
+        '' ) : ;;
+        *  ) FROM_LINELIMIT="$optarg" ;;
+      esac
      ;;
     -e | --envelope | --en* )
       envelopep=t
@@ -268,7 +265,7 @@ while : ; do
      ;;
     -f | --format* | --f* )
       eval "$getopt"
-      FROM_FORMAT=$optarg
+      FROM_FORMAT="$optarg"
      ;;
     -H | --help-format | --help-* )
       echo "$format_usage" 1>&2
@@ -278,17 +275,27 @@ while : ; do
       echo "$usage" 1>&2
       exit 1
      ;;
+    -M | --match-header* | --match-h* )
+      eval "$getopt"
+      FROM_MATCH_HEADER="$optarg"
+     ;;
+    -m | --match* )
+      eval "$getopt"
+      FROM_MATCH_REGEXP="$optarg"
+     ;;
     -n | --numbered | --n* )
       FROM_NUMBERED=t
       shift
      ;;
-    -p | --no-parse | --n* )
+    -P | --no-parse | --n* )
       FROM_PARSEP=
       shift
      ;;
-    -s | --sender | --s* )
+    -s | --sender* | --s* )
+      # This option is for compatibility with Brian Fox's implementation.
       eval "$getopt"
-#FIXME
+      FROM_MATCH_REGEXP="$optarg"
+      FROM_MATCH_HEADER=From
      ;;
     -U | --user* | --us* )
       eval "$getopt"
@@ -370,10 +377,10 @@ case "$envelopep:$FROM_EXTRACTP$FROM_MATCHP$FROM_UNREAD_ONLY_P" in
     case "$FROM_COUNTP" in
        '') exec sed -n -e '/^From /p' ${1+"$@"} ;;
        t )
-         exec perl -e '$! = 0; while (<>) { /^From /o && $n++; }' \
-                   -e '$! && exit $!;' \
-                   -e 'print "n:$n\n";' \
-                   ${1+"$@"}
+         exec $perl -e '$! = 0; while (<>) { /^From /o && $n++; }' \
+                    -e '$! && exit $!;' \
+                    -e 'print "$n\n";' \
+                    ${1+"$@"}
         ;;
     esac
   ;;
@@ -382,25 +389,29 @@ esac
 case "${FROM_FORMAT+set}" in
   set ) : ;;
   * )
-    FROM_FORMAT='%-19.18From %-13.12Date %Subject\n'
-
-    case "$FROM_NUMBERED" in
+    case "$FROM_EXTRACTP" in
       t )
-        FROM_FORMAT="%-3{FLINES} $FROM_FORMAT"
+        FROM_PARSEP=
+        FROM_FORMAT='From: %From\nSubject: %Subject\nDate: %Date\n'
+       ;;
+      * )
+        FROM_FORMAT='%-19.18From %-13.12Date %Subject\n'
+
+        case "$FROM_NUMBERED" in
+          t )
+            FROM_FORMAT="%-3{FLINES} $FROM_FORMAT"
+           ;;
+        esac
        ;;
     esac
    ;;
-esac
-
-case "$FROM_RE_HDR" in
-  '' ) FROM_RE_HDR='^From$' ;;
 esac
 
 FROM_PROGNAME=$progname
 
 export FROM_PROGNAME
 export FROM_COUNTP FROM_EXTRACTP FROM_PARSEP FROM_UNREAD_ONLY_P
-export FROM_LINELIMIT FROM_RE_HDR FROM_RE_TXT
+export FROM_LINELIMIT FROM_MATCH_HEADER FROM_MATCH_REGEXP
 export COLUMNS FROM_FORMAT FROM_USER
 
 # By using a here-document to include the source of the perl script (to
@@ -425,11 +436,22 @@ sub main
     }
 
   # I think this may not work; perl wants a file handle, not a descriptor
-  # number.  Lame.
+  # number.  Lose lose, larry.
   close (9);
 
   &initialize_variables ();
   &make_format_vector (&getenv ("FROM_FORMAT"));
+
+  if ($unread_only_p)
+    {
+      $header_save_p{'STATUS'} = 1;
+    }
+
+  if ($from_match_header ne '')
+    {
+      $from_match_header = "\U$from_match_header";
+      $header_save_p{$from_match_header} = 1;
+    }
 
   $i = 0;
   foreach $file (@ARGV)
@@ -447,28 +469,8 @@ sub main
       $i++;
     }
 
-  foreach $file (@ARGV)
-    {
-      &process_file ($file);
-    }
-
+  foreach $file (@ARGV) { &process_file ($file); }
   exit ($exit_status);
-}
-
-sub err
-{
-  printf (STDERR join(": ", $from_progname, @_) . "\n");
-}
-
-sub getenv
-{
-  local ($v) = @_;
-
-  if (defined ($ENV{$v}))
-    {
-      return $ENV{$v};
-    }
-  return '';
 }
 
 sub initialize_variables
@@ -503,20 +505,24 @@ sub initialize_variables
   $format_token{'{TLINES}'} = 'd';
   $format_token{'{FLINES}'} = 'd';
 
-  if (&getenv ("FROM_PARSEP") eq "t")
-    {
-      $hack_data = $t;
-    }
-  else
-    {
-      $hack_data = $nil;
-    }
+  $hack_data_p    = &truep ('FROM_PARSEP');
+  $extract_body_p = &truep ('FROM_EXTRACTP');
+  $unread_only_p  = &truep ('FROM_UNREAD_ONLY_P');
+  $count_only_p   = &truep ('FROM_COUNTP');
 
   $total_message_lines = 0;
   $in_message_body_p = $nil;
   $exit_status = 0;
 
   $columns = &getenv ('COLUMNS');
+  $from_match_header = &getenv ('FROM_MATCH_HEADER');
+  $from_match_regexp = &getenv ('FROM_MATCH_REGEXP');
+
+  $body_line_limit = -1;
+  if (&getenv ('FROM_LINELIMIT') ne '')
+    {
+      $body_line_limit = &getenv ('FROM_LINELIMIT') + 0;
+    }
 }
 
 sub make_format_vector
@@ -604,6 +610,7 @@ sub process_file
     }
 
   $folder_message_lines = 0;
+  $counted_messages = 0;
 
   while (<F>)
     {
@@ -628,17 +635,45 @@ sub process_file
           $current_headers{'{FLINES}'} = $folder_message_lines;
           $current_headers{'{FOLDER}'} = $file;
 
-          &print_headers (%current_headers);
           $in_message_body_p = $t;
-          next;
+          $body_line_count = 0;
+
+          $ignore_this_message_p = $t;
+          if (! ($unread_only_p && $current_headers{'STATUS'} =~ /R/oi)
+              && &message_header_pattern_matched_p () )
+            {
+              $counted_messages++;
+              $ignore_this_message_p = $nil;
+              if (! $count_only_p)
+                {
+                  if ($extract_body_p)
+                    {
+                      printf ("\n---------- Message %d ----------\n",
+                              $total_message_lines);
+                    }
+                  &print_headers (%current_headers);
+                }
+            }
         }
 
       if ( $in_message_body_p )
         {
+          if ($extract_body_p
+              && ! $ignore_this_message_p
+              && (($body_line_limit < 0)
+                  || ($body_line_count <= $body_line_limit)))
+            {
+              print "$_\n";
+              $body_line_count++;
+            }
           next;
         }
 
       &add_header ($_);
+    }
+  if ($count_only_p)
+    {
+      print "$counted_messages\n";
     }
   close (F);
 }
@@ -660,7 +695,7 @@ sub add_header
   if (defined ($header_save_p{$header}))
     {
       $data = $';
-      if ($hack_data && defined ($hack_header_function{$header}))
+      if ($hack_data_p && defined ($hack_header_function{$header}))
         {
           local ($fn) = $hack_header_function{$header};
           $data = &$fn ($data);
@@ -869,6 +904,47 @@ sub print_headers
       $str = $str . sprintf ($format, $data{$header});
       $i++;
     }
+}
+
+sub message_header_pattern_matched_p
+{
+  if ($from_match_header eq '')
+    {
+      return $t;
+    }
+
+  if (defined ($current_headers{$from_match_header})
+      && ($current_headers{$from_match_header} =~ /$from_match_regexp/oi))
+    {
+      return $t;
+    }
+
+  return $nil;
+}
+
+sub err
+{
+  printf (STDERR join(": ", $from_progname, @_) . "\n");
+}
+
+sub getenv
+{
+  local ($v) = @_;
+
+  if (defined ($ENV{$v}))
+    {
+      return $ENV{$v};
+    }
+  return '';
+}
+
+sub truep
+{
+  if (&getenv ($_[0]) eq 't')
+    {
+      return $t;
+    }
+  return $nil;
 }
 
 __EOF__
