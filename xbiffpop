@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id$
+# $Id: xbiffpop,v 1.1 1996/10/18 16:07:49 friedman Exp $
 
 # Name by which this script was invoked.
 progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
@@ -15,7 +15,7 @@ cat > $prog <<__EOF__
 #!/bin/sh
 
 oldsize=\`cat $stateinfo\`
-newsize=\`from -C\`
+newsize=\`${FROM-from} -C\`
 
 echo \$newsize > $stateinfo
 
