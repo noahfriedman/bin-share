@@ -1,156 +1,177 @@
-#!/bin/bash
-# ftolower -- convert uppercase filenames entirely to lowercase. 
-# 29-Feb-92 Noah Friedman <friedman@prep.ai.mit.edu>
-# Last modified 10-Feb-93
+#!/bin/sh
+# mvcase --- rename files to all upper or lower case
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1993-11-10
+# Last modified: 1994-03-13
+# Public domain
+
+# Commentary:
+# Code:
+
+# Name by which this script was invoked. 
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options}
+
+Options are:
+-D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-h, --help                   You're looking at it.
+-l, --lower-case             Rename upper-case files to lower case.
+-m, --mv-options   MVOPTS    Options to ${bq}mv$eq program.
+-R, --recur                  Rename all subdirectories and files
+-u, --upper-case             Rename lower-case files to upper case.
+"
+
+# Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
 #
-# Requires bash version 1.12 or later to work properly. 
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument ARG
+# won't get used if first long option syntax was used. 
+# If 3rd argument OPTIONAL is set, then 2nd may be empty without resulting
+# in an error (i.e. option argument is optional)
 #
-# Public domain.
-#
+# Returns number of positions caller should shift.
+# If retval = 3, caller should exit.
+get_option_argument='
+  {
+    option="$1" arg="$2" arg_optional="$3" shift_num=2
+    case "$option" in
+      --*=* )
+        arg=`echo $option | sed -e "s/^[^=]*=//"` 
+        shift_num=1
+       ;;
+    esac
+    case "$arg" in
+      "" )
+        case "$arg_optional" in
+          "" )
+            case "$option" in 
+              --*=* ) option=`echo $option | sed -e "s/=.*//"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$usage" 1>&2
+            exit 3
+           ;;
+        esac
+        exit 1
+       ;;  
+    esac
+    echo "$arg"
+    exit $shift_num
+  }'
 
-function usage ()
-{
-    if [ $# -gt 0 ]; then
-       echo -e "${progname}: $*\n" 1>&2
-    fi
-
-    cat 1>&2 <<EOF
-Usage: ${progname} {-D|--debug} {-v} {-i} {-f} [file1] {file2} {...}
-       ${progname} {--verbose} {--inquery} {--force} [file1] {file2} {...}
-EOF
-
-   exit 1
-}
-
-function main ()
-{
-    progname=$(basename "$0")
-
-    initialize_variables;
-    parse_command_args "$@"
-    shift $?
-
-    test -n "${debug+set}" && set -x
-
-    [ $# -eq 0 ] && usage
-
-    for file in "$@" ; do
-       mv_tolower "${file}"
+# Some bourne shells don't allow a numeric argument to `shift'.
+# Usage: eval "shift_num=n; $shift_n_times"
+shift_n_times='
+  {
+    while : ; do
+      case "$shift_num" in 0 | "" ) break ;; esac
+      shift_num=`expr $shift_num - 1`
+      shift
     done
-}
+  }'
 
-function initialize_variables ()
-{
-    bq="\`"  # To prevent hairy quoting and escaping later.
-    eq="'"
-}
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+case=lower
+recur=
 
-function parse_command_args ()
-{
- local orig_number_options=$#
+# Parse command line arguments. 
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character. 
+while test $# != 0; do
+  case "$1" in 
+    -D | --debug | --d* )
+      debug=t
+      shift
+     ;;
+    -h | --help | --h )
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -l | --lower-case | --l* )
+      case=lower
+      shift
+     ;;
+    -u | --upper-case | --u* )
+      case=upper
+      shift
+     ;;
+    -m | --mv-options* | --m* )
+      mv_switches=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -R | --recur | --r* )
+      recur=t
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    --*=* )
+      arg=`echo $1 | sed -e 's/=.*//'`
+      echo "$progname: unknown option $bq$arg$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -* )
+      echo "$progname: unknown option $bq$1$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
 
-    # unset option variables to make sure they weren't accidentally
-    # exported 
-    unset debug verbose mv_flags
+case "$debug" in t ) set -x ;; esac
 
-    # If you add new commands be sure to change the wildcards below to make
-    # sure they are unambiguous (i.e. only match one possible long option)
-    # Be sure to show at least one instance of the full long option name to
-    # document what the long option is canonically called. 
-    while [ $# -gt 0 ]; do
-       case z$1 in
-          z-D | z--debug | z--d* )
-             debug=t
-             shift
-            ;;
-          z-h* | z--help | z--h* )
-             usage
-            ;;
-          z-v | z--verbose | z--v* )
-             verbose=t
-             shift
-            ;;
-          z-i | z--inquery | z--i* )
-             mv_flags="-i"
-             shift
-            ;;
-          z-f | z--force | z--f* )
-             mv_flags="-f"
-             shift
-            ;;
-          z-- )
-             shift
-             break
-            ;;
-          z-* )
-             usage "${bq}${1}${eq} is not a valid option."
-            ;;
-          * )
-             break
-            ;;
-       esac
+case "$case" in
+  lower ) conv='y/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/' ;;
+  upper ) conv='y/abcdefghijklmnopqrstuvwxyz/ABCDEFGHIJKLMNOPQRSTUVWXYZ/' ;;
+esac
+
+case "$recur" in 
+  t )
+    find ${1+"$@"} -print | sort -r
+   ;;
+  * )
+    for i in ${1+"$@"} ; do 
+      echo "$i" 
     done
+   ;;
+esac \
+ | while read file ; do
+     dir=`echo "$file" \
+          | sed -e 's/\/*$//
+                    s/\/[^\/]*$//'`
+     base=`echo "$file" \
+           | sed -e 's/\/*$//
+                     s/.*\///'`
+     convbase=`echo "$base" | sed -e "$conv"`
 
-    # Return number of shifted arguments so calling function can shift
-    # appropriate amount.
-    return $[ orig_number_options - $# ]
-}
+     case "$base" in "$convbase" )
+       echo "$progname: $file not renamed" 1>&2
+       continue
+      ;;
+     esac
 
-function dirname ()
-{
- local dir="$1"
- local tdir="${dir%/}"
+     case "$base" in "$file" )
+       dir=. ;;
+     esac
 
-    # Strip trailing '/' characters from dir (unusual that this should
-    # ever occur, but dirname(1) seems to deal with it.)
-    while [ "${tdir}" != "${dir}" ]; do
-       tdir="${dir}"
-       dir="${tdir%/}"
-    done
+     ${MV-mv} $mv_switches "$file" "$dir/$convbase"
+   done
 
-    dir="${dir%/*}"
-    echo "${dir:-/}"
-}
-
-function basename ()
-{
- local path="$1"
- local suffix="$2"
- local tpath="${path%/}"
-
-    # Strip trailing '/' characters from path (unusual that this should
-    # ever occur, but basename(1) seems to deal with it.)
-    while [ "${tpath}" != "${path}" ]; do
-       tpath="${path}"
-       path="${tpath%/}"
-    done
-
-    path="${path##*/}"       # Strip off pathname
-    echo ${path%${suffix}}   # Also strip off extension, if any.
-}
-
-function mv_tolower ()
-{
- local oldname="$1"
- local dirname=$(dirname "${oldname}")
- local basename=$(basename "${oldname}")
- local new_basename=$(echo "${basename}" | tr '[A-Z]' '[a-z]')
-
-    if [ "z${basename}" = "z${oldname}" ]; then
-       newname="${new_basename}"
-    else
-       newname="${dirname}/${new_basename}"
-    fi
-
-    if [ "z${newname}" = "z${oldname}" ]; then
-       echo "${progname}: file ${bq}${newname}${eq} is already lower case." 1>&2
-       return 1
-    fi
-
-    test -n "${verbose}" && echo "${oldname} -> ${newname}"
-    mv ${mv_flags} "${oldname}" "${newname}"
-}
-
-main "$@"
-
-# eof
+# mvcase ends here

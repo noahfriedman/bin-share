@@ -1,315 +1,308 @@
-#!/bin/bash
-# 10-Feb-92 Noah Friedman <friedman@prep.ai.mit.edu>
-# Last modified 18-Oct-92
-# 
-# Rotate accounting logs, optionally compressing old logs. 
-# See usage and help functions for more details. 
-# This script requires bash 1.12 or later to function properly. 
+#!/bin/sh
+# rotate-log --- rotate accounting logs, optionally compressing old logs
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1992-02-10
+# Last modified: 1994-03-13
+# Public domain
+
+# Commentary:
+# Code:
+
+# Name by which this script was invoked. 
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options} [logfile-name ...]
+
+Options are:
+-c, --compress                Compress logs while rotating.
+-C, --compress-method METHOD  Method to use for compressing; one of
+                              ${bq}compact$eq, ${bq}compress$eq, ${bq}gzip$eq.
+                              Default is ${bq}compress$eq.
+-D, --debug                   Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-d, --default-directory  DIR  Default directory for log files listed without
+                              pathname (i.e. no "/" chars in name)
+-g, --chgrp            GROUP  Change group ownership to GROUP on rotated logs.
+-h, --help                    You're looking at it.
+-m, --chmod             MODE  Change permissions to MODE on rotated logs.
+-n, --number-of-logs       N  Keep up to N old versions of log (default 7).
+                              Rotated logs are numbered zero-origin.
+-o, --chown            OWNER  Change owner of logs to OWNER (you should use
+                              OWNER.GROUP and avoid using --chgrp if the
+                              ${bq}chown${eq} command supports this syntax).
+-v, --verbose                 Chatter away while working.
+"
+
+# Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
 #
-# Public domain.
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument ARG
+# won't get used if first long option syntax was used. 
+# If 3rd argument OPTIONAL is set, then 2nd may be empty without resulting
+# in an error (i.e. option argument is optional)
 #
+# Returns number of positions caller should shift.
+# If retval = 3, caller should exit.
+get_option_argument='
+  {
+    option="$1" arg="$2" arg_optional="$3" shift_num=2
+    case "$option" in
+      --*=* )
+        arg=`echo $option | sed -e "s/^[^=]*=//"` 
+        shift_num=1
+       ;;
+    esac
+    case "$arg" in
+      "" )
+        case "$arg_optional" in
+          "" )
+            case "$option" in 
+              --*=* ) option=`echo $option | sed -e "s/=.*//"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$usage" 1>&2
+            exit 3
+           ;;
+        esac
+        exit 1
+       ;;  
+    esac
+    echo "$arg"
+    exit $shift_num
+  }'
 
-function usage ()
-{
-    if [ $# -gt 0 -a "z$1" != "z--help" ]; then
-       echo -e "${progname}: $*\n" 1>&2
-    fi
+# Some bourne shells don't allow a numeric argument to `shift'.
+# Usage: eval "shift_num=n; $shift_n_times"
+shift_n_times='
+  {
+    while : ; do
+      case "$shift_num" in 0 | "" ) break ;; esac
+      shift_num=`expr $shift_num - 1`
+      shift
+    done
+  }'
 
-    cat 1>&2 << EOF
-Usage: ${progname} {-c} {-D} {-d dir} {-g group} {-h} {-m mode} {-n num}
-       {-o owner} {-v} {--chgrp=group} {--chmod=mode} {--chown=owner} 
-       {--help} {--compress} {--debug} {--default-directory=dir} 
-       {--number-of-logs=num} {--verbose} [log1] {log2} ...
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+chgrp_args=
+chmod_args=
+chown_args=
+compressp=
+compress_method=compress
+debug=
+default_directory=.
+number_of_logs=7
+verbose=
 
-EOF
+# Parse command line arguments. 
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character. 
+while test $# != 0; do
+  case "$1" in 
+    -c | --compress )
+      compress=t
+      shift
+     ;;
+    -C | --compress-method* | --compress-* )
+      compress_method=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -D | --debug | --deb* )
+      debug=t
+      shift
+     ;;
+    -d | --default-directory* | --def* )
+      default_directory=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -g | --chgrp* | --chg* )
+      chgrp_args=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -m | --chmod* | --chm* )
+      chmod_args=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -n | --number-of-logs* | --n* )
+      number_of_logs=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -o | --chown* | --cho* )
+      chown_args=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -v | --verbose | --v* )
+      verbose=t
+      shift
+     ;;
+    -h | --help | --h )
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    --*=* )
+      arg=`echo $1 | sed -e 's/=.*//'`
+      echo "$progname: unknown option $bq$arg$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -* )
+      echo "$progname: unknown option $bq$1$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
 
-    if [ "z$1" != "z--help" ]; then
-       cat 1>&2 << EOF
-   Use option ${bq}--help${eq} to get a longer description of options.
+case "$debug" in t ) set -x ;; esac
 
-EOF
-       exit 1
-    fi
-}
+case $# in
+  0 )
+    echo "$progname: at least one log name is required as an argument." 1>&2
+    echo "$usage" 1>&2
+   ;;
+esac
 
-function help () 
-{
-    usage --help
+orig_cwd=${PWD-`pwd`}
+max_log_number=`expr $number_of_logs - 1`  # make it zero-origin
 
-    cat 1>&2 <<EOF
--c, --compress               Compress logs while rotating.
--D, --debug                  Turn on shell debugging ("set -x").
--d, --default-directory DIR  Default directory for log files listed without
-                             pathnames of any sort (i.e. no "/" chars in name)
--g, --chgrp GROUP            Change group ownership to GROUP on rotated logs.
--h, --help                   This documentation.
--m, --chmod MODE             Change access permissions to MODE on rotated logs.
--n, --number-of-logs N       Keep up to N old versions of log.  Default is ${default_number_of_logs}.
-                             Rotated logs are numbered with a zero-origin.
--o, --chown OWNER            Change owner of logs to OWNER (can use
-                             OWNER.GROUP and avoid using --chgrp if
-                             ${bq}chown${eq} command supports this syntax).
--v, --verbose                Chatter away while working.
-
-EOF
-
+case "$compress_method" in
+  compact )  compress_cmd='compact -f';  suffix='.C'  ;;
+  compress ) compress_cmd='compress -f'; suffix='.Z'  ;;
+  gzip )     compress_cmd='gzip';        suffix='.gz' ;;
+  * )
+    echo "*** $progname: unknown compress-method $bq$compress_method$eq" 1>&2
     exit 1
-}
+   ;;
+esac   
 
-function main ()
-{
-    initialize_variables "$@"
-    parse_command_args "$@"
-    shift $?
+for log in ${1+"$@"} ; do
+  cd "$orig_cwd"
 
-    test -n "${debug+set}" && set -x
+  dirname=`echo "$log" \
+           | sed -e 's/\/*$//
+                     s/\/[^\/]*$//'`
+  basename=`echo "$log" \
+            | sed -e 's/\/*$//
+                      s/.*\///'`
+  case "$dirname" in "$basename" )
+    dirname=$default_directory ;;
+  esac
 
-    if [ $# -eq 0 ]; then
-       usage "At least one log name is required as an argument."
-    fi
+  if cd "$dirname" ; then
+    :
+  else
+    echo "*** $progname: skipping $bq$log$eq logs." 1>&2
+    continue
+  fi
 
-    for log in "$@" ; do
-       if [ "${compress}" ]; then
-          compress_log "${log}"
-       fi
-       rotate_log "${log}"
-    done
-}
+  if test ".$compressp" = '.t' ; then
+    case "$verbose" in t )
+      echo "Compressing uncompressed logs in $dirname..." ;;
+    esac
 
-function initialize_variables ()
-{
-    progname="${0##*/}"
-    bq="\`"  # To prevent hairy quoting and escaping later.
-    eq="'"
-    dq='"'
+    num=$max_log_number
+    while : ; do
+      case $num in -1 ) break ;; esac
+      file="$basename.$num"
 
-    default_number_of_logs=7
-}
+      test -f "$file" \
+       && $compress_cmd "$file" \
+       && test ".$verbose" = '.t' \
+       && echo "$file -> $file$suffix"
 
-function parse_command_args ()
-{
- local orig_number_options=$#
-
-    # unset option variables to make sure they weren't accidentally
-    # exported 
-    unset chgrp chmod chown compress debug default_directory number_of_logs verbose 
-
-    # If you add new options be sure to change the wildcards below to make
-    # sure they are unambiguous (i.e. only match one possible long option)
-    # Be sure to show at least one instance of the full long option name to
-    # document what the long option is canonically called. 
-    # Long options which take arguments will need a `*' appended to the
-    # canonical name to match the value appended after the `=' character. 
-    while [ $# -gt 0 ]; do
-       case z$1 in
-          z-c | z--compress | z--co* )
-             compress=t
-             shift
-            ;;
-          z-D | z--debug | z--deb* )
-             debug=t
-             shift
-            ;;
-          z-d | z--default-directory* | z--def* )
-             get_option_argument default_directory "$1" "$2"
-             shift $?
-            ;;
-          z-g | z--chgrp* | z--chg* )
-             get_option_argument chgrp "$1" "$2"
-             shift $?
-            ;;
-          z-h* | z--help | z--h* )
-             help
-            ;;
-          z-m | z--chmod* | z--chm* )
-             get_option_argument chmod "$1" "$2"
-             shift $?
-            ;;
-          z-n | z--number-of-logs* | z--n* )
-             get_option_argument number_of_logs "$1" "$2"
-             shift $?
-            ;;
-          z-o | z--chown* | z--cho* )
-             get_option_argument chown "$1" "$2"
-             shift $?
-            ;;
-          z-v | z--verbose | z--v* )
-             verbose=t
-             shift
-            ;;
-          z-- )
-             shift
-             break
-            ;;
-          z-* )
-             usage "${bq}${1}${eq} is not a valid option."
-            ;;
-          * )
-             break
-            ;;
-       esac
+      num=`expr $num - 1`
     done
 
-    if [ ! "${number_of_logs}" ]; then
-       number_of_logs="${default_number_of_logs}"
-    fi
+    # Don't do this.  Things like accounting, syslogd, and so on might
+    # still have the file open, and all they'd do is corrupt the compressed
+    # file.  It'll get compressed the next time log rotation happens, and
+    # by then it probably won't be open anymore.
+    #$compress_cmd "$basename" \
+    # && test ".$verbose" = '.t' \
+    # && echo "$basename -> $basename$suffix"
 
-    # Return number of shifted arguments so calling function can shift
-    # appropriate amount.
-    return $[ orig_number_options - $# ]
-}
+    case "$verbose" in t )
+      echo "Finished compressing $bq$log$eq logs." ;;
+    esac
+  else
+    suffix=
+  fi
 
-# Usage: get_option_argument VARIABLE OPTION ARG {OPTIONAL}
-#    where VARIABLE is shell variable that will be set to the value ARG.
-#    Long option syntax is `--foo=bar' or `--foo bar'.  3rd argument ARG
-#    won't get used if first long option syntax was used.  If 4 arg
-#    OPTIONAL is non-empty, option isn't required to have an argument; if
-#    the argument is missing, VARIABLE is set to the empty value. 
-# Returns number of positions caller should shift
-function get_option_argument ()
-{
- local variable="$1"
- local option="$2"
- local arg="$3"
- local arg_optional="$4"
+  case "$verbose" in t )
+    echo "Rotating logs in directory $dirname..." ;;
+  esac
 
-    # All long options must be at least 3 characters long (--o*), whereas
-    # short options are only two chars (-o) and arguments are always
-    # separate.
-    if [ ${#option} -ge 3 -a "z${option#*=}" != "z${option}" ]; then
-       arg="${option#*=}"  # Strip off anything before and including `=' char
-       eval ${variable}=\'"${arg}"\'
-       return 1
-    else
-       if [ -z "${arg}" -a -z "${arg_optional}" ]; then
-          usage "option ${bq}${option}${eq} requires argument."
-       fi
-       eval ${variable}=\'"${arg}"\'
-       return 2
-    fi
-}
+  num=$max_log_number
+  nextnum=$number_of_logs
+  while : ; do
+    case $num in
+      -2 ) break ;;
+      -1 )
+        # move `log' to `log.0'
+        # Note that logfile will not be compressed even if --compress was
+        # specified, so don't append $suffix.  See comments in relevent
+        # code above.
+        oldfile="$basename"
+        newfile="$basename.0"
+       ;;
+      * )
+        oldfile="$basename.$num$suffix"
+        newfile="$basename.$nextnum$suffix"
+       ;;
+    esac
 
-function pushd ()
-{
-    if builtin pushd "${1}" > /dev/null 2>&1 ; then
-       return 0
-    fi
+    test -f "$oldfile" \
+     && test $nextnum -lt $max_log_number \
+     && mv "$oldfile" "$newfile" \
+     && {
+          case "$verbose" in t )
+            echo "$oldfile -> $newfile" ;;
+          esac
 
-    reason="$(builtin pushd ${1} 2>&1 1> /dev/null)"
-    reason="${reason#*:}"
-    perror "Could not chdir to ${bq}${1}${eq}:${reason}"
-    return 1
-}
+          test ".$chmod_args" = . || chmod $chmod_args "$newfile"
+          test ".$chgrp_args" = . || chgrp $chgrp_args "$newfile"
+          test ".$chown_args" = . || chown $chown_args "$newfile"
+        }
 
-function compress_log ()
-{
- local directory="${1%/*}"
- local logfile="${1##*/}"
- local file
- local num=$[ number_of_logs - 1 ];
+    nextnum=$num
+    num=`expr $num - 1`
+  done
 
-    if [ "${directory}" = "${logfile}" ]; then
-       directory=${default_directory:-${PWD}}
-    fi
+  # Create new logfile
+  : > "$basename"
+  test ".$chmod_args" = . || chmod $chmod_args "$logfile"
+  test ".$chgrp_args" = . || chgrp $chgrp_args "$logfile"
+  test ".$chown_args" = . || chown $chown_args "$logfile"
 
-    if ! pushd "${directory}" ; then
-       perror "log compression failed."
-       return 1
-    fi
+  case "$verbose" in t )
+    echo "Created $basename"
+    echo "Finished rotating $bq$log$eq logs."
+   ;;
+  esac
+done
 
-    report "Compressing uncompressed logs in ${PWD}:"
-    while [ ${num} -ge 0 ]; do
-       file="${logfile}.${num}"
-       if [ -f "${file}" ]; then
-          compress -f "${file}" && report "${file} -> ${file}.Z"
-       fi
-       num=$[ num - 1 ]
-    done
-    # Don't do this.  Things like accounting, syslogd, and so on, might
-    # still have a file descriptor open on this file, and all they'd do is
-    # corrupt the compressed file.  It'll get compressed the next time log
-    # rotation happens, and by then it won't be in use by anything anymore,
-    # probably. 
-    #compress -f "${logfile}" && report "${logfile} -> ${logfile}.Z"
-    report "Finished compressing ${dq}${logfile}${dq} logs."
-
-    popd > /dev/null 2>&1
-}
-
-
-function rotate_log ()
-{
- local directory="${1%/*}"
- local logfile="${1##*/}"
- local file
- local num=$[ number_of_logs - 1 ]
- local dot_Z_if_compressed=""
-
-    if [ "${directory}" = "${logfile}" ]; then
-       directory=${default_directory:-${PWD}}
-    fi
-
-    if ! pushd "${directory}" ; then
-       perror "log rotation failed."
-       return 1
-    fi
-
-    if [ "${compress}" ]; then
-       dot_Z_if_compressed=".Z"
-    fi
-
-    report "Rotating logs in directory ${PWD}:"
-
-    while [ ${num} -ge 0 ]; do
-       nextnum=$[ num + 1 ]
-       oldfile="${logfile}.${num}${dot_Z_if_compressed}"
-       newfile="${logfile}.${nextnum}${dot_Z_if_compressed}"
-       if [ -f "${oldfile}" -a ${nextnum} -lt ${number_of_logs} ]; then
-          mv "${oldfile}" "${newfile}" && report "${oldfile} -> ${newfile}"
-          chperms "${newfile}"
-       fi
-       num=$[ num - 1 ]
-    done
-
-    # Lastly, move current log to log.0
-    # Note that logfile will never be compressed (even if --compress option
-    # was specified).  See comments in compress_log for reason why. 
-    oldfile="${logfile}"
-    newfile="${logfile}.0"
-    if [ -f "${logfile}" ]; then
-       mv "${oldfile}" "${newfile}" && report "${oldfile} -> ${newfile}"
-       chperms "${newfile}"
-    fi
-    
-    cp /dev/null "${logfile}"
-    chperms "${logfile}"
-    report "Created ${logfile}"
-
-    report "Finished rotating ${dq}${logfile}${dq} logs."
-    popd > /dev/null 2>&1
-}
-
-function chperms () 
-{
-    test "${chown}" && chown ${chown} "$@"
-    test "${chgrp}" && chgrp ${chgrp} "$@"
-    test "${chmod}" && chmod ${chmod} "$@"
-}
-
-# Print message on stdout (if we desire verbosity)
-function report ()
-{
-    if [ "${verbose}" ]; then
-       echo "$*" 
-    fi
-}
-
-# Print message on stderr (always)
-function perror ()
-{
-    echo "${progname}: $*" 1>&2
-}
-
-main "$@"
-
-# eof
+# rotate-log ends here
