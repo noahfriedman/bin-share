@@ -4,7 +4,7 @@
 # Created: 1995-08-14
 # Public domain
 
-# $Id: with,v 1.3 1995/09/23 22:12:47 friedman Exp friedman $
+# $Id: with,v 1.4 1995/10/29 19:52:07 friedman Exp friedman $
 
 # Commentary:
 
@@ -257,31 +257,41 @@ esac
 WITH_PROGNAME="$progname"
 export WITH_PROGNAME
 
-# By using a here-document to include the source of the perl script (to
-# avoid command line length limits), we usurp the normal stdin the inferior
-# process might have expected.  So dup stdin onto fd 9, and before the
-# inferior process is started, it will be reduped back onto fd 0.
-exec perl $debug $includes - ${1+"$@"} 9<&0 <<'__EOF__'
+# Sigh.  If we happen to be running setuid, perl refuses to read scripts
+# from stdin, so use a tempfile instead.  What a waste, and all in the same
+# of "security".
+WITH_SCRIPTFILE="${TMPDIR-/tmp}/$progname$$"
+export WITH_SCRIPTFILE
+
+trap 'exitstat=$?
+    rm -f "$WITH_SCRIPTFILE"
+    trap "" 0 1 2 3 15
+    exit $exitstat
+   ' 0 1 2 3 15
+
+cat > "$WITH_SCRIPTFILE" <<'__EOF__'
 
 &main;
 
 sub main
 {
-  $with_progname = $ENV{'WITH_PROGNAME'};
-  delete $ENV{'WITH_PROGNAME'};
+  $with_progname = &getenv ('WITH_PROGNAME');
+  &unsetenv ('WITH_PROGNAME');
 
-  # See comments preceding perl invocation for an explanation.
-  if (! open (STDIN, "<&9"))
+  # Delete the temporary scriptfile, as a way of cleaning up after the
+  # shell invocation.
+  if (&envp ('WITH_SCRIPTFILE'))
     {
-      printf (STDERR "$with_progname: cannot recover stdin from fd 9: $!\n");
-      exit (1);
-    }
+      local ($file) = &getenv ('WITH_SCRIPTFILE');
 
-  close (9);
+      &unsetenv ('WITH_SCRIPTFILE');
+      unlink ($file);
+    }
 
   # Push some include dirs which are pretty standard, just in case.
   # Perl5 does not usually install .ph files.
-  push (@INC, "$ENV{HOME}/lib/perl",
+  $home = &getenv ('HOME');
+  push (@INC, "$home/lib/perl",
               "/usr/local/gnu/lib/perl",
               "/usr/local/lib/perl",
               "/usr/lib/perl"
@@ -320,6 +330,31 @@ sub envp
       return 1;
     }
   return 0;
+}
+
+# This automatically "untaints" any values returned from the environment.
+# This only matters when running setuid.
+sub getenv
+{
+  local ($var) = @_;
+
+  if (&envp ($var))
+    {
+      local ($taintval) = $ENV{$var};
+      local ($val);
+
+
+      $taintval =~ /^(.*)$/;
+      $val = $1;                  # $1 is always untainted
+      return $val;
+    }
+  return '';
+}
+
+sub unsetenv
+{
+  local ($var) = @_;
+  delete $ENV{$var};
 }
 
 sub err
@@ -384,7 +419,7 @@ sub background
 {
   if (&envp ('WITH_BG'))
     {
-      delete $ENV{'WITH_BG'};
+      &unsetenv ('WITH_BG');
 
       # Don't fork here if we are planning to detach from tty later anyway;
       # notty does that.
@@ -400,7 +435,7 @@ sub notty
 {
   if (&envp ('WITH_NOTTY'))
     {
-      delete $ENV{'WITH_NOTTY'};
+      &unsetenv ('WITH_NOTTY');
 
       if (defined (&TIOCNOTTY))
         {
@@ -430,9 +465,9 @@ sub set_cwd
 {
   if (&envp ('WITH_CWD'))
     {
-      local ($d) = $ENV{'WITH_CWD'};
-      delete $ENV{'WITH_CWD'};
+      local ($d) = &getenv ('WITH_CWD');
 
+      &unsetenv ('WITH_CWD');
       $! = 0;
       chdir ($d);
       if ($! != 0)
@@ -447,9 +482,9 @@ sub set_egid
   if (&envp ('WITH_EGID'))
     {
       local ($egid) = $) + 0;
-      local ($sgid) = &group2gid ($ENV{'WITH_EGID'});
+      local ($sgid) = &group2gid (&getenv ('WITH_EGID'));
 
-      delete $ENV{'WITH_EGID'};
+      &unsetenv ('WITH_EGID');
 
       $) = $sgid;
 
@@ -466,9 +501,9 @@ sub set_gid
     {
       local ($rgid) = $( + 0;
       local ($egid) = $) + 0;
-      local ($sgid) = &group2gid ($ENV{'WITH_GID'});
+      local ($sgid) = &group2gid (&getenv ('WITH_GID'));
 
-      delete $ENV{'WITH_GID'};
+      &unsetenv ('WITH_GID');
 
       $( = $sgid;
       $) = $sgid;
@@ -488,10 +523,10 @@ sub set_groups
 {
   if (&envp ('WITH_GROUPS'))
     {
-      local (@groups) = split ('[ ,]', $ENV{'WITH_GROUPS'});
+      local (@groups) = split ('[ ,]', &getenv ('WITH_GROUPS'));
       local ($i) = 0;
 
-      delete $ENV{'WITH_GROUPS'};
+      &unsetenv ('WITH_GROUPS');
 
       if (defined (&SYS_setgroups))
         {
@@ -518,8 +553,8 @@ sub set_name
 {
   if (&envp ('WITH_NAME'))
     {
-      local ($name) = $ENV{'WITH_NAME'};
-      delete $ENV{'WITH_NAME'};
+      local ($name) = &getenv ('WITH_NAME');
+      &unsetenv ('WITH_NAME');
       $progname = $ARGV[0];
       $ARGV[0] = $name;
     }
@@ -533,8 +568,8 @@ sub set_pgrp
 {
   if (&envp ('WITH_PGRP'))
     {
-      setpgrp ($$, $ENV{'WITH_PGRP'});
-      delete $ENV{'WITH_PGRP'};
+      setpgrp ($$, &getenv ('WITH_PGRP'));
+      &unsetenv ('WITH_PGRP');
     }
 }
 
@@ -542,7 +577,7 @@ sub set_priority
 {
   if (&envp ('WITH_PRIORITY'))
     {
-      local ($p) = $ENV{'WITH_PRIORITY'} + 0;
+      local ($p) = &getenv ('WITH_PRIORITY') + 0;
 
       $! = 0;
       setpriority (0, 0, $p);
@@ -557,8 +592,8 @@ sub set_root
 {
   if (&envp ('WITH_ROOT'))
     {
-      local ($d) = $ENV{'WITH_ROOT'};
-      delete $ENV{'WITH_ROOT'};
+      local ($d) = &getenv ('WITH_ROOT');
+      &unsetenv ('WITH_ROOT');
 
       $! = 0;
       chroot ($d);
@@ -574,9 +609,9 @@ sub set_euid
   if (&envp ('WITH_EUID'))
     {
       local ($euid) = $>;
-      local ($suid) = &user2uid ($ENV{'WITH_EUID'});
+      local ($suid) = &user2uid (&getenv ('WITH_EUID'));
 
-      delete $ENV{'WITH_EUID'};
+      &unsetenv ('WITH_EUID');
 
       $> = $suid;
 
@@ -593,9 +628,9 @@ sub set_uid
     {
       local ($ruid) = $<;
       local ($euid) = $>;
-      local ($suid) = &user2uid ($ENV{'WITH_UID'});
+      local ($suid) = &user2uid (&getenv ('WITH_UID'));
 
-      delete $ENV{'WITH_UID'};
+      &unsetenv ('WITH_UID');
 
       $< = $suid;
       $> = $suid;
@@ -612,5 +647,9 @@ sub set_uid
 }
 
 __EOF__
+
+case $? in
+  0 ) exec ${PERL-perl} $debug $includes "$WITH_SCRIPTFILE" ${1+"$@"} ;;
+esac
 
 # with ends here
