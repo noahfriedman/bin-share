@@ -4,7 +4,7 @@
 # Created: 1991-12-18
 # Public domain
 
-# $Id: display-time,v 1.5 1995/05/11 18:08:05 friedman Exp friedman $
+# $Id: display-time,v 1.6 1995/05/11 19:15:30 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -136,13 +136,6 @@ done
 
 case "$debug" in t ) set -x ;; esac
 
-trap '{
-        exitstat=$?
-        rm -f "$stampfile" 2> /dev/null
-        trap "" 1 2 3 15
-        exit $exitstat
-      }' 1 2 3 15
-
 USER=${USER-${LOGNAME-`{ (whoami) 2> /dev/null; } \
                        || { id | sed -ne 's/.*uid=[0-9]*(//
                                           s/).*//
@@ -156,8 +149,8 @@ for f in /usr/spool/mail /var/mail /usr/mail ; do
   fi
 done
 
-stampfile="/tmp/$progname$$"
 mail_result=
+prev_spool_stat=
 
 while : ; do
   loadavg_result=
@@ -171,15 +164,16 @@ while : ; do
   esac
 
   if test ".$check_mail" = .t -a -s "$spoolfile" ; then
-    set fnord `ls -td "$stampfile" "$spoolfile" 2> /dev/null`
-    shift
-    case "$1" in "$spoolfile" )
-      set fnord `grep '^From ' "$spoolfile" 2> /dev/null | wc -l`
-      shift
-      mail_result="mail:$1"
-      > "$stampfile"
-     ;;
+    spool_stat=`ls -d "$spoolfile" 2> /dev/null`
+    case "$spool_stat" in
+      "$prev_spool_stat" ) : ;;
+      * )
+        set fnord `grep '^From ' "$spoolfile" 2> /dev/null | wc -l`
+        shift
+        mail_result="mail:$1"
+       ;;
     esac
+    prev_spool_stat="$spool_stat"
   else
     mail_result=
   fi
