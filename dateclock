@@ -1,25 +1,18 @@
 #!/bin/sh
-# $Id$
-
 exec ${PERL-perl} -Sx $0 ${1+"$@"}
 #!perl
 
+# $Id: dateclock,v 1.1 2000/03/09 20:14:02 friedman Exp $
+
 use POSIX;
 
-sub main
-{
-  my $cl = `tput clear 2>/dev/null`;
-  my $ho = `tput home  2>/dev/null`;
+$| = 1;
+while (1)
+  {
+    print strftime ("\r%a %b %e %H:%M:%S %Z %Y", localtime ());
+    select (undef, undef, undef, 0.50);
+  }
 
-  select (STDOUT);
-  $| = 1;
-
-  print "$cl";
-  while (1)
-    {
-      print "$ho", strftime ("%a %b %e %H:%M:%S %Z %Y", localtime ()), "\n";
-      select (undef, undef, undef, 0.33);
-    }
-}
-
-main;
+# local variables:
+# mode: perl
+# end:
