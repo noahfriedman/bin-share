@@ -1,0 +1,49 @@
+#!/usr/bin/perl
+# with-timeout --- run process but kill if it hangs
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1996-05-26
+# Public domain.
+
+# $Id$
+
+&main;
+
+sub main
+{
+  if ($#ARGV < 1)
+    {
+      local (@p) = split (/\//, $0);
+
+      printf (STDERR "Usage: $p[$#p] [timeout] [command {args ...}]\n");
+      exit (1);
+    }
+
+  $SIG{'ALRM'} = 'sigalrm_handler';
+  alarm ($ARGV[0]);
+  shift (@ARGV);
+
+  $proc = &spawn (@ARGV);
+  wait;
+  exit ($?);
+}
+
+sub sigalrm_handler
+{
+  printf (STDERR "$ARGV[0]: Timeout waiting for process to complete.\n");
+  kill (1, $proc);
+  exit (1);
+}
+
+sub spawn
+{
+  local ($pid) = fork;
+
+  die if (! defined ($pid));
+  if ($pid == 0)
+    {
+      exec (@_);
+    }
+  return $pid;
+}
+
+# with-timeout ends here
