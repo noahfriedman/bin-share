@@ -1,0 +1,23 @@
+#! /bin/sh
+
+# $Id$
+
+exec with --display ${DISPLAY-:0.0} \
+          --no-tty \
+          --priority=19  \
+          xearth -nolabel \
+                 -stars \
+                 -onepix \
+                 -nomarkers \
+                 -night 15 \
+                 -wait 300 \
+                 -nice 19 \
+                 -mag 0.25 \
+                 -shift -200,-150 \
+                 -pos sunrel,24.64,41.3 \
+                 -gamma 2.6 \
+                 -rot 21 \
+                 -proj orthographic \
+                 -bigstars 20
+
+# eof

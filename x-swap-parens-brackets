@@ -1,0 +1,44 @@
+#!/bin/sh
+
+# $Id$
+
+# Swap positions of [] and () characters
+# To swap them, just run this script with no arguments.
+# To undo the mapping, give the argument "restore" on the command line.
+#
+# These keycodes may be specific to Sun type 4 and 5 keyboards.
+# First rhs keysym is the unshifted key, the second is the shifted key.
+# Normally, they are as follows:
+#
+# keycode 45 = 9 (
+# keycode 46 = 0 )
+# keycode 71 = [ {
+# keycode 72 = ] }
+#
+# Thanks to terminal braindeath on the part of the xmodmap implementor, we
+# cannot simply swap the meanings of the "parenleft", "parenright",
+# "bracketleft", and "bracketright" keysyms (which would have made this
+# script more portable) because keysyms on the lhs of assignments represent
+# the entire keycode they currently map to, which means you must still
+# provide two rhs values or you lose the shifted value.  However, you
+# cannot *get* the current shifted value of the keysym on the rhs of the
+# expression so there's no way to preserve them!  FMH!  Anyway, we must
+# refer to the actual keycodes (which are system-specific) and specify both
+# the unshifted and shifted keysyms.
+
+case "$1" in
+  restore )
+    xmodmap -e 'keycode 45 = 9            parenleft' \
+            -e 'keycode 46 = 0            parenright' \
+            -e 'keycode 71 = bracketleft  braceleft' \
+            -e 'keycode 72 = bracketright braceright'
+   ;;
+  * )
+    xmodmap -e 'keycode 45 = 9            bracketleft' \
+            -e 'keycode 46 = 0            bracketright' \
+            -e 'keycode 71 = parenleft    braceleft' \
+            -e 'keycode 72 = parenright   braceright'
+   ;;
+esac
+
+# swapkeys ends here
