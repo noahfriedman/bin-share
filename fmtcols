@@ -9,7 +9,7 @@ exec ${PERL-perl} -wSx $0 ${1+"$@"}
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-08-02
 
-# $Id: fmtcols,v 2.6 2001/01/21 03:02:03 friedman Exp $
+# $Id: fmtcols,v 2.7 2001/02/19 21:47:12 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -68,7 +68,7 @@ sub map_over_file_contents ($@)
       my $bytesread = $blocksize;
       my $offset = 0;
       $_ = "";
-      while (defined $bytesread && $bytesread == $blocksize)
+      while (defined $bytesread && $bytesread > 0)
         {
           my $len = length;
           $_ = substr ($_, $offset)
