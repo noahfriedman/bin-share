@@ -1,12 +1,12 @@
 #! /bin/sh
 # rotate-log --- rotate accounting logs, optionally compressing old logs
 
-# Copyright (C) 1995 Noah S. Friedman
+# Copyright (C) 1992, 1995, 1996, 1998 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-02-10
 
-# $Id: rotate-log,v 1.12 1996/02/22 20:21:58 friedman Exp $
+# $Id: rotate-log,v 1.13 1996/03/03 22:58:57 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,9 +24,6 @@
 # Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
 
 # Commentary:
-
-# Todo: rewrite this in perl.
-
 # Code:
 
 # Name by which this script was invoked.
@@ -36,6 +33,8 @@ progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 bq='`'
 eq="'"
 dq='"'
+
+known_compress_methods='compact compress gzip bzip bzip2'
 
 usage="Usage: $progname {options} [logfile-name ...]
 
@@ -53,8 +52,8 @@ Options are:
                               pathname (i.e. no "/" chars in name)
 -g, --group, --chgrp   GROUP  Change group ownership to GROUP on rotated logs.
 -h, --help                    You're looking at it.
--M, --compress-method METHOD  Method to use for compressing; one of
-                              ${bq}compact$eq, ${bq}compress$eq, ${bq}gzip$eq.
+-M, --compress-method METHOD  Method to use for compressing, one of:
+                              $known_compress_methods.
                               Default is ${bq}gzip$eq.
 -m, --mode, --chmod     MODE  Change permissions to MODE on rotated logs.
 -N, --no-new-log              After rotating log->log.0, do not recreate log.
@@ -275,12 +274,14 @@ esac
 
 case "$compressp:$compress_method" in
   # re_suffix is regexp-quoted
-  t:compact )  compress_cmd='compact -f'  suffix='.C'  re_suffix='\.C'  ;;
-  t:compress ) compress_cmd='compress -f' suffix='.Z'  re_suffix='\.Z'  ;;
-  t:gzip )     compress_cmd='gzip';       suffix='.gz' re_suffix='\.gz' ;;
+  t:compact )  compress_cmd='compact -f'  suffix='.C'   re_suffix='\.C'   ;;
+  t:compress ) compress_cmd='compress -f' suffix='.Z'   re_suffix='\.Z'   ;;
+  t:gzip )     compress_cmd='gzip';       suffix='.gz'  re_suffix='\.gz'  ;;
+  t:bzip )     compress_cmd='bzip';       suffix='.bz'  re_suffix='\.bz'  ;;
+  t:bzip2 )    compress_cmd='bzip2';      suffix='.bz2' re_suffix='\.bz2' ;;
   t:* )
     echo "$progname: unknown compress-method $bq$compress_method$eq" 1>&2
-    echo "$progname: Known compression methods: compact compress gzip" 1>&2
+    echo "$progname: Known compression methods: $known_compress_methods" 1>&2
     exit 1
    ;;
 esac
