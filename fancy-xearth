@@ -1,12 +1,55 @@
 #! /bin/sh
+# fancy-xearth --- wrapper to set xearth parameters in pleasing fashion
 
-# $Id: fancy-xearth,v 1.2 1996/06/14 05:37:46 friedman Exp $
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 1996-03-05
+# Public domain
 
-exec > /dev/null 2>&1 < /dev/null
+# $Id: fancy-xearth,v 1.3 1997/08/07 03:06:09 friedman Exp $
+
+# Commentary:
+# Code:
+
+#exec > /dev/null 2>&1 < /dev/null
+
 DISPLAY=${DISPLAY-:0.0}
 export DISPLAY
 
-if xearth -version 2> /dev/null; then
+xearth -version 2> /dev/null || exit 1
+
+# Original offset was fixed at -250,-150 which looked good at 1024x768, but
+# doesn't feel far enough to the left for higher resolution displays
+# (e.g. 1600x1200).  Instead, calculate relative offset based on the size
+# of the display.
+{
+  xrdb_syms=`xrdb -symbols`
+  case "$DISPLAY" in
+    # If display does not contain an explicit screen number (e.g. 0.0),
+    # then there are multiple screens associated with the display and
+    # xrdb -symbols is going to spit out comments.
+    # We really want a way to determine which syms we want since they may
+    # vary from screen to screen, but I just don't know of any method of
+    # deciding which to use.
+    *:*.* ) : ;;
+    * )     xrdb_syms=`echo "$xrdb_syms" | sed -e '/^#/d'` ;;
+  esac
+
+  sedfilt='s/-D.*//
+           s/[ 	][ 	]*/ /g
+           s/^ *//g
+           s/ $//g
+           p
+           q'
+
+  width=`echo "$xrdb_syms"  | sed -ne "/-DWIDTH=/!d;s/.*-DWIDTH=//;$sedfilt"`
+  height=`echo "$xrdb_syms" | sed -ne "/-DHEIGHT=/!d;s/.*-DHEIGHT=//;$sedfilt"`
+
+  xshift=`expr $width / 4`
+  yshift=`expr $height / 6`
+}
+
+# Now run xearth with computed offset and other parameters.
+{
   xearth -nolabel \
          -stars \
          -onepix \
@@ -15,20 +58,51 @@ if xearth -version 2> /dev/null; then
          -wait 3600 \
          -nice 19 \
          -mag 0.25 \
-         -shift -250,-150 \
+         -shift -$xshift,-$yshift \
          -pos sunrel,24.64,41.3 \
-         -gamma 2.6 \
+         -gamma 2.3 \
          -rot 21 \
          -proj orthographic \
          -bigstars 20 \
          ${1+"$@"} &
+}
 
-  bitmapdir=$HOME/lib/bitmaps
-  cursorfile="$bitmapdir/ent.d.cbm"
-  maskfile="$bitmapdir/ent.m.cbm"
-  if [ -f "$cursorfile" ] && [ -f "$maskfile" ]; then
-    xsetroot -cursor "$cursorfile" "$maskfile"
-  fi
-fi
+# Install starship enterprise bitmaps
+{
+  cursorfile="/tmp/ent.d.bm$$"
+  maskfile="/tmp/end.m.bm$$"
+  trap 'rm -f "$cursorfile" "$maskfile" 2> /dev/null' 0 1 2 3 15
+
+  cat > "$cursorfile" <<__EOF_CURSORFILE__
+#define ent_width 24
+#define ent_height 24
+#define ent_x_hot 21
+#define ent_y_hot 0
+static char ent_bits[] = {
+   0x00, 0x00, 0x38, 0x00, 0x00, 0x24, 0x00, 0xc0, 0x23, 0x00, 0x40, 0x10,
+   0x00, 0x40, 0x08, 0x00, 0x40, 0x04, 0x00, 0x24, 0x02, 0x00, 0x1a, 0x02,
+   0x00, 0x11, 0x06, 0x80, 0x70, 0x0a, 0x40, 0x48, 0x10, 0x20, 0x28, 0x10,
+   0x10, 0x10, 0x08, 0x08, 0x03, 0x04, 0x84, 0x04, 0x02, 0x42, 0x04, 0x01,
+   0x21, 0x82, 0x00, 0x1f, 0x41, 0x00, 0x80, 0x30, 0x00, 0x00, 0x09, 0x00,
+   0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+__EOF_CURSORFILE__
+
+  cat > "$maskfile" <<__EOF_MASKFILE__
+#define ent_width 24
+#define ent_height 24
+#define ent_x_hot -1
+#define ent_y_hot -1
+static char ent_bits[] = {
+   0x00, 0x00, 0x38, 0x00, 0x00, 0x3c, 0x00, 0xc0, 0x3f, 0x00, 0xc0, 0x1f,
+   0x00, 0xc0, 0x0f, 0x00, 0xc0, 0x07, 0x00, 0xe4, 0x03, 0x00, 0xfe, 0x03,
+   0x00, 0xff, 0x07, 0x80, 0xff, 0x0f, 0xc0, 0xcf, 0x1f, 0xe0, 0xef, 0x1f,
+   0xf0, 0xff, 0x0f, 0xf8, 0xff, 0x07, 0xfc, 0xfc, 0x03, 0x7e, 0xfc, 0x01,
+   0x3f, 0xfe, 0x00, 0x1f, 0x7f, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x0f, 0x00,
+   0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+__EOF_MASKFILE__
+
+  xsetroot -cursor "$cursorfile" "$maskfile"
+  rm -f "$cursorfile" "$maskfile"
+}
 
 # fancy-xearth ends here
