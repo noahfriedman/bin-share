@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1996-02-27
 
-# $Id: getpopmail,v 2.3 1996/06/07 19:21:31 friedman Exp $
+# $Id: getpopmail,v 2.4 1996/07/27 02:14:28 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -63,7 +63,18 @@ Options are:
 -D, --debug                  Enable debugging.
 -c, --config    FILE         Use configuration file FILE.
 -h, --help                   You're looking at it.
--p, --probe                  Make sure pop server responds to pings first.
+-p, --probe     {HOSTS}      Make sure pop server/gateway accessible first.
+                             The optional argument ${bq}hosts$eq can be one
+                             of ${bq}server$eq or ${bq}gateway$eq,
+                             indicating that each pop server contacted
+                             should be ${bq}ping${eq}ed prior to
+                             contacting, or else the local routing gateway
+                             should be pinged before attempting any
+                             connections at all.
+                             This is to avoid long delays waiting for
+                             connections to time out for servers that are
+                             down, or if running with transient PPP links.
+                             If no argument is given, both are probed.
 -q, --quiet                  Discard all output.
                              This is the default if stdin is not a tty.
 -v, --verbose                Be verbose.
@@ -99,8 +110,10 @@ fi
 # after every call to getopt.  The argument (if any) is stored in the
 # variable `optarg'.
 #
-# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument
-# won't get used if first long option syntax was used.
+# Long option syntax is `--foo=bar' or `--foo bar'.
+# For optional args, you must use the `--foo=bar' long option syntax
+# if the argument starts with `-', otherwise the argument will be ignored
+# and treated as the next option.
 #
 # Note: because of broken bourne shells, using --foo=bar syntax can
 # actually screw the quoting of args that end with trailing newlines.
@@ -110,34 +123,28 @@ getopt='
   {
     optarg=
     case "$1" in
-      --*=* )
-        optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
-        shift
-       ;;
-      * )
-        case ${2+set} in
-          set )
-            optarg="$2"
-            shift
-            shift
+      --*=* ) optarg=`echo "$1" | sed -e "1s/^[^=]*=//"` ; shift ;;
+      -* )
+        case "${2+set}:$optarg_optional" in
+          set: ) optarg="$2" ; shift ; shift ;;
+          set:?* )
+            case "$2" in
+              -* ) shift ;;
+              * )  optarg="$2"; shift; shift ;;
+            esac
            ;;
-          * )
-            case "$optarg_optional" in
-              "" )
-                case "$1" in
-                  --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
-                  * ) option="$1" ;;
-                esac
-                exec 1>&2
-                echo "$progname: option $bq$option$eq requires argument."
-                echo "$progname: use $bq--help$eq to list option syntax."
-                exit 1
-               ;;
-           esac
-           shift
-         ;;
+          : )
+            option="$1"
+            case "$option" in
+              --*=* ) option=`echo "$option" | sed -e "1s/=.*//;q"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$progname: use $bq--help$eq to list option syntax." 1>&2
+            exit 1
+           ;;
+          * ) shift ;;
         esac
-     ;;
+       ;;
     esac
     optarg_optional=
   }'
@@ -163,9 +170,20 @@ while : ; do
       echo "$usage" 1>&2
       exit 0
      ;;
-    -p | --probe | --p* )
+    -p | --probe* | --p* )
       probe=t
-      shift
+      optarg_optional=t
+      eval "$getopt"
+
+      case "$optarg" in
+        server | gateway | gw ) probe="$optarg" ;;
+        ""       ) : ;;
+        * )
+          # Not a recognized arg to --probe; push arg back onto arglist.
+          set fnord "$optarg" ${1+"$@"}
+          shift
+         ;;
+      esac
      ;;
     -q | --quiet | --q* )
       verbose=
@@ -209,7 +227,7 @@ case "$verbose" in
   * ) exec > /dev/null 2>&1 < /dev/null ;;
 esac
 
-case "$probe" in t )
+case "$probe" in t | gw | gateway )
   network-up-p -v || exit $? ;;
 esac
 
@@ -233,15 +251,23 @@ while read x 0<&3; do
     server=$1 user=$2 pass=$3 protocol=$4
     shift; shift; shift; shift
 
-    case "$probe" in t )
+    case "$probe" in t | server )
       network-up-p -v "$server" || continue ;;
     esac
 
     expect -f - <<__EOF__
-      set timeout -1
       spawn popclient -u "$user" "-v$protocol" ${1+"$@"} "$server"
       expect "password:"
       send "$pass\r"
+      set timeout 15
+      expect {
+        timeout {
+          puts "(connection timed out)"
+          exit
+        }
+        "+OK"
+      }
+      set timeout -1
       expect eof
 __EOF__
 done
