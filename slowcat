@@ -1,0 +1,111 @@
+#!/bin/sh
+exec ${PERL-perl} -wSx $0 ${1+"$@"}
+#!perl
+
+# slowcat --- write output slowly, emulating physical serial terminal
+
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2003-01-01
+# Public domain
+
+# $Id$
+
+# Commentary:
+# Code:
+
+use 5.003;
+use strict;
+use Getopt::Long;
+use Symbol;
+
+(my $progname = $0) =~ s|.*/||;
+
+my $bits_per_sec  = 9600;
+my $usec_interval = 100;
+
+sub usleep ($)
+{
+  my $usec = shift;
+  my $sec = $usec / 1000;
+  select (undef, undef, undef, $sec);
+}
+
+sub slowcat ($$$)
+{
+  my ($fh, $bits_per_sec, $usec_interval) = @_;
+
+  my $bytes_per_sec = $bits_per_sec / 8;
+  my $bytes_per_call = $bytes_per_sec * ($usec_interval / 1000);
+
+  while (sysread ($fh, $_, $bytes_per_call))
+    {
+      syswrite (STDOUT, $_, $bytes_per_call);
+      usleep ($usec_interval);
+    }
+}
+
+# fh may be a filehandle or a reference to an array of handles
+# mode 1 = buffering, 0 = no buffering
+sub set_buffering_mode ($$)
+{
+  my ($fh, $mode) = @_;
+  my $orig = select (ref $fh eq 'ARRAY' ? $fh->[0] : $fh);
+
+  for my $handle (ref $fh eq 'ARRAY' ? @$fh : $fh)
+    {
+      select ($handle);
+      $| = ($mode == 0);
+    }
+  select ($orig);
+}
+
+sub usage (@)
+{
+  print STDERR "$progname: @_\n\n" if @_;
+  print STDERR "Usage: $progname {options} {files}\n
+Options are:
+-h, --help                   You're looking at it.
+-b, --bps             BPS    Output BPS bits per second.
+-i, --sleep-interval  USEC   Use USEC microseconds of granularity between
+                             writes.\n";
+  exit (1);
+}
+
+sub parse_options ()
+{
+  Getopt::Long::config ('bundling', 'autoabbrev');
+  GetOptions ("h|help",             sub { usage () },
+              "b|bps=i",            \$bits_per_sec,
+              "i|sleep-interval=i", \$usec_interval,
+             );
+}
+
+sub main ()
+{
+  set_buffering_mode (*STDOUT{IO}, 0);
+  parse_options ();
+
+  unless (@ARGV)
+    {
+      slowcat (*STDIN{IO}, $bits_per_sec, $usec_interval);
+      exit (0);
+    }
+
+  my $fh = gensym;
+  while (@ARGV)
+    {
+      my $filename = shift @ARGV;
+      sysopen ($fh, $filename, 0) || die "$filename: $!";
+      slowcat ($fh, $bits_per_sec, $usec_interval);
+      close ($fh);
+    }
+  exit (0);
+}
+
+main ();
+
+# local variables:
+# mode: perl
+# end:
+
+# slowcat ends here
