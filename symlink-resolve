@@ -1,12 +1,12 @@
 #! /bin/sh
 # symlink-resolve --- dereference symbolic links
 
-# Copyright (C) 1993, 1995 Noah S. Friedman
+# Copyright (C) 1993, 1995, 1998 Noah S. Friedman
 
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1993-02-07
 
-# $Id: symlink-resolve,v 1.7 1996/03/03 23:00:48 friedman Exp $
+# $Id: symlink-resolve,v 1.8 1996/08/09 05:16:42 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -178,7 +178,7 @@ for ($i = 0; $i < @ARGV; $i++)
    # instances of "/../../"
    while (/\/[^\/][^\/]*\/\.\.\//o)
      {
-      s/\/[^\/][^\/]*\/\.\.\//\//og;  # Resolve most references to ".."
+      s/\/[^\/][^\/]*\/\.\.\//\//o;   # Resolve most references to ".."
      }
    s/\/[^\/][^\/]*\/\.\.$//o;         # Resolving trailing ".."
    s/^\/\.\.\//\//go;                 # Eliminate leading "/.."
