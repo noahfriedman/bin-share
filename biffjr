@@ -1,37 +1,50 @@
 #!/bin/sh
-# waitfor --- notify you when a user logs in
+# biffjr --- beep and notify when you have new mail
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
-# Created: 1991-08-08
-# Last Modified: 1994-03-13
+# Created: 1993-09-21
+# Last modified: 1994-03-15
 # Public domain
 
 # Commentary:
 
-# Notifies invoker when specified user logs onto any of the specified
-# hosts.  This script will automatically background itself.  There's no
-# need to call it with a "&" operator.
+# This script works without the `comsat' daemon, which is not always
+# enabled or is buggy (some versions don't work if your username is 8
+# characters long).
+#
+# This program will background itself automatically; you don't need to use
+# `&' in the shell.  It terminate itself when you log out.
+#
+# Because of the means biffjr uses to determine when you've logged out, you
+# must be connected to a pty which is owned by you.  Sometimes this is not
+# the case in emacs shell buffers.
 
 # Code:
 
-# Name by which this script was invoked. 
 progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 
-# To prevent hairy quoting and escaping later.
 bq='`'
 eq="'"
 
-usage="Usage: $progname {options} [user] {host1} {host2} {...}
+usage="Usage: $progname {options}
 
 Options are:
 -D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-f, --from           FPROG   Display envelopes from new messages.  Optional
+                             argument FPROG is the pathname of the ${bq}from$eq
+                             program to execute.
+                             This option should either be listed last or
+                             the token $bq--from=$eq should be used if the
+                             optional argument is not to be supplied.
 -F, --force                  Do not examine ownership of tty to decide
                              whether to terminate.  Use of this option is
                              discouraged because failure to kill this program
                              at logout will annoy the next user to log in.
 -h, --help                   You're looking at it.
--i, --interval  SECONDS      Number of seconds between checks, default 60.
-
-If no hosts are specified, the current host is assumed.
+-m, --mail-file      MFILE   Path of mail spool file.
+-n, --no-bell                Do not beep when displaying messages.
+                             Primarily intended for emacs shell buffers.
+-s, --sleep-interval SEC     Interval (in seconds) between mail checks.
+                             Default is 60 seconds.
 "
 
 # Clever way to save arguments whilst preserving quoting.
@@ -106,9 +119,12 @@ shift_n_times='
 # Initialize variables.
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
+bells=t
 debug=
 daemonp=f
 force=
+mail_file=${MAIL-$MAILPATH}
+show_from=
 sleep_interval=60
 
 eval "$save_current_args"
@@ -118,25 +134,47 @@ eval "$save_current_args"
 # It's a good idea to document the full long option name in each case.
 # Long options which take arguments will need a `*' appended to the
 # canonical name to match the value appended after the `=' character. 
-while test $# != 0; do
+while test $# != 0 ; do
   case "$1" in 
-    --daemon )
+    --daemon )  # Users should not use this option.
       daemonp=t
       shift
      ;;
-    -D | --debug | --d* )
+    -D | --debug | --de* )
       debug=t
       shift
      ;;
-    -F | --force | --f* )
+    -F | --force | --fo* )
       force=t
       shift
+     ;;
+    -f | --from* | --fr* )
+      show_from=`(set - "$1" "$2" arg-optional; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+
+      case "$show_from" in
+        '' ) : ;;
+        * )  FROM=$show_from ;;
+      esac
+      show_from=t
      ;;
     -h | --help | --h )
       echo "$usage" 1>&2
       exit 1
      ;;
-    -i | --interval* | --i* )
+    -m | --mail-file* | --m* )
+      mail_file=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -n | --no-bell | --n* )
+      bells=
+      shift
+     ;;
+    -s | --sleep-interval* | --s* )
       sleep_interval=`(set - "$1" "$2"; eval "$get_option_argument")`
       retval=$?
       case $retval in 3 ) exit 1 ;; esac
@@ -164,15 +202,6 @@ while test $# != 0; do
 done
 
 case "$debug" in t ) set -x ;; esac
-
-case $# in
-  0 )
-    exec 1>&2
-    echo "$progname: You must supply a username."
-    echo "$usage"
-    exit 1
-   ;;
-esac
 
 case "$force" in
   t ) : ;;
@@ -217,22 +246,32 @@ case "$daemonp" in f )
 esac
 
 
-tmpfile="/tmp/$progname$$"
-
-target_user="$1"
-shift
-case $# in 0 )
-  set fnord `hostname`
-  shift
+case "$mail_file" in '' )
+  USER=${USER-${LOGNAME-`(whoami) 2> /dev/null \
+                         || id | sed -ne 's/.*uid=[0-9]*(//;s/).*//;p'`}}
+  for dir in /usr/spool/mail /var/mail /usr/mail ; do
+    if test -d "$dir" ; then
+      mail_file="$dir/$USER"
+      break
+    fi
+  done
  ;;
 esac
+case "$bells" in t )
+  bells=`echo ..... | tr '.' '\007'` ;;
+esac
+msgcount='NAN'
+stampfile="/tmp/$progname$$"
 
 trap '{ 
         exitstat=$?
-        rm -f "$tmpfile" 2> /dev/null
+        rm -f "$stampfile" 2> /dev/null
         trap "" 1 2 3 15
         exit $exitstat
       }' 1 2 3 15
+
+: > "$stampfile" || exit 1
+chmod u+w "$stampfile"
 
 while : ; do
   case "$force" in
@@ -242,24 +281,34 @@ while : ; do
       case "$tty_owner" in 
         "$USER" ) : ;;
         * )
-          rm -f "$tmpfile" 2> /dev/null
+          rm -f "$stampfile" 2> /dev/null
           exit 0 
          ;;
       esac
      ;;
   esac
 
-  rusers -l ${1+"$@"} 2> /dev/null \
-   | grep "^$target_user" > "$tmpfile" 2> /dev/null
-  if test -s "$tmpfile" ; then
-    echo "*** $progname: $target_user has logged in:"
-    cat "$tmpfile"
-    echo "*** $progname: Terminating."
-    rm -f "$tmpfile"
-    exit 0
+  set fnord `ls -td "$mail_file" "$stampfile" 2> /dev/null`
+  shift
+  if test ".$1" = ".$mail_file" -a -s "$mail_file" ; then
+    : > "$stampfile" || exit 1
+
+    set fnord `grep '^From ' "$mail_file" 2> /dev/null | wc -l`
+    shift
+    msgcount=$1
+
+    echo "$bells*** $progname: You have new mail.  ($msgcount)"
+    case "$show_from" in t )
+      echo "$bells*** $progname: Spooled messages:"
+      ${FROM-from}
+     ;;
+    esac
   fi
 
-  sleep "$sleep_interval"
+  # If sleep exits abnormally, it's probably because of an invalid
+  # argument to sleep, in which case no sleep is happening and this script
+  # will chew cycles.  So exit instead.
+  sleep "$sleep_interval" || exit 1
 done
 
-# waitfor ends here
+# biffjr ends here
