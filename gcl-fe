@@ -3,7 +3,7 @@
 
 # Copyright (C) 1996 Noah S. Friedman
 
-# $Id$
+# $Id: gcl-fe,v 1.1 1996/06/29 22:10:23 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -155,3 +155,5 @@ exec "$libdir/unixport/saved_gcl" \
    -eval '(setq si::*tk-library* "/usr/lib/tk")' \
    ${1+"$@"}
 # other options: -load /tmp/foo.o -load jo.lsp -eval "(joe 3)"
+
+# gcl-fe ends here
