@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.41 2000/01/26 12:28:25 friedman Exp $
+# $Id: from,v 1.42 2000/01/26 12:48:00 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -725,10 +725,13 @@ sub add_header ($)
     }
 }
 
-# Try to extract real name from From: line when possible
+# Try to extract real name from From: line when possible.
 sub hack_From_data ($)
 {
   my $data = shift;
+
+  # "\<" used below to avoid confusing cperl-mode font-lock;
+  # this is not a perl metacharacter.
 
   # From: foobar@host (real name)
   # From: "real name" <foobar@host>
@@ -740,20 +743,18 @@ sub hack_From_data ($)
       substr ($data, -1) = '';
     }
   # From: "" <foobar@host>
-  elsif ($data =~ /""[^<]*<[^>]+>/o)
+  elsif ($data =~ /""[^\<]*\<[^\>]+\>/o)
     {
-      $data =~ /<([^>]+)>/o;
+      $data =~ /\<([^\>]+)\>/o;
       $data = $1;
     }
   # From: real name <foobar@host>
-  # "\<" used to avoid confusing cperl-mode font-lock; this is not a perl
-  # metacharacter.
   elsif ($data =~ m/^([^\<]+)\</o)
     {
       $data = $1;
     }
   # From: <foobar@host>
-  elsif ($data =~ /^<(.*)>/o)
+  elsif ($data =~ /^\<(.*)\>/o)
     {
       $data = $1;
     }
