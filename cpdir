@@ -2,8 +2,9 @@
 # cpdir --- copy directories preserving time, symlinks, etc.
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1991-08-14
-# Last modified: 1994-03-13
 # Public domain.
+
+# $Id$
 
 # Commentary:
 # Code:
@@ -124,9 +125,14 @@ for src in ${1+"$@"} ; do
      ;;
   esac
 
-  ( cd "$srcdir" && tar -cf - "$src" ) \
-   | ( cd "$dst" && tar $verbose -xpf - )
-
+  if test -d "$dst" ; then
+    ( cd "$srcdir" && tar -cf - "$src" ) \
+     | ( cd "$dst" && tar $verbose -xpf - )
+  else
+    mkdir "$dst"
+    ( cd "$srcdir/$src" && tar -cf - . ) \
+     | ( cd "$dst" && tar $verbose -xpf - )
+  fi
 done
 
 # cpdir ends here
