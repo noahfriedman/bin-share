@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-01-19
 
-# $Id: from,v 1.22 1998/01/20 21:25:04 friedman Exp $
+# $Id: from,v 1.23 1998/01/21 21:04:32 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -407,7 +407,7 @@ case "${FROM_FORMAT+set}" in
     case "$FROM_EXTRACTP" in
       t )
         FROM_PARSEP=
-        FROM_FORMAT='From: %From\nTo: %To\nSubject: %Subject\nDate: %Date\n'
+        FROM_FORMAT='From: %From\nTo: %To\nCc: %Cc\nSubject: %Subject\nDate: %Date\n'
        ;;
       * )
         FROM_FORMAT='%-19.18From %-13.12Date %Subject\n'
