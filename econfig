@@ -4,7 +4,7 @@
 # Created: 1994-10-26
 # Public domain.
 
-# $Id$
+# $Id: econfig,v 1.1 1994/10/26 21:07:17 friedman Exp friedman $
 
 # Commentary:
 
@@ -39,12 +39,11 @@ Options are:
 -P, --prefix        PREFIX   Use PREFIX for installation prefix path.
                              Note: you probably don't need to set this
                              since the devopment versions of emacs should
-                             not be installed.  If not specified, configure
-                             is given the $bq--run-in-place$eq option so
-                             that the executable can be run directly out of
-                             the build tree (with ${bq}yemacs$eq).
+                             not be installed.  If not specified, the
+                             prefix is set to $bq/tmp/not-for-installation$eq.
 -p, --program       PROG     Run PROG to configure emacs.
 -q, --quiet                  Turn off verbose messages from configure.
+-s, --silent                 Alias for $bq--quiet$eq.
 -t, --toolkit       TOOLKIT  Use an emacs compiled with the TOOLKIT window
                              toolkit.
 --                           End argument list to $progname and begin
@@ -67,9 +66,9 @@ default toolkit to be ${bq}lucid$eq."
 debug=
 configuration=
 guessp=t
-prefix=--run-in-place
+prefix=--prefix=/tmp/not-for-installation
 toolkit=
-verbose=--verbose
+quiet=
 
 # Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
 #
@@ -159,8 +158,8 @@ while : ; do
       case $retval in 3 ) exit 1 ;; esac
       eval "shift_num=$retval; $shift_n_times"
      ;;
-    -q | --quiet | --q* )
-      verbose=
+    -q | --quiet | --q* | -s | --silent | --s* )
+      quiet=--quiet
       shift
      ;;
     -t | --toolkit* | --t* )
@@ -189,8 +188,8 @@ while : ; do
   esac
 done
 
-case "$debug"   in t  ) set -x            ;; esac
-case "$verbose" in '' ) exec 1> /dev/null ;; esac
+case "$debug" in t  ) set -x ;; esac
+case "$quiet" in '--quiet' ) exec 1> /dev/null ;; esac
 
 case "$guessp" in
   t )
@@ -231,7 +230,7 @@ esac
 
 set fnord "$configure" \
           $prefix \
-          $verbose \
+          $quiet \
           --with-x-toolkit=$toolkit \
           $configuration \
 	  ${1+"$@"}
