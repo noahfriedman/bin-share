@@ -1,34 +1,20 @@
 #! /bin/sh
 # with-timeout --- run process but kill if it hangs
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1996-05-26
 # Public domain.
 
-# $Id: with-timeout,v 1.2 1997/10/20 23:08:36 friedman Exp $
+# $Id: with-timeout,v 1.3 1998/10/29 20:41:31 friedman Exp $
 
-exec ${PERL-perl} - ${1+"$@"} 9<&0 <<'__EOF__'
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl
 
-&main;
-
-sub main
+sub spawn
 {
-  open (STDIN, "<&9") || die;
-
-  if ($#ARGV < 1)
-    {
-      local (@p) = split (/\//, $0);
-
-      printf (STDERR "Usage: $p[$#p] [timeout] [command {args ...}]\n");
-      exit (1);
-    }
-
-  $SIG{'ALRM'} = 'sigalrm_handler';
-  alarm ($ARGV[0]);
-  shift (@ARGV);
-
-  $proc = &spawn (@ARGV);
-  wait;
-  exit ($?);
+  my $pid = fork;
+  die if (!defined $pid);
+  exec (@_) if ($pid == 0);
+  return $pid;
 }
 
 sub sigalrm_handler
@@ -38,18 +24,25 @@ sub sigalrm_handler
   exit (1);
 }
 
-sub spawn
+sub main
 {
-  local ($pid) = fork;
-
-  die if (! defined ($pid));
-  if ($pid == 0)
+  if ($#ARGV < 1)
     {
-      exec (@_);
+      my $p = $0;
+      $p =~ s|.*/||;
+      print STDERR "Usage: $p [timeout] [command {args ...}]\n";
+      exit (1);
     }
-  return $pid;
+
+  $SIG{'ALRM'} = \&sigalrm_handler;
+  alarm ($ARGV[0]);
+  shift @ARGV;
+
+  $proc = spawn (@ARGV);
+  wait;
+  exit ($?);
 }
 
-__EOF__
+main();
 
 # with-timeout ends here
