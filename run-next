@@ -1,27 +1,14 @@
-#! /bin/sh
-# run-next --- run next instance of program in path after specified directory
+#!/bin/sh
+exec ${PERL-perl} -Swx $0 ${1+"$@"}
+#!perl
 
-# Copyright (C) 1995 Noah S. Friedman
+# run-next --- run next instance of program in path after specified directory
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-09-07
+# Public domain
 
-# $Id: run-next,v 1.4 1996/03/03 22:59:26 friedman Exp $
-
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2, or (at your option)
-# any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, you can either send email to this
-# program's maintainer or write to: The Free Software Foundation,
-# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
+# $Id: run-next,v 1.5 1999/12/23 17:25:11 friedman Exp $
 
 # Commentary:
 
@@ -41,17 +28,18 @@
 
 # Code:
 
-# Name by which this script was invoked.
-progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+use 5.003;
+use strict;
+use Getopt::Long;
 
-# To prevent hairy quoting and escaping later.
-bq='`'
-eq="'"
+(my $progname = $0) =~ s|.*/||;
+my $opt_print = 0;
+my $opt_skip = 0;
 
-usage="Usage: $progname {options} [program {program options}]
-
+sub usage
+{
+  print "Usage: $progname {options} [program {program options}]\n
 Options are:
--D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
 -h, --help                   You're looking at it.
 -p, --print                  Just print full name of program to run,
                              without running it.  Any program options are
@@ -59,220 +47,82 @@ Options are:
 -s, --skip           N       Run Nth instance of program in path.
                              This is relative to absolute pathname
                              specified in program name to run, if any.
-                             Default is 1.
-"
+                             Default is 1.\n";
+  exit (1);
+}
 
-# Clever way to save arguments whilst preserving quoting.
-# Note that only one set of args can be saved at a time.
-# Usage: eval "$save_current_args"
-#        eval "$restore_saved_args"
-save_current_args='
-  {
-    _saved_args=
-    while : ; do
-      case $# in 0 ) break ;; esac
-      eval _saved_args$#=\$1
-      _saved_args="$_saved_args \"\$_saved_args$#\""
-      shift
-    done
-    eval "$restore_saved_args"
-  }'
-restore_saved_args='
-  {
-    eval '\''{ eval set fnord $_saved_args ; }'\''
-    shift
-  }'
+sub err
+{
+  my $fatalp = shift;
+  my $msg = join (": ", $progname, @_);
+  print STDERR $msg, (substr ($msg, -1, 1) eq "\n"? "" : "\n");
+  exit (1) if $fatalp;
+  return undef;
+}
 
-# Initialize variables.
-# Don't use `unset' since old bourne shells don't have this command.
-# Instead, assign them an empty value.
-debug=
-printp=
-n=1
+sub main
+{
+  Getopt::Long::config ('bundling', 'autoabbrev');
+  GetOptions ("h|help",   \&usage,
+              "p|print",  \$opt_print,
+              "s|skip=i", \$opt_skip);
 
-# Usage: eval "$getopt"; value=$optarg
-# or     optarg_optional=t; eval "$getopt"; value=$optarg
-#
-# This function automatically shifts the positional args as appropriate.
-# The argument to an option is optional if the variable `optarg_optional'
-# is non-empty.  Otherwise, the argument is required and getopt will cause
-# the program to exit on an error.  optarg_optional is reset to be empty
-# after every call to getopt.  The argument (if any) is stored in the
-# variable `optarg'.
-#
-# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument
-# won't get used if first long option syntax was used.
-#
-# Note: because of broken bourne shells, using --foo=bar syntax can
-# actually screw the quoting of args that end with trailing newlines.
-# Specifically, most shells strip trailing newlines from substituted
-# output, regardless of quoting.
-getopt='
-  {
-    optarg=
-    case "$1" in
-      --*=* )
-        optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
-        shift
-       ;;
-      * )
-        case ${2+set} in
-          set )
-            optarg="$2"
-            shift
-            shift
-           ;;
-          * )
-            case "$optarg_optional" in
-              "" )
-                case "$1" in
-                  --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
-                  * ) option="$1" ;;
-                esac
-                exec 1>&2
-                echo "$progname: option $bq$option$eq requires argument."
-                echo "$progname: use $bq--help$eq to list option syntax."
-                exit 1
-               ;;
-           esac
-         ;;
-        esac
-     ;;
-    esac
-    optarg_optional=
-  }'
+  my $arg = shift @ARGV;
+  my ($progdir, $prog) = ($1, $2)
+    if ($arg =~ m|^(.*)/([^/]*)$|);
+  $progdir = "/" if (defined $progdir && $progdir eq "");
+  $prog = $arg unless (defined $prog);
 
-# Parse command line arguments.
-# Make sure that all wildcarded options are long enough to be unambiguous.
-# It's a good idea to document the full long option name in each case.
-# Long options which take arguments will need a `*' appended to the
-# canonical name to match the value appended after the `=' character.
-while : ; do
-  case $# in 0) break ;; esac
-  case "$1" in
-    -D | --debug | --d* )
-      debug=t
-      shift
-     ;;
-    -h | --help | --h )
-      echo "$usage" 1>&2
-      exit 0
-     ;;
-    -p | --print | --p* )
-      printp=t
-      shift
-     ;;
-    -s | --skip | --s* )
-      eval "$getopt"
-      n=$optarg
-     ;;
-    -- )     # Stop option processing
-      shift
-      break
-     ;;
-    -? | --* )
-      case "$1" in
-        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
-        * )     arg="$1" ;;
-      esac
-      exec 1>&2
-      echo "$progname: unknown or ambiguous option $bq$arg$eq"
-      echo "$progname: Use $bq--help$eq for a list of options."
-      exit 1
-     ;;
-    -??* )
-      # Split grouped single options into separate args and try again
-      optarg="$1"
-      shift
-      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
-      shift
-     ;;
-    * )
-      break
-     ;;
-  esac
-done
+  my $found_progdir = defined $progdir ? 0 : 1;
+  my %progdirs;
+  my $seen = 0;
+  my $execdir;
+  for my $dir (split (/:/, $ENV{PATH}))
+    {
+      $dir = "." if ($dir eq "");
 
-case "$debug" in t ) set -x ;; esac
+      if (!$found_progdir && $dir eq $progdir)
+        {
+          $found_progdir = 1;
+          next;
+        }
+      next unless ($found_progdir);
+      next if (exists $progdirs{$dir});
+      my $f = join ("/", $dir, $prog);
+      next unless (-x $f && -f $f);
+      $progdirs{$dir} = $seen++;
+      next unless ($seen > $opt_skip);
+      $execdir = $dir;
+      last;
+    }
 
-eval "$save_current_args"
+  err (1, $progdir, "directory not in PATH") unless ($found_progdir);
+  err (1, $prog, "program not in any directories after \`$progdir' in PATH")
+    if (scalar keys %progdirs == 0);
+  if ($seen <= $opt_skip)
+    {
+      err (0, $prog, sprintf ("program does not appear in %d places, only %d:",
+                              $opt_skip+1, $seen));
+      map { err (0, "  " . join ("/", $_, $prog)) }
+          sort { $progdirs{$a} <=> $progdirs{$b} } keys %progdirs;
+      exit (1);
+    }
 
-case "$1" in
-   */* )
-     set fnord `echo "$1" | sed -e 's/\(.*\)\/\([^/]*\)/\1 \2/'`
-     shift
-     progdir="$1"
-     prog="$2"
-    ;;
-   * )
-     progdir=
-     prog="$1"
-    ;;
-esac
+  my $execprog = join ("/", $execdir, $prog);
+  if ($opt_print)
+    {
+      print $execprog, "\n";
+      exit (0);
+    }
 
-# Do this, instead of "shift $#", since, amazingly, that is not portable.
-set fnord
-shift
+  exec ($execprog, @ARGV) || err (1, $execprog, "$!");
+}
 
-for d in `IFS=':'; echo $PATH`; do
-  case "$d" in '' ) d=. ;; esac
-  case " $* " in
-    # Do not add duplicate directories to search path
-    *" $d "* ) : ;;
-    * )
-      if test -f $d/$prog ; then
-        set fnord ${1+"$@"} "$d"
-        shift
-      fi
-     ;;
-  esac
-done
+main ();
 
-case "$progdir" in
-  '' ) : ;;
-  * )
-    found=nil
-    while test $# -gt 0; do
-      if test ".$1" = ".$progdir"; then
-        shift
-        found=t
-        break
-      fi
-      shift
-    done
-
-    if test $# -eq 0; then
-      exec 1>&2
-      case "$found" in
-        nil ) echo "$progname: $bq$progdir$eq not in PATH." ;;
-        t   ) echo "$progname: No $bq$prog$eq after $bq$progdir$eq in PATH." ;;
-      esac
-      exit 1
-    fi
-   ;;
-esac
-
-if test $n -gt $#; then
-  exec 1>&2
-  echo "$progname: $bq$prog$eq does not appear in $n places, only $#:"
-  for f in ${1+"$@"}; do
-    echo "$progname: $f/$prog"
-  done
-  exit 1
-fi
-
-eval execdir="\$$n"
-
-case "$printp" in
-  t )
-    echo "$execdir/$prog"
-    exit 0
-   ;;
-  * )
-    eval "$restore_saved_args"
-    shift
-    exec "$execdir/$prog" ${1+"$@"}
-   ;;
-esac
+# local variables:
+# mode: perl
+# eval: (auto-fill-mode 1)
+# end:
 
 # run-next ends here
