@@ -1,5 +1,5 @@
 #! /bin/sh
-# $Id: mkulinks-all,v 1.1 1995/11/08 22:24:28 friedman Exp $
+# $Id$
 # As of 1995-06-27, this is run nightly by cron on axiom.cli.com.
 
 PATH=/usr/etc:$PATH:/usr/lib
@@ -12,13 +12,34 @@ tmpfile="/tmp/$progname$$"
 
 trap 'rm -f "$tmpfile"' 0 1 2 3 15
 
-for h in `ypmatch sparc netgroup`; do
+# The sed script converts whitespace between hostnames in ypmatch output
+# into newlines, so that `sort' can sort and unique-ify lines.
+for h in `{
+            ypmatch sparc netgroup
+            ypmatch solaris2 netgroup
+          } | sed -ne "s/[ 	][ 	]*/ /g
+                       h
+                       s/.*//
+                       G
+                       :l
+                       / /{
+                         s/^\(.\)\([^ ]*\) /\1\2\1/
+                         t l
+                       }
+                       p" \
+            | sort -u`
+do
+  # 1995-12-06 throckmorton is unstable since we use it to test commercial
+  # installations and often leave the canonical /usr/local unmounted.
+  # For now, do not attempt to contact that host.
+  case "$h" in
+    throckmorton ) continue ;;
+  esac
+
   if ping $h 3 > /dev/null 2>&1 ; then
     rsh $h -n /usr/local/etc/mkulinks --errors-to=stdout \
                                       --link-directory=/home \
                                       --perl=/usr/local/bin/perl \
-                                      --remove-non-links \
-                                      --strip-non-user-links \
                                       --verbose \
      2>&1 | sed -e "/^Ignoring:/d
                     s/^/[$h] /"
@@ -28,7 +49,7 @@ done > "$tmpfile" 2>&1
 if test -s "$tmpfile"; then
   sendmail -oi -t < "$tmpfile" <<__EOF__
 From: $progname
-To: friedman
+To: friedman, cohen
 Subject: $progname output
 Reply-To: friedman
 
