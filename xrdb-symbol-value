@@ -1,10 +1,10 @@
 #! /bin/sh
 # xrdb-symbol-value --- get value of an xrdb symbol
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-04-05
 # Public domain
 
-# $Id: xrdb-symbol-value,v 1.2 1995/07/10 16:31:38 friedman Exp friedman $
+# $Id: xrdb-symbol-value,v 1.3 1995/07/10 18:47:46 friedman Exp $
 
 # Commentary:
 
@@ -16,28 +16,24 @@
 case "${XRDB_SYMBOLS+set}" in
   set ) : ;;
   * )
-    XRDB_SYMBOLS="`xrdb -symbols`"
-    case "$DISPLAY" in
-      # If display does not contain an explicit screen number (e.g. 0.0),
-      # then there are multiple screens associated with the display and
-      # xrdb -symbols is going to spit out comments.
-      # We really want a way to determine which syms we want since they
-      # may vary from screen to screen, but I just don't know of any
-      # method of deciding which to use.
-      *:*.* ) : ;;
-      * )     XRDB_SYMBOLS="`echo \"$XRDB_SYMBOLS\" | sed -e '/^#/d'`" ;;
-    esac
+    # The -screen argument should limit the output to the current screen if
+    # there is more than one; if the display does not refer to a specific
+    # screen (e.g. set to ":0", then the default screen should be selected.
+    # To get information about a different screen, set DISPLAY to that screen.
+    XRDB_SYMBOLS="`xrdb -symbols -screen`"
    ;;
 esac
 
-echo "$XRDB_SYMBOLS" \
-  | sed -ne '/-D'"$1"'=/!d
-             s/.*-D'"$1"'=//
-             s/-D.*//
-             s/[ 	][ 	]*/ /g
-             s/^[ 	][ 	]*//g
-             s/[ 	][ 	]*$//g
-             p
-             q'
+while test $# -gt 0 ; do
+  echo "$XRDB_SYMBOLS" \
+    | sed -n -e '/-D'"$1"'=/!d' \
+             -e 's/^-D[^=]*=//' \
+             -e 's/"//g' \
+             -e 's/[ 	][ 	]*/ /g' \
+             -e 's/^ //' \
+             -e 's/ $//' \
+             -e p -e q
+  shift
+done
 
 # xrdb-symbol-value ends here
