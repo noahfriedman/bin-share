@@ -1,0 +1,479 @@
+#! /bin/sh
+# mozwhack --- patch mozilla client executables for netscape.cfg lookup
+
+# Author: Noah Friedman <friedman@netscape.com>
+# Created: 1997-09-18
+
+# $Id$
+
+# Commentary:
+
+# This program modifies the hardwired path in Mozilla executables used to
+# search for `netscape.cfg', the distributed admin stub file ("Mission
+# Control", as it was called for Communicator 4.0).
+#
+# The directory specified must have a subdirectory called `app-defaults' in
+# which the netscape.cfg file actually resides.  This is another policy
+# that is hardwired into the executable, and this program can't change that.
+#
+# There is a flag that can be set in the executable (via the --require-cfg
+# option) which will cause the executable to abort (without any warning or
+# explanation, unfortunately) if the netscape.cfg file cannot be found.  I
+# don't recommend enabling this flag; it's too fascist.
+
+# You must have the libAutoAdmin.so plugin in order to use Mission Control.
+# That file must be located in $MOZILLA_HOME, not $MOZILLA_HOME/plugins.
+# Furthermore, as of Communicator 4.03, the MOZILLA_HOME environment
+# variable must end with a trailing `/', or the executable will attempt to
+# load the wrong file name for the autoadmin module.
+
+# Code:
+
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+suffix=whacked
+
+usage="Usage: $progname [filename] [cfg dir]
+
+Options are:
+-D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-h, --help                   You're looking at it.
+-o, --output-file   FILE     Write output to file FILE.  By default, the
+                             output file is written to the current working
+                             directory with the name of the input file
+                             appended by $bq${bq}.$suffix$eq$eq.
+-R, --no-require-cfg         Allow mozilla executable to run without
+                             netscape.cfg file present.
+-r, --require-cfg            Do not allow mozilla executable to run without
+                             netscape.cfg file present.
+-v, --verbose                Be verbose.
+"
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+verbose=
+outfile=
+perl="${PERL-perl}"
+MOZWHACK_VERBOSE=
+MOZWHACK_REQUIRE=asis
+
+# Usage: eval "$getopt"; value=$optarg
+# or     optarg_optional=t; eval "$getopt"; value=$optarg
+#
+# This function automatically shifts the positional args as appropriate.
+# The argument to an option is optional if the variable `optarg_optional'
+# is non-empty.  Otherwise, the argument is required and getopt will cause
+# the program to exit on an error.  optarg_optional is reset to be empty
+# after every call to getopt.  The argument (if any) is stored in the
+# variable `optarg'.
+#
+# Long option syntax is `--foo=bar' or `--foo bar'.
+# For optional args, you must use the `--foo=bar' long option syntax
+# if the argument starts with `-', otherwise the argument will be ignored
+# and treated as the next option.
+#
+# Note: because of broken bourne shells, using --foo=bar syntax can
+# actually screw the quoting of args that end with trailing newlines.
+# Specifically, most shells strip trailing newlines from substituted
+# output, regardless of quoting.
+getopt='
+  {
+    optarg=
+    case "$1" in
+      --*=* ) optarg=`echo "$1" | sed -e "1s/^[^=]*=//"` ; shift ;;
+      -* )
+        case "${2+set}:$optarg_optional" in
+          set: ) optarg="$2" ; shift ; shift ;;
+          set:?* )
+            case "$2" in
+              -* ) shift ;;
+              * )  optarg="$2"; shift; shift ;;
+            esac
+           ;;
+          : )
+            option="$1"
+            case "$option" in
+              --*=* ) option=`echo "$option" | sed -e "1s/=.*//;q"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$progname: use $bq--help$eq to list option syntax." 1>&2
+            exit 1
+           ;;
+          * ) shift ;;
+        esac
+       ;;
+    esac
+    optarg_optional=
+  }'
+
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
+    -D | --debug | --d* )
+      set -x
+      debug=-d
+      shift
+     ;;
+    -h | --help | --h* )
+      echo "$usage" 1>&2
+      exit 0
+     ;;
+    -o | --output-file* | --o* )
+      eval "$getopt"
+      outfile="$optarg"
+     ;;
+    -R | --no-require-cfg | --n* )
+      MOZWHACK_REQUIRE=no
+      shift
+     ;;
+    -r | --require-cfg | --r* )
+      MOZWHACK_REQUIRE=yes
+      shift
+     ;;
+    -v | --verbose | --v* )
+      MOZWHACK_VERBOSE=t
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -? | --* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    -??* )
+      # Split grouped single options into separate args and try again
+      optarg="$1"
+      shift
+      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+      shift
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+MOZWHACK_PROGNAME="$progname"
+export MOZWHACK_PROGNAME MOZWHACK_REQUIRE MOZWHACK_VERBOSE
+
+case $# in
+  2 ) : ;;
+  * )
+    echo "$usage" 1>&2
+    exit 1
+   ;;
+esac
+
+infile="$1"
+whackdir="$2"
+shift
+shift
+
+case "$outfile" in
+  '' )
+    case "$infile" in
+      - ) outfile="stdin.$suffix" ;;
+      * ) outfile=`echo "$infile" | sed -e 's/\\/*$//;s/.*\\///'`.$suffix ;;
+    esac
+   ;;
+esac
+
+exec $perl $debug - "$infile" "$outfile" "$whackdir" 9<&0 << '__EOF__'
+
+&main (@ARGV);
+
+sub main
+{
+  local ($infile, $outfile, $whackdir) = @_;
+  local ($infile_name, $outfile_name) = ("\`$infile'", "\`$outfile'");
+
+  &initialize ();
+
+  $infile_name  = "standard input"  if ($infile eq "-");
+  $outfile_name = "standard output" if ($outfile eq "-");
+
+  $infile  = "&9"      if ($infile eq "-");
+  $outfile = "&STDOUT" if ($outfile eq "-");
+
+  &fatal ($infile, "Cannot read and write to same file.")
+    if ($infile_name eq $outfile_name);
+
+  open (INFILE,  "<$infile")  || fatal ("open(r)", $infile, "$!");
+  open (OUTFILE, ">$outfile") || fatal ("open(w)", $outfile, "$!");
+
+  &verbose ("Reading input from $infile_name.");
+  &transform (INFILE, OUTFILE, $whackdir, $outfile);
+  close (INFILE);
+  close (OUTFILE);
+  &fix_perms ($infile, $outfile);
+  &verbose ("Output written to $outfile_name.");
+}
+
+sub initialize
+{
+  $EKIT_ENABLED  = 0x01;
+  $EKIT_REQUIRED = 0x02;
+
+  $re_ekit = sprintf ("(%c|%c|%c)",
+                      $EKIT_ENABLED, $EKIT_REQUIRED,
+                      $EKIT_ENABLED | $EKIT_REQUIRED);
+
+  $signature = "\177\222\223\235\112\223\235\112"
+             . "\213\230\112\217\127\225\223\236"
+             . "\112\237\230\223\233\237\217\112"
+             . "\235\236\234\223\230\221\113\0";
+
+  $sig_length     = length ($signature);
+  $version_length = 8;
+
+  # This value should be larger than the actual structure size is likely to
+  # be; we'll adjust downward.
+  $PATH_MAX   = 4096;
+  $verified_PATH_MAX = 0;
+  &initialize_patch_struct ($PATH_MAX);
+}
+
+sub initialize_patch_struct
+{
+  local ($root_length) = $_[0] + 1;
+
+  $patch_struct_template = "a$sig_length"     # unsigned char signature[32];
+                         . "a$version_length" # char version[8];
+                         . "a$root_length"    # char root[PATH_MAX+1];
+                         . "C";               # unsigned char whacked;
+
+  $patch_struct_len = length (pack ($patch_struct_template, '', '', '', ''));
+}
+
+sub transform
+{
+  local ($in, $out, $whackdir, $outfile_name) = @_;
+  local ($buffer, $idx, $idx_offset);
+  local ($blocksize) = 1024 * 1024;  # bytes
+  local ($bytesread, $total_bytesread, $buflen) = (0, 0, 0);
+
+  # It would have been simpler to just read the entire executable into
+  # memory, then do the search/modify on the buffer and write it back out.
+  # But Mozilla executables are over 10MB in some cases.
+  #
+  # This algorithm reads blocks, searches for the signature, and if not
+  # found writes out most of the buffer except for the very end
+  # in case the signature crosses block boundaries.
+  while (1)
+    {
+      $bytesread = read ($in, $buffer, $blocksize, $buflen);
+      last if (! defined ($bytesread) || $bytesread < 1);
+      $total_bytesread += $bytesread;
+      $buflen += $bytesread;
+
+      $idx_offset = $buflen - $bytesread - $sig_lenth;
+      $idx_offset = 0 if ($idx_offset < 0);
+      $idx = index ($buffer, $signature, $idx_offset);
+      if ($idx >= 0)
+        {
+          local ($offset) = $total_bytesread - $buflen + $idx;
+          &verbose ("Found signature at offset $offset.");
+
+          while ($buflen < ($idx_offset + $patch_struct_len))
+            {
+              &verbose ("Structure crosses block boundary; reading...");
+
+              $bytesread = read ($in, $buffer, $blocksize, $buflen);
+              &fatal ("Unexpected end of file while reading structure")
+                if (! defined ($bytesread) || $bytesread < 1);
+              $total_bytesread += $bytesread;
+              $buflen += $bytesread;
+            }
+
+          &determine_patch_struct_size ($idx, \$buffer);
+          if (length ($whackdir) > $PATH_MAX)
+            {
+              close ($in);
+              close ($out);
+              unlink ($outfile_name);
+              &fatal ($whackdir, "name exceeds max length ($PATH_MAX)");
+            }
+          &whack ($idx, \$buffer, $whackdir);
+        }
+
+      if (($buflen - $sig_length) > $sig_length)
+        {
+          print $out substr ($buffer, 0, $buflen - $sig_length);
+          $buffer = substr ($buffer, $buflen - $sig_length);
+          $buflen = $sig_length;
+        }
+    }
+  # Flush remaining buffer.
+  print $out $buffer;
+}
+
+# This function guesses the size of the patch structure by looking for the
+# EKIT_* key bytes, none of which should appear between the signature and
+# the proper end of the structure.  We can't just hardcode the length
+# because it varies from platform to platform (e.g. 255 bytes for SunOS
+# 4.x, 1024 bytes for Solaris, etc.)
+#
+# This function depends on patch structure member order.
+sub determine_patch_struct_size
+{
+  local ($idx, $buffer) = @_;
+  local ($x) = substr ($$buffer,
+                       $idx + $sig_length + $version_length,
+                       $patch_struct_len);
+
+  if ($x =~ m/$re_ekit/go)
+    {
+      # Substract one for the pos of the `whacked' flag which we just
+      # found, and subtract one more for the pathname null terminator.
+      $PATH_MAX = pos ($x) - 2;
+      $verified_PATH_MAX = 1;
+      &verbose ("Max allowed path length = $PATH_MAX bytes");
+    }
+  else
+    {
+      $PATH_MAX = 255;
+      print STDERR "warning: cannot determine max path length; "
+                 . "assumuming $PATH_MAX.\n";
+    }
+  &initialize_patch_struct ($PATH_MAX);
+}
+
+sub whack
+{
+  local ($idx, $buffer, $whackdir) = @_;
+  local ($datastr) = substr ($$buffer, $idx, $patch_struct_len);
+  local (%data) = unpack_patch_struct ($datastr);
+  local ($require) = &getenv ("MOZWHACK_REQUIRE");
+
+  &verbose ("Old directory", $data{'root'});
+  &verbose ("New directory", $whackdir);
+  $data{'root'} = $whackdir;
+
+  &verbose ("This binary previously edited by version $data{version}")
+    if (substr ($data{'version'}, 0, 1) ne chr (0));
+  $data{'version'} = '0.1.mw';
+
+  if ($verified_PATH_MAX)
+    {
+      if ($require eq 'yes')
+        {
+          $data{'whacked'} |= $EKIT_REQUIRED;
+          &verbose ("Executable will require config file.");
+        }
+      elsif ($require eq 'no')
+        {
+          $data{'whacked'} |= $EKIT_REQUIRED;
+          $data{'whacked'} ^= $EKIT_REQUIRED;
+          &verbose ("Executable will NOT require config file.");
+        }
+      else
+        {
+          &verbose ("Executable requires config file",
+                    ($data{'whacked'} & $EKIT_REQUIRED)? "yes" : "no");
+        }
+    }
+  else
+    {
+      if ($require eq 'asis')
+        {
+          &verbose ("Can't tell whether executable requires config file.");
+        }
+      else
+        {
+          &verbose ("Cannot change requirement for config file.");
+        }
+    }
+
+  $datastr = &pack_patch_struct (%data);
+  # Ewww, functions as lvalues.  But this modifies the buffer in place,
+  # which we want.
+  substr ($$buffer, $idx, $patch_struct_len) = $datastr;
+}
+
+sub fix_perms
+{
+  local ($infile, $outfile) = @_;
+  local (@attrs) = stat ($infile);
+
+  return if (! defined (@attrs));
+  chmod ($attrs[2], $outfile);
+  chown ($attrs[4], $attrs[$5], $outfile);
+  chmod ($attrs[2], $outfile);
+}
+
+sub unpack_patch_struct
+{
+  local (@vals) = unpack ($patch_struct_template, $_[0]);
+  local (%new);
+  $new{'signature'} = $vals[0];
+  $new{'version'}   = $vals[1];
+  $new{'root'}      = $vals[2];
+  $new{'whacked'}   = $vals[3];
+  return %new;
+}
+
+sub pack_patch_struct
+{
+  local (%d) = @_;
+  pack ($patch_struct_template,
+        $d{'signature'}, $d{'version'}, $d{'root'}, $d{'whacked'});
+}
+
+sub err
+{
+  print (STDERR join(": ", &getenv ('MOZWHACK_PROGNAME'), @_) . "\n");
+}
+
+sub fatal
+{
+  unshift (@_, 'FATAL');
+  &err (@_);
+  exit (1);
+}
+
+sub verbose
+{
+  if (&getenv ("MOZWHACK_VERBOSE"))
+    {
+      local ($s) = sprintf ("%s", join(": ", @_));
+      local ($i) = index ($s, chr (0));
+      $s = substr ($s, 0, $i) if ($i > 0);
+      print STDERR "$s\n";
+    }
+}
+
+sub getenv
+{
+  local ($x) = $ENV{$_[0]};
+  return $x if (defined ($x) && $x ne '');
+  return undef;
+}
+
+sub putenv
+{
+  $ENV{$_[0]} = $_[1];
+}
+
+__EOF__
+
+# mozwhack ends here
