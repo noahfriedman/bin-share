@@ -8,7 +8,7 @@ exec ${PERL-perl} -Swx $0 ${1+"$@"}
 # Created: 1995-09-07
 # Public domain
 
-# $Id: run-next,v 1.6 2000/08/06 11:52:34 friedman Exp $
+# $Id: run-next,v 1.7 2000/08/10 10:02:42 friedman Exp $
 
 # Commentary:
 
@@ -77,7 +77,8 @@ sub main
   my %progdirs;
   my $seen = 0;
   my $execdir;
-  foreach my $dir (split (/:/, $ENV{PATH}))
+  my $dir;
+  foreach $dir (split (/:/, $ENV{PATH}))
     {
       $dir = "." if ($dir eq "");
 
