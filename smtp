@@ -1,11 +1,12 @@
 #!/bin/sh
-# smtp --- kludgy hack to connect to smtp servers by abbreviated hostname
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# smtp --- connect to smtp servers
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-04-15
 # Public domain
 
-# $Id: smtp,v 1.7 1997/10/16 02:28:55 friedman Exp $
+# $Id: smtp,v 1.8 1998/07/21 02:21:47 friedman Exp $
 
+# Recognize some abbreviations for frequently-referenced hosts
 case "$1" in
   aeneas )             h=aeneas.mit.edu            ;;
   ai | life )          h=life.ai.mit.edu           ;;
@@ -21,10 +22,33 @@ case "$1" in
   media )              h=media.mit.edu             ;;
   osu | cis )          h=cis.ohio-state.edu        ;;
   piglet )             h=piglet.splode.com         ;;
-  red-bean )           h=totoro.red-bean.com       ;;
+  red-bean )           h=red-bean.com              ;;
   * )                  h="$1"                      ;;
 esac
 
-exec tcpconnect -v $h ${2-smtp}
+# Look up MX record for host, if any.
+# Note that we only look at the first MX record for a host.
+# If there are others and the connection request to the primary fails, this
+# script will not presently contact secondary MXers.
+mx=`dig "$h" mx \
+      | sed -n -e '
+         /^;; ANSWER/{
+           :l
+           n
+           /^;;/q
+           /^'"$h"'\..*MX/!b l
+           s/.*MX[ 	]*//
+           s/\.$//
+           p
+           b l
+         }' \
+      | sort -n \
+      | sed -e '1!d' -e 's/.*[ 	]//'`
+
+case "$mx" in
+  '' ) mx="$h" ;;
+esac
+
+exec tcpconnect -v "$mx" ${2-smtp}
 
 # smtp ends here

@@ -1,0 +1,30 @@
+#!/bin/sh
+# mx --- find MX hosts for a host name
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 1999-07-24
+# Public domain
+
+# $Id$
+
+justone=
+case "$1" in
+  -1 ) shift; justone='1!d' ;;
+esac
+
+dig "$1" mx \
+ | sed -n -e '
+       /^;; ANSWER/{
+         :l
+         n
+         /^;;/q
+         /^'"$1"'\..*MX/!b l
+         s/.*MX[ 	]*//
+         s/\.$//
+         p
+         b l
+       }' \
+ | sort -n \
+ | sed -e 's/.*[ 	]//' \
+       -e "$justone"
+
+# mx ends here.
