@@ -2,8 +2,9 @@
 # countmail --- be obnoxious about how much mail you have
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1993-02-22
-# Last modified: 1994-03-31
 # Public domain
+
+# $Id$
 
 # Commentary:
 
@@ -15,23 +16,101 @@
 
 # Code:
 
-case $# in
-  0 ) for dir in /usr/spool/mail /var/mail /usr/mail; do
-        if test -d "$dir" ; then
-          prefix="$dir/"
-          break
-        fi
-      done
-      file="$prefix`(whoami) 2> /dev/null`" \
-       || file="$prefix`id | sed -ne 's/.*uid=[0-9]*(//;s/).*//;p'`"
-     ;;
-  * ) file="$1" ;;
+case " $* " in
+  '  ') 
+    for dir in /usr/spool/mail /var/mail /usr/mail; do
+      if test -d "$dir" ; then
+        prefix="$dir/"
+        break
+      fi
+    done
+
+    user=${USER-${LOGNAME-`{ (whoami) 2> /dev/null; } \
+                           || { id | sed -ne 's/.*uid=[0-9]*(//
+                                              s/).*//
+                                              p'
+                              }`}}
+
+    set fnord "$prefix$user"
+    shift
+   ;;
+  *' - '* ) 
+    _saved_args=
+    stdin_tmpfile=
+    stdin_file_found=
+    while : ; do
+      case $# in 0 ) break ;; esac
+      case "$1" in
+        - )
+          # We can only read from stdin once.
+          case "$stdin_file_found" in t ) continue ;; esac
+          stdin_file_found=t
+
+          # Test to see if grep interprets `-' to mean stdin.  
+          # If it doesn't, then we must save stdin to a temporary file and
+          # mutate the arguments to this script to replace `-' with the
+          # name of that tmp file.
+          (
+            if test -f - ; then
+              cd /tmp
+              if test -f - ; then
+                tmpdir=/tmp/cntmail$$
+                mkdir "$tmpdir"
+                cd "$tmpdir"
+                echo chdir to "$tmpdir"
+
+                trap '{
+                        exitstat=$?
+                        cd /
+                        rm -rf "$tmpdir"
+                        trap "" 0
+                        exit $exitstat
+                      }' 0 1 2 15
+              fi
+            fi
+
+            ${GREP-grep} fnord - > /dev/null 2>&1 << __EOF__
+fnord
+__EOF__
+          )
+
+          case $? in
+            0 )
+              eval _saved_args$#=\$1
+             ;;
+            * )
+              trap '{
+                      exitstat=$?
+                      rm -f "$stdin_tmpfile" 2> /dev/null
+                      trap "" 0
+                      exit $exitstat
+                    }' 0 1 2 15
+
+              stdin_tmpfile=/tmp/cntmail$$
+              (
+                umask 077
+                cat > "$stdin_tmpfile"
+              )
+              eval _saved_args$#=\$stdin_tmpfile
+             ;;
+          esac
+         ;;
+        * )
+          eval _saved_args$#=\$1
+         ;;
+      esac
+      _saved_args="$_saved_args \"\$_saved_args$#\""
+      shift
+    done
+    eval '{ eval set fnord $_saved_args ; }'
+    shift
+   ;;
 esac
 
-set fnord `grep '^From ' "$file" 2> /dev/null | wc -l`
+set fnord `${GREP-grep} '^From ' ${1+"$@"} 2> /dev/null | wc -l`
 shift
 
-eval set fnord "`echo ${1+\"$@\"} | sed -n -e '
+eval set fnord "`echo ${1+\"$@\"} | sed -ne '
   s/[, ]//g
   s/^00*/0/g
   s/\(.\)\(.\)\(.\)$/\"\1 \2 \3\"/
@@ -110,27 +189,27 @@ while : ; do
   if test ".$d1$d2$d3" != '.000' ; then
     case $# in
        0 | 1 ) ;;
-       2 ) result="${result}THOUSAND "                    ;;
-       3 ) result="${result}MILLION "                     ;;
-       4 ) result="${result}BILLION "                     ;;
-       5 ) result="${result}TRILLION "                    ;;
-       6 ) result="${result}QUADRILLION "                 ;;
-       7 ) result="${result}QUINTILLION "                 ;;
-       8 ) result="${result}SEXTILLION "                  ;;
-       9 ) result="${result}SEPTILLION "                  ;;
-      10 ) result="${result}OCTILLION "                   ;;
-      11 ) result="${result}NONILLION "                   ;;
-      12 ) result="${result}DECILLION "                   ;;
-      13 ) result="${result}UNDECILLION "                 ;;
-      14 ) result="${result}DUODECILLION "                ;;
-      15 ) result="${result}TREDECILLION "                ;;
-      16 ) result="${result}QUATTUORDECILLION "           ;;
-      17 ) result="${result}QUINDECILLION "               ;;
-      18 ) result="${result}SEXDECILLION "                ;;
-      19 ) result="${result}SEPTENDECILLION "             ;;
-      20 ) result="${result}OCTODECILLION "               ;;
-      21 ) result="${result}NOVEMDECILLION "              ;;
-      22 ) result="${result}VIGINTILLION "                ;;
+       2 ) result="${result}THOUSAND "          ;;
+       3 ) result="${result}MILLION "           ;;
+       4 ) result="${result}BILLION "           ;;
+       5 ) result="${result}TRILLION "          ;;
+       6 ) result="${result}QUADRILLION "       ;;
+       7 ) result="${result}QUINTILLION "       ;;
+       8 ) result="${result}SEXTILLION "        ;;
+       9 ) result="${result}SEPTILLION "        ;;
+      10 ) result="${result}OCTILLION "         ;;
+      11 ) result="${result}NONILLION "         ;;
+      12 ) result="${result}DECILLION "         ;;
+      13 ) result="${result}UNDECILLION "       ;;
+      14 ) result="${result}DUODECILLION "      ;;
+      15 ) result="${result}TREDECILLION "      ;;
+      16 ) result="${result}QUATTUORDECILLION " ;;
+      17 ) result="${result}QUINDECILLION "     ;;
+      18 ) result="${result}SEXDECILLION "      ;;
+      19 ) result="${result}SEPTENDECILLION "   ;;
+      20 ) result="${result}OCTODECILLION "     ;;
+      21 ) result="${result}NOVEMDECILLION "    ;;
+      22 ) result="${result}VIGINTILLION "      ;;
       * ) 
         echo "countmail: you have too much mail." 1>&2; 
         exit 1 
