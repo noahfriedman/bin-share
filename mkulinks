@@ -1,67 +1,395 @@
-#! /usr/local/bin/perl
-# mkhomelinks --- create links in /home for user home directories
+#! /bin/sh
+# mkulinks --- create links in /home for user home directories
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-06-23
 # Public domain.
 
-# $Id: mkhomelinks,v 1.1 1995/06/23 21:50:47 friedman Exp friedman $
+# $Id: mkulinks,v 1.2 1995/09/05 20:51:48 friedman Exp friedman $
 
-$tophome = "/home";
+# Commentary:
+# Code:
 
-while (@pwent = getpwent ())
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options}
+
+Options are:
+-D, --debug                  Enable interative perl debugging.
+-h, --help                   You're looking at it.
+-l, --link-directory  DIR    Make symlinks in DIR (default: /u)
+-s, --strip-non-user-links   Remove symlinks which do not correspond to the
+                             name of any user account.
+-r, --remove-non-links       Remove any non-symlinks.
+                             WARNING: this option will remove files and
+                             entire directory hierarchies.
+-v, --verbose                Report file operations.
+"
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+MKULINKS_HOMEDIR=/u
+MKULINKS_STRIP=
+MKULINKS_RMNONLINKS=
+MKULINKS_VERBOSE=
+export MKULINKS_HOMEDIR    MKULINKS_STRIP
+export MKULINKS_RMNONLINKS MKULINKS_VERBOSE
+
+# Usage: eval "$getopt"; value=$optarg
+# or     optarg_optional=t; eval "$getopt"; value=$optarg
+#
+# This function automatically shifts the positional args as appropriate.
+# The argument to an option is optional if the variable `optarg_optional'
+# is non-empty.  Otherwise, the argument is required and getopt will cause
+# the program to exit on an error.  optarg_optional is reset to be empty
+# after every call to getopt.  The argument (if any) is stored in the
+# variable `optarg'.
+#
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument
+# won't get used if first long option syntax was used.
+#
+# Note: because of broken bourne shells, using --foo=bar syntax can
+# actually screw the quoting of args that end with trailing newlines.
+# Specifically, most shells strip trailing newlines from substituted
+# output, regardless of quoting.
+getopt='
   {
-    if (&invalid_user_p (@pwent)) { next; }
+    optarg=
+    case "$1" in
+      --*=* )
+        optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
+        shift
+       ;;
+      * )
+        case ${2+set} in
+          set )
+            optarg="$2"
+            shift
+            shift
+           ;;
+          * )
+            case "$optarg_optional" in
+              "" )
+                case "$1" in
+                  --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
+                  * ) option="$1" ;;
+                esac
+                exec 1>&2
+                echo "$progname: option $bq$option$eq requires argument."
+                echo "$progname: use $bq--help$eq to list option syntax."
+                exit 1
+               ;;
+           esac
+         ;;
+        esac
+     ;;
+    esac
+    optarg_optional=
+  }'
 
-    local ($user, $pw, $uid, $gid, $quota, $comment, $gcos, $home, $shell)
-      = @pwent;
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
+    -D | --debug | --d* )
+      debug=-d
+      shift
+     ;;
+    -h | --help | --h )
+      echo "$usage" 1>&2
+      exit 0
+     ;;
+    -l | --link-directory* | --l* )
+      eval "$getopt"
+      MKULINKS_HOMEDIR="$optarg"
+     ;;
+    -s | --strip-non-user-links | --s* )
+      MKULINKS_STRIP=t
+      shift
+     ;;
+    -r | --remove-non-links | --r* )
+      MKULINKS_RMNONLINKS=t
+      shift
+     ;;
+    -v | --verbose | --v* )
+      MKULINKS_VERBOSE=t
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -? | --* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    -??* )
+      # Split grouped single options into separate args and try again
+      optarg="$1"
+      shift
+      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+      shift
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
 
-    local ($symlink) = $tophome . "/" . $user;
+case "$debug" in -d ) set -x ;; esac
 
-    if ($symlink ne $home)
-      {
-        # Don't clobber entry if it's not a symlink already.
-        if (-e $symlink && ! -l $symlink) { next; }
+MKULINKS_PROGNAME="$progname"
+export MKULINKS_PROGNAME
 
-        local ($linkname) = readlink ($symlink);
+exec perl $debug - ${1+"$@"} <<'__EOF__'
 
-        if (-d $home)
-          {
-            if ($linkname ne $home)
-              {
-                # Create symlink to home directory.
-                unlink ($symlink);
-                symlink ($home, $symlink);
-              }
-          }
-        else
-          {
-            # Remove symlink; it doesn't point to anything that exists.
-            unlink ($symlink);
-          }
-      }
-  }
+&main;
+
+sub main
+{
+  $progname = $ENV{'MKULINKS_PROGNAME'};
+  $tophome = $ENV{'MKULINKS_HOMEDIR'};
+
+  &make_top ($tophome);
+
+  if ($ENV{'MKULINKS_RMNONLINKS'} eq 't')
+    {
+      &prune_directory ($tophome, 0);
+    }
+
+  undef %homelinks;
+
+  if ($ENV{'MKULINKS_STRIP'} eq 't')
+    {
+      %homelinks = &getdirentries ($tophome);
+    }
+
+  %homelinks = &make_links (%homelinks);
+
+  if ($ENV{'MKULINKS_STRIP'} eq 't')
+    {
+      &remove_non_user_links ($tophome, %homelinks);
+    }
+}
+
+sub make_top
+{
+  local ($tophome) = @_;
+
+  if (-e $tophome)
+    {
+      if (! -d $tophome)
+        {
+          &errmsg ($tophome, "File exists and is not a directory.");
+          &errmsg ("Aborting.");
+          exit (1);
+        }
+    }
+  else
+    {
+      &verbose ("Creating", $tophome);
+      if (! mkdir ($tophome, 0777))
+        {
+          &iferr ("mkdir", $tophome, "$!.");
+          &errmsg ("Aborting.");
+          exit (1);
+        }
+    }
+}
+
+sub getdirentries
+{
+  local ($dir) = @_;
+  local (@files, %files);
+
+  if (! opendir (DIRHNDL, $dir))
+    {
+      iferr ("opendir", "$dir", "$!.");
+      return %files;
+    }
+
+  @files = grep (-l, readdir (DIRHNDL));
+  close (DIRHNDL);
+
+  foreach $dir (@files)
+    {
+      $files{$dir} = '';
+    }
+
+  return %files;
+}
+
+# This function performs the equivalent of an `rm -rf'.
+# However, if the second arg is 0, it does not remove symlinks.
+sub prune_directory
+{
+  local ($dir, $linksp) = @_;
+
+  local (@files, %files);
+
+  if (! opendir (DIRHNDL, $dir))
+    {
+      iferr ("opendir", "$dir", "$!.");
+      return 0;
+    }
+
+  @files = grep (!/^\.\.?$/, readdir (DIRHNDL));
+  close (DIRHNDL);
+
+  if (! $linksp)
+    {
+      local (@ofiles) = @files;
+      local ($i) = 0;
+
+      undef (@files);
+
+      foreach $file (@ofiles)
+        {
+          if (! -l "$dir/$file")
+            {
+              $files[$i] = $file;
+              $i++;
+            }
+        }
+    }
+
+  foreach $ent (@files)
+    {
+      local ($file) = "$dir/$ent";
+
+      if (-d $file)
+        {
+          &prune_directory ($file, 1);
+          &verbose ("Removing", $file, "Directory, not symbolic link.");
+          if (! rmdir ($file))
+            {
+              &iferr ("rmdir", $file, "$!.");
+            }
+        }
+      else
+        {
+          &verbose ("Removing", $file, "File, not symbolic link.");
+          &unlink1 ($file);
+        }
+    }
+}
+
+sub make_links
+{
+  local (%homelinks) = @_;
+  local (%processed);
+
+  while (@pwent = getpwent ())
+    {
+      local ($user, $pw, $uid, $gid, $quota, $comment, $gcos, $home, $shell)
+        = @pwent;
+
+      # We avoid processing any account twice.  If a user account is
+      # duplicated both in an NIS database and in the local passwd file,
+      # getpwent will eventually return both instances.  However, it seems
+      # that the NIS entry is returned first.  Regardless, the symlink
+      # created should match the home directory of the user account
+      # normally referenced by other programs, i.e. the first one.
+      if (defined ($processed{$user}))
+        {
+          &verbose ("Ignoring", $user, "Duplicate passwd entry.");
+          next;
+        }
+      $processed{$user} = 1;
+      delete ($homelinks{$user});
+
+      if (&invalid_user_p (@pwent))
+        {
+          &verbose ("Ignoring", $user, "Exempt username.");
+          next;
+        }
+
+      local ($symlink) = $tophome . "/" . $user;
+
+      if ($symlink ne $home)
+        {
+          # Don't clobber entry if it's not a symlink already.
+          if (-e $symlink && ! -l $symlink)
+            {
+              &verbose ("Skipping", $user, $symlink, "Not a symbolic link.");
+              next;
+            }
+
+          local ($linkname) = readlink ($symlink);
+
+          if (-d $home)
+            {
+              if ($linkname ne $home)
+                {
+                  if (-l $symlink)
+                    {
+                      &verbose ("Updating", "$symlink -> $home");
+                      &unlink1 ($symlink);
+                    }
+                  else
+                    {
+                      &verbose ("Creating", "$symlink -> $home");
+                    }
+
+                  if (! symlink ($home, $symlink))
+                    {
+                      &iferr ("symlink", "$symlink -> $home", "$!.");
+                    }
+                }
+            }
+          else
+            {
+              if (-l $symlink)
+                {
+                  # Remove symlink; it doesn't point to anything that exists.
+                  &verbose ("Removing", $symlink, "$linkname nonexistent");
+                  &unlink1 ($symlink);
+                }
+            }
+        }
+    }
+
+  return %homelinks;
+}
+
+sub remove_non_user_links
+{
+  local ($tophome, %homelinks) = @_;
+
+  foreach $dir (sort (keys (%homelinks)))
+    {
+      local ($symlink) = $tophome . "/" . $dir;
+
+      if (-l $symlink)
+        {
+          &verbose ("Deleting", $symlink, "Not a user link.");
+          &unlink1 ($symlink);
+        }
+    }
+}
 
 # Various heuristics to decide if this is a real user account or not.
 sub invalid_user_p
 {
-  local ($user, $pw, $uid, $gid, $quota, $comment, $gcos, $home, $shell)
-    = @pwent;
+  local ($user, $pw, $uid, $gid, $quota, $comment, $gcos, $home, $shell) = @_;
 
-  # Special exception for the following accounts.
-  if ($user eq "www"
-      || $user eq "ftp")
-    {
-      return 0;
-    }
-
-  if ($pw =~ /[*]/          # * is never a valid char in ciphertext
-      || $pw =~ /nologin/
-      || $uid < 100
-      || $home eq "/"
-      || $shell =~ /logout/
-      || $shell =~ /!/
-      || $shell =~ /false/
-     )
+  if ($home eq "/")
     {
       return 1;
     }
@@ -69,4 +397,38 @@ sub invalid_user_p
   return 0;
 }
 
-# mkhomelinks ends here
+sub unlink1
+{
+  foreach $file (@_)
+    {
+      if (unlink ($file) != 1)
+        {
+          &iferr ("unlink", $file, "$!.");
+        }
+    }
+}
+
+sub iferr
+{
+  if ($! != 0)
+    {
+      &errmsg (@_);
+    }
+}
+
+sub errmsg
+{
+  printf (STDERR join(": ", $progname, @_) . "\n");
+}
+
+sub verbose
+{
+  if ("$ENV{MKULINKS_VERBOSE}" eq "t")
+    {
+      printf (STDOUT join(": ", @_) . "\n");
+    }
+}
+
+__EOF__
+
+# mkulinks ends here
