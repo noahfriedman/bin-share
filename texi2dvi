@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- produce DVI (or PDF) files from Texinfo (or LaTeX) sources.
-# $Id: texi2dvi,v 0.27 1999/01/21 20:19:49 karl Exp $
+# $Id: texi2dvi,v 0.28 1999/01/23 15:22:16 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98, 99 Free Software Foundation, Inc.
 #
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.27 $'
+rcs_revision='$Revision: 0.28 $'
 rcs_version=`set - $rcs_revision; echo $2`
 program=`echo $0 | sed -e 's!.*/!!'`
 version="texi2dvi (GNU Texinfo 3.12-pretest) $rcs_version
@@ -280,7 +280,7 @@ for command_line_filename in "$@"; do
   if test -n "$makeinfo"; then
     $verbose "Macro-expanding $command_line_filename to $filename_src ..."
     $makeinfo --footnote-style=end -E "$filename_src" -I "$filename_dir" \
-      $miincludes -o /dev/null "$command_line_filename"
+      $miincludes --no-ifinfo --iftex -o /dev/null "$command_line_filename"
   fi
 
   # If makeinfo failed (or was not even run), use a copy of the
