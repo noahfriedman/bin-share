@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.44 2000/01/30 08:59:30 friedman Exp $
+# $Id: from,v 1.45 2000/02/07 08:21:44 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -299,8 +299,9 @@ sub initialize_variables ()
   $hack_header_function{DATE}    = \&hack_Date_data;
   $hack_header_function{SUBJECT} = \&parse_rfc1522;
 
-  $format_token{'{TLINES}'} = 'd';
-  $format_token{'{FLINES}'} = 'd';
+  $format_token{'{TLINES}'}  = 'd';
+  $format_token{'{FLINES}'}  = 'd';
+  $format_token{'{OCTETS}'}  = 'd';
 
   $total_message_lines = 0;
   $exit_status = 0;
@@ -616,6 +617,8 @@ sub process_pop3_folder ($$$$)
       $total_message_lines++;
       $current_headers{'{FLINES}'} = $msgnumber;
       $current_headers{'{TLINES}'} = $total_message_lines;
+      $current_headers{'{OCTETS}'} = pop3_message_size ($sock, $msgnumber)
+        if $header_save_p{'{OCTETS}'};
 
       maybe_print_headers ($lineno, $lines, $opt_all_headers);
 
@@ -962,6 +965,15 @@ sub pop3_message_count ($)
   pop3_send_command ($sock, "STAT");
   my $results = pop3_parse_response ($sock);
   return $results->[1];
+}
+
+sub pop3_message_size ($)
+{
+  my ($sock, $msgnumber) = @_;
+  pop3_send_command ($sock, "LIST $msgnumber");
+  my $results = pop3_parse_response ($sock);
+  return $results->[2] if ($results->[0] eq "+OK");
+  return undef;
 }
 
 sub pop3_retrieve_lines ($$$)
