@@ -1,12 +1,12 @@
 #! /bin/sh
-# $Id: untar,v 1.4 1999/10/19 07:45:15 friedman Exp $
+# $Id: untar,v 1.5 2000/02/19 00:09:58 friedman Exp $
 
 for f in ${1+"$@"}; do
   case "$f" in
     *.t[ag]z | *.tar.gz | *.tar.[Zz] | *.xtar.gz | *.xtar.[Zz] | *.nif )
       ${GZIP-gzip} -dc "$f" | ${TAR-tar} -xpvf -
      ;;
-    *.tbz | *.tbz2 | *.tar.bz2 | *.xtar.bz2 )
+    *.tbz | *.tbz2 | *.tar.bz2 | *.xtar.bz2 | *.tar.bz )
       ${BZIP2-bzip2} -dc "$f" | ${TAR-tar} -xpvf -
      ;;
     *.tar | *.xtar )
