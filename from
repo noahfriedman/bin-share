@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-01-19
 
-# $Id: from,v 1.17 1996/10/18 08:28:49 friedman Exp $
+# $Id: from,v 1.18 1996/10/21 19:56:31 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -741,7 +741,7 @@ sub process_pop3_folder
 
       while ($lineno < $header_line_count)
         {
-          add_header ($lines[$lineno]);
+          &add_header ($lines[$lineno]);
           $lineno++;
         }
 
