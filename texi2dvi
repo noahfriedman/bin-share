@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- smartly produce DVI files from texinfo sources
-# $Id: texi2dvi,v 0.11 1998/06/08 11:57:51 karl Exp $
+# $Id: texi2dvi,v 0.12 1998/06/08 12:11:14 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98 Free Software Foundation, Inc.
 #
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.11 $'
+rcs_revision='$Revision: 0.12 $'
 rcs_version=`set - $rcs_revision; echo $2`
 
 version="$0 (GNU Texinfo 3.12) $rcs_version
@@ -67,7 +67,7 @@ miincludes=
 nonopt=
 textra=
 txincludes=
-verbose=false
+verbose=: # no verbosity by default
 
 backup_extension=.bak # these files get deleted if all goes well.
 orig_pwd="`pwd`"
