@@ -1,6 +1,6 @@
 #! /bin/sh
-# texi2dvi --- produce DVI files from Texinfo/LaTeX sources.
-# $Id: texi2dvi,v 0.25 1999/01/14 22:17:02 karl Exp $
+# texi2dvi --- produce DVI (or PDF) files from Texinfo (or LaTeX) sources.
+# $Id: texi2dvi,v 0.26 1999/01/17 21:42:16 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98, 99 Free Software Foundation, Inc.
 #
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.25 $'
+rcs_revision='$Revision: 0.26 $'
 rcs_version=`set - $rcs_revision; echo $2`
 program=`echo $0 | sed -e 's!.*/!!'`
 version="texi2dvi (GNU Texinfo 3.12-pretest) $rcs_version
@@ -45,6 +45,7 @@ is used to determine its language (LaTeX or Texinfo).
 
 Options:
   -@                   Use @input instead of \input; for preloaded Texinfo.
+  -b, --batch          No interaction.
   -c, --clean          Remove all auxiliary files.
   -D, --debug          Turn on shell debugging (set -x).
   -e, --expand         Expand Texinfo macros with makeinfo before running TeX.
@@ -52,7 +53,7 @@ Options:
   -h, --help           Display this help and exit successfully.
   -l, --language=LANG  Specify the LANG of FILE: LaTeX or Texinfo.
   -p, --pdf            Use pdftex or pdflatex for processing.
-  -q, --quiet          No interaction and no output unless errors.
+  -q, --quiet          No output unless errors (implies --batch).
   -s, --silent         Same as --quiet.
   -t, --texinfo=CMD    Insert CMD after @setfilename in copy of input file.
                        Multiple values accumulate.
@@ -69,7 +70,8 @@ general questions and discussion to <help-texinfo@gnu.org>."
 # Initialize variables for option overriding and otherwise.
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
-at_escape=
+escape='\'
+batch=:
 clean=
 debug=
 expand=t   # FIXME: should be turned off once in-TeX-expansion is fixed
@@ -120,9 +122,10 @@ while test x"$1" != x"$arg_sep"; do
 
   # This recognizes --quark as --quiet.  So what.
   case "$1" in
-    -@ ) at_escape=t;;
+    -@ ) escape=@;;
     # Silently and without documentation accept -b and --b[atch] as synonyms.
-    -b | -q | -s | --b* | --s* | --q*) quiet=t;;
+    -b | --b*) batch=echo;;
+    -q | -s | --q* | --s*) quiet=t; batch=echo;;
     -c | --c*) clean=t;;
     -D | --d*) debug=t;;
     -e | --e*) expand=t;;
@@ -173,8 +176,7 @@ test "$debug" = t && set -x
 # 4 used on the Kubota Titan
 # 5 tools output (turned off by --quiet)
 
-# Tools output.  If quiet, discard, else redirect
-# to the message flow
+# Tools output.  If quiet, discard, else redirect to the message flow.
 if test "$quiet" = t; then
   exec 5>/dev/null
 else
@@ -183,7 +185,7 @@ fi
 
 # 
 # TeXify files.
-for command_line_filename in "$@"; do
+for command_line_filename; do
   $verbose "Processing $command_line_filename ..."
 
   # If the COMMAND_LINE_FILENAME is not absolute (e.g., --debug.tex),
@@ -279,8 +281,6 @@ for command_line_filename in "$@"; do
     $verbose "Macro-expanding $command_line_filename to $filename_src ..."
     $makeinfo --footnote-style=end -E "$filename_src" -I "$filename_dir" \
       $miincludes -o /dev/null "$command_line_filename"
-  else
-    false # set $? for next test
   fi
 
   # If makeinfo failed (or was not even run), use a copy of the
@@ -356,9 +356,10 @@ for command_line_filename in "$@"; do
     fi
 
     # Run bibtex on current file.
-    # o Only once, and only for LaTeX.  Ensured by the value of ${bibtex}.
-    # o Only if its input exists (the .log file).
-    # o Only if needed by LaTeX file (there are `Citation' in the log file).
+    # - Once, and only for LaTeX.  Ensured by the value of ${bibtex}.
+    # - If its input (the aux file) exists.
+    # - If aux file contains both `\bibdata' and `\bibstyle'.
+    # - If some citations are missing (log file contains `Citation').
     #
     # Don't try to be too smart.  For instance running bibtex only if
     # the bbl file exists and is older than the LaTeX file is wrong, since
@@ -377,7 +378,7 @@ for command_line_filename in "$@"; do
         echo "$0: $bibtex exited with bad status, quitting." >&2
         exit 1
       fi
-      # Only run bibtex once.
+      # Run bibtex only once per file.
       bibtex=
     fi
 
@@ -388,27 +389,15 @@ for command_line_filename in "$@"; do
     # nonexistent.
     if test -n "$texindex" && test -n "$orig_index_files"; then
       $verbose "Running $texindex $orig_index_files ..."
-      if $texindex $orig_index_files 2>&5 1>&2; then :;else
+      if $texindex $orig_index_files 2>&5 1>&2; then :; else
          echo "$0: $texindex exited with bad status, quitting." >&2
          exit 1
       fi
     fi
 
     # Finally, run TeX.
-    if test "$at_escape" = t; then
-      nonstopmode=@nonstopmode
-      input=@input
-    else
-      nonstopmode='\nonstopmode'
-      input='\input'
-    fi
-
-    if test "$quiet" = t; then
-      tex_mode=$nonstopmode
-    else
-      tex_mode=
-    fi
-    cmd="$tex $tex_mode $input $filename_input"
+    tex_mode=`$batch "${escape}nonstopmode"`
+    cmd="$tex $tex_mode ${escape}input $filename_input"
     $verbose "Running $cmd ..."
     if $cmd >&5; then :; else
       echo "$0: $tex exited with bad status, quitting." >&2
