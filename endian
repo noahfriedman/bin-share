@@ -1,52 +1,56 @@
 #!/bin/sh
 # endian -- determine endian-ness of machine
-#
-# Written 21-Jan-93 by Noah Friedman <friedman@prep.ai.mit.edu>
-# Last modified 21-Jan-93
-#
-# Public domain. 
-#
-# The C compiler is called by this shell script.  The environment
-# variable `CC' and `CFLAGS' are used to determine exactly what
-# compiler and args to use.  `cc' is the default. 
-#
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1993-01-21
+# Public domain.
 
-cd /tmp || exit 1
+# $Id$
 
-file="endian$$"
+# Commentary:
 
-cat > "${file}.c" <<__EOF__
-   main () 
-   {
-     union
-       {
-         long l;
-         char c[sizeof (long)];
-       } u;
+# If `perl' cannot be found on the system, the C compiler is called by this
+# shell script.  The environment variable `CC' and `CFLAGS' are used to
+# determine exactly what compiler and args to use.  `cc' is the default.
 
-     u.l = 1;
-     exit (u.c[sizeof (long) - 1] == 1);
-   }
+# Code:
+
+if { perl -v; } > /dev/null 2>&1; then
+  perl -e '
+    $x = 1;
+    @y = unpack ("c2", pack ("i", $x));
+    $s = "big";
+    if ($y[0] == 1) { $s = "little"; }
+    print "$s-endian\n";
+    exit (0);
+  '
+else
+  cd /tmp || exit 1
+  file="endian$$"
+  trap 'rm -f "$file" "${file}".[acos]' 0 1 2 3 15
+
+  cat > "${file}.c" <<'__EOF__'
+     main ()
+     {
+       union
+         {
+           long l;
+           char c[sizeof (long)];
+         } u;
+
+       u.l = 1;
+       exit (u.c[sizeof (long) - 1] == 1);
+     }
 __EOF__
 
-${CC-cc} ${CFLAGS} ${file}.c -o ./${file} || exit 1
+  ${CC-cc} $CFLAGS "${file}.c" -o "./$file" || exit 1
 
-./"${file}"
+  ./"$file"
 
-case $? in
-   0)
-      echo "little-endian"
-     ;;
-   1)
-      echo "big-endian"
-     ;;
-   *)
-      echo "unknown"
-     ;;
-esac
-
-rm -f "${file}" "${file}.c"
-
-exit 0
+  case $? in
+     0) echo "little-endian" ;;
+     1) echo "big-endian"    ;;
+     *) echo "unknown"       ;;
+  esac
+fi
 
 # eof
