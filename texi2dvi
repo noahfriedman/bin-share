@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- produce DVI (or PDF) files from Texinfo (or LaTeX) sources.
-# $Id: texi2dvi,v 0.32 1999/02/03 21:05:03 karl Exp $
+# $Id: texi2dvi,v 0.33 1999/02/05 22:43:50 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98, 99 Free Software Foundation, Inc.
 #
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.32 $'
+rcs_revision='$Revision: 0.33 $'
 rcs_version=`set - $rcs_revision; echo $2`
 program=`echo $0 | sed -e 's!.*/!!'`
 version="texi2dvi (GNU Texinfo 3.12-pretest) $rcs_version
@@ -77,7 +77,6 @@ debug=
 expand=false	# echo for expansion via makeinfo
 oformat=dvi
 set_language=
-makeinfo=
 miincludes=	# makeinfo include path
 textra=
 txincludes=	# TEXINPUTS extensions
@@ -229,14 +228,15 @@ for command_line_filename in ${1+"$@"}; do
     language=
   fi
 
-  # Get the type of the file (latex or texinfo) based on its extension,
-  # or upon the specified language.
+  # Get the type of the file (latex or texinfo) from the given language
+  # we just guessed, or from the file extension if not set yet.
   case ${language:-$filename_ext} in
     [lL]a[tT]e[xX] | *.ltx | *.tex)
       # Assume a LaTeX file.  LaTeX needs bibtex and uses latex for
       # compilation.  No makeinfo.
       bibtex=${BIBTEX:-bibtex}
       ext=tex
+      makeinfo= # no point in running makeinfo on latex source.
       texindex=${MAKEINDEX:-makeindex}
       if test $oformat = dvi; then
         tex=${LATEX:-latex}
@@ -246,8 +246,7 @@ for command_line_filename in ${1+"$@"}; do
       ;;
 
     *)
-      # Assume a Texinfo file.  Texinfo files need makeinfo, texindex
-      # and tex.
+      # Assume a Texinfo file.  Texinfo files need makeinfo, texindex and tex.
       bibtex=
       ext=texi
       makeinfo=`$expand ${MAKEINFO:-makeinfo}`
