@@ -4,7 +4,7 @@
 # Created: 1995-04-15
 # Public domain
 
-# $Id$
+# $Id: smtp,v 1.1 1995/04/15 23:37:45 friedman Exp friedman $
 
 case "$1" in
   aeneas )             h=aeneas.mit.edu            ;;
@@ -21,10 +21,9 @@ case "$1" in
   media )              h=media.mit.edu             ;;
   prep | ai | life )   h=life.ai.mit.edu           ;;
   osu | cis )          h=cis.ohio-state.edu        ;;
+  piglet )             h=piglet.cr.usgs.gov        ;;
   splode )             h=splode.mame.mu.oz.au      ;;
-  * )
-    echo "smtp: $1: unknown host." 1>&2
-    exit 1
+  * )                  h="$1"                      ;;
 esac
 
 exec tcpconnect $h smtp
