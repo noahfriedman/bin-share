@@ -1,0 +1,138 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+# Use our own ntoa/aton functions because Socket.pm's requires packed strings.
+sub ntoa
+{
+  join (".", map { "" . ($_[0] >> $_) & 255 } qw(24 16 8 0));
+}
+
+sub aton
+{
+  my $ip = 0;
+  map { $ip = ($ip << 8) | $_ } split (/\./, $_[0]);
+  return $ip;
+}
+
+sub expand_range
+{
+  my %composite;
+  my $idx = 0;
+
+  for my $range (@_)
+    {
+      local $_;
+
+      $range =~ s/^\s*(.*?)\s*$/$1/; # strip surrounding whitespace
+      # First split the range into the sub sections as seperated by
+      # commas, and then expand each sub range
+      foreach (split (/\s*,\s*/, $range))
+        {
+          my %range;
+          my $action = '+';
+          my $prefix = ""; # optional prefix (IP addresses only)
+          my $suffix = ""; # optional domain extension
+
+          if (/^([-+&\|!])/)
+            {
+              $action = substr ($_, 0, 1);
+              s/^.//;
+            }
+
+          # Canonicalize IP ranges
+          #   A.B.C-A.B.D.E => A.B.C-D.E
+          s//$1$2-$3/ if /^([\d.]+\.)?(\d+)-\1([\d.]+)?$/;
+
+          # CIDR range e.g. 192.168.1.0/24
+          if (m=^([\d.]+)/(\d+)$=)
+            {
+              my $mask = $2;
+              my @net = split (/\./, $1);
+              push @net, "0" while (@net < 4);
+              my $net = aton (join (".", @net));
+              # Substracting 1 inverts bits to all 1's and also means
+              # below that we will avoid the broadcast address.
+              my $max = 2**(32 - $mask) - 1;
+
+              # If net has any bits set in hostmask region, it's an invalid
+              # network spec for the size of the mask.
+              if ($net & $max)
+                {
+                  print STDERR "$_: Invalid network/hostmask\n";
+                  return;
+                }
+
+              # Start with 1 to omit network address
+              for (my $i = 1; $i < $max; $i++)
+                {
+                  $range{ ntoa ($net + $i) } = $idx++;
+                }
+
+              $_ = ''; # don't do any more processing on this entry
+            }
+          # Save off leading/trailing octets of IP addr, if there are any.
+          #   A-B.C.D.E
+          #   A.B-C.D.E
+          #   A.B.C.D-E
+          elsif (/^([\d.]+\.)?(\d+)-(\d+)(\.[\d.]+)?$/)
+            {
+              $prefix = defined $1 ? $1 : "";
+              $_ = "$2-$3";
+              $suffix = defined $4 ? $4 : "";
+            }
+          # Save off fqdn, if there are any.
+          # Accept the following specifications:
+          #    (a) hostM-N.domain.com
+          #    (b) hostM-hostN.domain.com
+          #    (c) hostM.domain.com-hostN.domain.com
+          #
+          # Note that case (a) is potentially ambiguous since a host might be
+          # called, e.g. clusterM-0.domain.com in a cluster of
+          # clusterM-0 ... clusterM-N, but in that case the right way to
+          # specify the node range is clusterM-N-clusterM-N'.domain.com
+          # or even clusterM-N-N'.domain.com!
+          # If ranges are generated programmatically and fed to this script,
+          # this caveat should be kept in mind.
+          elsif (/^([^.]*)(\d+)-(\d+)(\..*)/) # case (a)
+            { $suffix = $4; $_ = "$1$2-$3" }
+          elsif (/^([^.]*)(\d+)()-\1(\d+)(\..*)$/) # case (b)
+            { $suffix = $5; $_ = "$1$2-$1$4" }
+          elsif (/^([^.]*)(\d+)(\..+?)-\1(\d+)\3$/) # case (c)
+            { $suffix = $3; $_ = "$1$2-$1$4" }
+
+          if (/^(.*?)(\d+)-\1?(\d+)$/)
+            {
+              # We matched the following cases:
+              # * Range of digits: 1-10
+              # * Range of digits with prefix: foo1-10
+              # * Range of digits each with prefixes: foo1-foo10
+              #   We also match cases like "foo1-bar1-foo1-bar10" and
+              #   even "foo1-foo1-foo1-foo10" here but not "foo1-bar10"; that
+              #   last case is a single host because prefixes do not match.
+              my $l = length ($2);
+              # make sure names are zero-padded to length of first number
+              my $fmt = "%s%s%0${l}d%s";
+              for (my $i = $2+0; $i <= $3+0; $i++)
+                {
+                  $range{ sprintf ($fmt, $prefix, $1, $i, $suffix) } = $idx++;
+                }
+            }
+          elsif ($_ ne '') # literal
+            { $range{$prefix . $_ . $suffix} = $idx++ }
+
+          # Depending on "action" merge it in or filter it out
+          if (($action eq '+') || ($action eq '|'))
+            { %composite = (%composite, %range) }
+          elsif (($action eq '-') || ($action eq '!'))
+            { map { delete $composite{$_} } keys %range }
+          elsif ($action eq '&')
+            { map { delete $composite{$_} if !$range{$_} } keys %composite }
+        }
+    }
+  return (wantarray
+          ? sort { $composite{$a} <=> $composite{$b} } keys %composite
+          : \%composite);
+}
+
+map { print $_, "\n" } expand_range (@ARGV);
