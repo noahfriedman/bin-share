@@ -2,8 +2,9 @@
 # biffjr --- beep and notify when you have new mail
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1993-09-21
-# Last modified: 1994-03-15
 # Public domain
+
+# $Id$
 
 # Commentary:
 
@@ -215,9 +216,11 @@ case "$force" in
        ;;
     esac
 
-    USER=${USER-${LOGNAME-`(whoami) 2> /dev/null \
-                           || id | sed -ne 's/.*uid=[0-9]*(//;s/).*//;p'`}}
-
+    USER=${USER-${LOGNAME-`{ id | sed -ne 's/.*uid=[0-9]*(//
+                                           s/).*//
+                                           p'
+                           } \
+                           || { (whoami) 2> /dev/null; }`}}
     export TTY USER
 
     tty_sed='s/	/ /g
@@ -270,7 +273,7 @@ trap '{
         exit $exitstat
       }' 1 2 3 15
 
-: > "$stampfile" || exit 1
+> "$stampfile" || exit 1
 chmod u+w "$stampfile"
 
 while : ; do
@@ -291,7 +294,7 @@ while : ; do
   set fnord `ls -td "$mail_file" "$stampfile" 2> /dev/null`
   shift
   if test ".$1" = ".$mail_file" -a -s "$mail_file" ; then
-    : > "$stampfile" || exit 1
+    > "$stampfile" || exit 1
 
     set fnord `grep '^From ' "$mail_file" 2> /dev/null | wc -l`
     shift
