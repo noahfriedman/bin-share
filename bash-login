@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1996-10-11
 
-# $Id: bash-login,v 1.8 1999/05/20 14:44:40 friedman Exp $
+# $Id: bash-login,v 1.9 1999/05/22 16:41:08 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -226,15 +226,12 @@ esac
 
 # Not printing; actually execute bash
 if { bash -c : ; } 2> /dev/null ; then
-  oSHELL="$SHELL"
-  case "$setshellp" in
-    t )
-      SHELL=`type -path bash`
-      export SHELL
-     ;;
-  esac
-
   exec bash -norc -c '
+    oSHELL="$SHELL"
+    case "'"$setshellp"'" in
+      t ) export SHELL=`type -path bash` ;;
+    esac
+
     execflag=
     case "'"$loginp"':$BASH_VERSION" in
       t:1.*) execflag="-"  ;;
@@ -244,7 +241,7 @@ if { bash -c : ; } 2> /dev/null ; then
     no_exit_on_failed_exec=t
     exec $execflag bash ${1+"$@"}
 
-    SHELL="'"$oSHELL"'"
+    export SHELL="$oSHELL"
     export BASH_LOGIN_FAILED_P=t
     exec $execflag $SHELL ${1+"$@"}
   ' ${1+"$@"}
