@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-06-03
 
-# $Id$
+# $Id: ludeconf,v 2.1 1997/06/04 19:33:10 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -33,30 +33,37 @@ progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 bq='`'
 eq="'"
 
+# This string is expanded by rcs automatically when this file is checked out.
+rcs_revision='$Revision: 2.1 $'
+revision=`set fnord $rcs_revision; echo $3`
+
 usage="Usage: $progname {$progname-options} {-- {configure-options}}
+(Version $revision)
 
 $progname options:
---cc, --with-cc      {CC}    Force use of CC for C compiler.
+-c, --cc, --with-cc  {CC}    Force use of CC for C compiler.
                              If optional arg CC not specified, use ${bq}gcc$eq.
---configure          CONFSH  Run the CONFSH configure script.
+--configure          CONFPRG Run the CONFPRG ${bq}configure$eq program.
                              If not specified, guess location.
 
 -x, --x, --with-x    {XDIR}  Use X Window System; look for libraries in
                              XDIR/lib and header files in XDIR/include.
                              If optional arg XDIR not specified, guess
                              location.
--X, --no-x, --without-x      Do not configure to use X Window System.
-                             This is the default for most programs.
+-X, --no-x, --without-x      Force configure not to use X Window System.
 
 -C, --class          CLASS   Use CLASS as the lude system architecture.
                              If not specified, guess using ${bq}ludeclass$eq.
 -D, --depot          DEPOT   Use DEPOT as the lude system depot.
                              If not specified, guess.
--S, --soft           SOFT    Use SOFT as the lude software package.
+-S, --soft           PKG     Use PKG as the lude software package.
                              If not specified, guess.
 
 -h, --help                   You're looking at it.
--v, --verbose                Verbose output.
+-v, --verbose                Show lude parameters and configure command to
+                             run. This option also caused $bq--verbose$eq to be
+                             passed to the ${bq}configure$eq command as well.
+-V, --version                Show version number and exit.
 --debug                      Turn on shell debugging ($bq${bq}set -x$eq$eq).
 "
 
@@ -68,9 +75,8 @@ $progname options:
 debug=
 verbose=
 
-configure_options=
 configure_program=
-configure_x=no
+configure_x=
 
 lude_class=${LUDE2_CLASS}
 lude_depot=${LUDE2_DEPOT}
@@ -137,39 +143,35 @@ getopt='
 while : ; do
   case $# in 0) break ;; esac
   case "$1" in
-    -C | --class* | --lude-class* )
+    -C | --class* | --lude-class* | --cl* | --lude-c* )
        eval "$getopt"
        lude_class="$optarg"
      ;;
-    -D | --depot* | --lude-depot* )
+    -D | --depot* | --lude-depot* | --dep* | --lude-d* )
        eval "$getopt"
        lude_depot="$optarg"
      ;;
-    -S | --soft* | --lude-soft* )
+    -S | --soft* | --lude-soft* | --s* | --lude-s* )
        eval "$getopt"
        lude_soft="$optarg"
      ;;
 
-    --cc* | --with-cc* )
+    -c | --cc* | --with-cc* )
        optarg_optional=t
        eval "$getopt"
        case "$optarg" in
-         -* )
-           set fnord "$optarg" ${1+"$@"}
-           shift
-           CC=gcc
-          ;;
-         * ) CC="$optarg" ;;
+         '' ) CC=gcc       ;;
+         * )  CC="$optarg" ;;
        esac
        export CC
      ;;
 
-    --configure* )
+    --configure* | --co* )
        eval "$getopt"
        configure_program="$optarg"
      ;;
 
-    --debug | --d* )
+    --debug | --deb* )
       debug=t
       shift
      ;;
@@ -177,18 +179,21 @@ while : ; do
       echo "$usage" 1>&2
       exit 0
      ;;
-    -v | --verbose | --v* )
-      configure_options="$configure_options --verbose"
+    -v | --verbose | --verb* )
       verbose=t
       shift
+     ;;
+    -V | --version | --vers* )
+      echo "$progname version $revision" 1>&2
+      exit 0
      ;;
     -x | --x* | --with-x* )
       optarg_optional=t
       eval "$getopt"
-      x11dirs="$optarg"
+      x11dir="$optarg"
       configure_x=yes
      ;;
-    -X | --no-x* | --without-x* )
+    -X | --no-x | --without-x )
       configure_x=no
       shift
      ;;
@@ -280,7 +285,8 @@ esac
 
 case "$configure_x:$x11dir" in
   no:* )
-    configure_options="$configure_options --with-x-toolkit=no --without-x"
+    set fnord --with-x-toolkit=no --without-x ${1+"$@"}
+    shift
     x11dir=
    ;;
   yes: )
@@ -311,12 +317,20 @@ esac
 
 case "$x11dir" in
   '' ) : ;;
-   * ) configure_options="$configure_options
-                          --with-x-toolkit-yes
-                          --with-x11
-                          --x-includes=$x11dir/include
-                          --x-libraries=$x11dir/lib"
-      ;;
+   * )
+     set fnord \
+         --with-x-toolkit-yes --with-x11 \
+         --x-includes="$x11dir/include" --x-libraries="$x11dir/lib" \
+         ${1+"$@"}
+     shift
+    ;;
+esac
+
+case "$verbose" in
+  t )
+    set fnord --verbose ${1+"$@"}
+    shift
+   ;;
 esac
 
 ##########
@@ -327,7 +341,7 @@ set fnord \
     "$configure_program" \
     --prefix="$install_prefix/share" \
     --exec-prefix="$install_prefix/$lude_class" \
-    $configure_options ${1+"$@"}
+    ${1+"$@"}
 shift
 
 case "$verbose" in
