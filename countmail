@@ -1,0 +1,144 @@
+#!/bin/sh
+
+case $# in
+   0 ) file="/usr/spool/mail/`whoami`" ;;
+   * ) file="$1" ;;
+esac
+
+set - `grep '^From ' "${file}" | wc -l`
+
+result=""
+
+set - `echo "$@" \
+          | sed -n '
+               s/[, ]//g;s/^/,/
+               : rev0
+               /[^,]$/{s/^\(.*\),\(.*\)\(.\)$/\1\3,\2/;t rev0
+               }
+               s/,//g;s/\([^ ][^ ][^ ]\)/\1 /g;s/^/,/
+               : rev1
+               /[^,]$/{s/^\(.*\),\(.*\)\(.\)$/\1\3,\2/;t rev1
+               }
+               s/,//gp
+              '`
+
+while [ $# -ne 0 ]; do
+   val1=""
+   val2=""
+   val3=""
+
+   eval `echo "$1" \
+          | sed '/^...$/{s/\(.\)\(.\)\(.\)/digit3="\1"; digit2="\2"; digit1="\3";/;q;}
+                 /^..$/{s/\(.\)\(.\)/digit3=""; digit2="\1"; digit1="\2";/;q;}         
+                 s/\(.\)/digit3=""; digit2=""; digit1="\1";/'`
+
+   case "${digit3}" in
+      '1' ) val3="ONE"   ;;
+      '2' ) val3="TWO"   ;;
+      '3' ) val3="THREE" ;;
+      '4' ) val3="FOUR"  ;;
+      '5' ) val3="FIVE"  ;;
+      '6' ) val3="SIX"   ;;
+      '7' ) val3="SEVEN" ;;
+      '8' ) val3="EIGHT" ;;
+      '9' ) val3="NINE"  ;;
+   esac
+
+   case "${digit2}" in
+      '1' ) val2="teen"    ;;
+      '2' ) val2="TWENTY"  ;;
+      '3' ) val2="THIRTY"  ;;
+      '4' ) val2="FORTY"   ;;
+      '5' ) val2="FIFTY"   ;;
+      '6' ) val2="SIXTY"   ;;
+      '7' ) val2="SEVENTY" ;;
+      '8' ) val2="EIGHTY"  ;;
+      '9' ) val2="NINETY"  ;;
+   esac
+
+   case "${val2}" in
+      'teen')
+         val2=""
+         case "${digit1}" in
+            '0') val1="TEN"       ;;
+            '1') val1="ELEVEN"    ;;
+            '2') val1="TWELVE"    ;;
+            '3') val1="THIRTEEN"  ;;
+            '4') val1="FOURTEEN"  ;;
+            '5') val1="FIFTEEN"   ;;
+            '6') val1="SIXTEEN"   ;;
+            '7') val1="SEVENTEEN" ;;
+            '8') val1="EIGHTEEN"  ;;
+            '9') val1="NINETEEN"  ;;
+         esac
+        ;;
+      0 ) : ;;
+      * )
+         if [ -n "${val2}" -a "z${digit1}" != "z0" ]; then
+            val2="${val2}-"
+         fi
+         case "${digit1}" in
+            '0') val2="${val2} " ;;
+            '1') val1="ONE"    ;;
+            '2') val1="TWO"    ;;
+            '3') val1="THREE"  ;;
+            '4') val1="FOUR"   ;;
+            '5') val1="FIVE"   ;;
+            '6') val1="SIX"    ;;
+            '7') val1="SEVEN"  ;;
+            '8') val1="EIGHT"  ;;
+            '9') val1="NINE"   ;;
+         esac
+        ;;
+   esac
+
+   if [ -n "${val3}" ]; then
+      result="${result}${val3} HUNDRED "
+   fi
+
+   if [ -n "${val2}" ]; then
+      result="${result}${val2}"
+   fi
+
+   if [ -n "${val1}" ]; then
+      result="${result}${val1} "
+   fi
+
+   case $# in
+       0 | 1 ) : ;;
+       2 ) result="${result}THOUSAND " ;;
+       3 ) result="${result}MILLION " ;;
+       4 ) result="${result}BILLION " ;;
+       5 ) result="${result}TRILLION " ;;
+       6 ) result="${result}QUADRILLION " ;;
+       7 ) result="${result}QUINTILLION " ;;
+       8 ) result="${result}SEXTILLION " ;;
+       9 ) result="${result}SEPTILLION " ;;
+      10 ) result="${result}OCTILLION " ;;
+      11 ) result="${result}NONILLION " ;;
+      12 ) result="${result}DECILLION " ;;
+      13 ) result="${result}UNDECILLION " ;;
+      14 ) result="${result}DUODECILLION " ;;
+      15 ) result="${result}TREDECILLION " ;;
+      16 ) result="${result}QUATTUORDECILLION " ;;
+      17 ) result="${result}QUINDECILLION " ;;
+      18 ) result="${result}SEXDECILLION " ;;
+      19 ) result="${result}SEPTENDECILLION " ;;
+      20 ) result="${result}OCTODECILLION " ;;
+      21 ) result="${result}NOVEMDECILLION " ;;
+      22 ) result="${result}VIGINTILLION " ;;
+      * )
+         echo "Error: number too large (66 digits max)." 1>&2
+         return 1
+        ;;
+   esac
+
+   shift
+done
+
+echo "${result}!
+
+${result}NEW MAIL MESSAGES!
+
+HAHAHAHAHA!
+"
