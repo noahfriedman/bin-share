@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.37 2000/01/21 12:00:39 friedman Exp $
+# $Id: from,v 1.38 2000/01/21 17:53:51 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -378,25 +378,30 @@ sub map_over_file_contents ($@)
 
   for my $file (@_)
     {
-      if (!sysopen ($fh, $file, 0))
+      if ($file eq "-")
+        {
+          if (!open ($fh, "<&STDIN"))
+            {
+              err ("stdin", $!);
+              next;
+            }
+        }
+      elsif (!sysopen ($fh, $file, 0))
         {
           err ($file, $!);
           next;
         }
 
-      my $size = [stat $fh]->[7];
-      my $bytesread = 0;
+      my $bytesread = $blocksize;
       my $offset = 0;
       $_ = "";
-      while ($bytesread < $size)
+      while ($bytesread == $blocksize)
         {
-          $bytesread += sysread ($fh, $_, $blocksize, length);
+          my $len = length;
+          $_ = substr ($_, $offset) if ($offset > 0 && $offset < $len);
+          $_ = "" if ($offset < 0 || $offset >= $len);
+          $bytesread = sysread ($fh, $_, $blocksize, length);
           $offset = &$fn (\$_);
-          if ($bytesread < $size)
-            {
-              $_ = substr ($_, $offset) if ($offset > 0 && $offset < length);
-              $_ = ""                   if ($offset < 0 || $offset >= length);
-            }
         }
       close ($fh);
     }
