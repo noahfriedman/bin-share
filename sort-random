@@ -1,4 +1,2 @@
-#!/bin/sh
-# $Id$
-
-exec perl -e 'print sort { rand(1) <=> 0.5 } <>' ${1+"$@"}
+#!/usr/bin/env perl
+print sort { rand(1) <=> 0.5 } <>
