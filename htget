@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-11-07
 
-# $Id: htget,v 1.4 1996/03/03 22:53:08 friedman Exp $
+# $Id: htget,v 1.5 1996/06/06 08:36:10 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -128,29 +128,27 @@ set fnord `echo "$1" | sed -ne 's/^http:\/\///
                                 /^[^/]*:[0-9]/!s/\([^/]*\)/\1:80/
                                 s/\([^:]*\):\([0-9]*\)\(\/.*\)/\1 \2 \3/p
                                '`
-
-nl='
-'
-
-cr=`echo x | tr x '\015'`
-
+export headers
 case "$headers" in
-  t )
-    echo "GET $4 HTTP/1.0$nl" \
-     | tcpconnect $verbose "$2" "$3" \
-     | sed -e "/$cr\$/s/$cr\$//"
-   ;;
-  only )
-    echo "GET $4 HTTP/1.0$nl" \
-     | tcpconnect $verbose "$2" "$3" \
-     | sed -e "/$cr\$/s/$cr\$//" \
-           -e '/^$/q'
-   ;;
-  * )
-    echo "GET $4" \
-     | tcpconnect $verbose "$2" "$3" \
-     | sed -e "/$cr\$/s/$cr\$//"
-   ;;
+  only ) req="HEAD $4 HTTP/1.0" ;;
+  *    ) req="GET $4 HTTP/1.0"  ;;
 esac
+
+echo "$req
+" | tcpconnect $verbose "$2" "$3" \
+  | perl -e '
+      $headers = "$ENV{headers}";
+      $in_headers = 1;
+      while (<>)
+        {
+          if ($in_headers)
+            {
+              s/\r\n$/\n/o;
+              print if ($headers eq "t" || $headers eq "only");
+              $in_headers = 0 if ($_ eq "\n");
+            }
+          else
+            { print; }
+        }'
 
 # htget ends here
