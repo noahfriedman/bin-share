@@ -25,7 +25,10 @@
 # If possible, please send a copy of the output of the script called with
 # the `--debug' option when making a bug report. 
 #
-# Version 0.2
+# Version 0.21
+#
+# Hacked by Adrian Ashley to make plaintext output using dvidoc at
+# the flick of a switch (the --plain or -p switch, to be precise.)
 #
 
 # Please note that in the interest of general portability, some common
@@ -41,11 +44,12 @@
 
 progname=`basename $0`
 
-usage="Usage: ${progname} {-d} {-f} {-h} [file1] {file2} {...}
-       {--debug} {--force} {--help}
+usage="Usage: ${progname} {-d} {-f} {-h} {-p [file]} [file1] {file2} {...}
+       {--debug} {--force} {--help} {--plain [file]}
 
    Options in braces are optional.  Those in brackets are required. 
 "
+
 
 if [ $# -eq 0 ]; then
    echo "${usage}" 1>&2;
@@ -55,6 +59,8 @@ fi
 backup_extension=".bak"
 texindex="texindex"
 tex="tex"
+dvidoc="dvidoc"
+plain_header_line='\\let\\docoutput=\\relax'
 bq="\`"  # To prevent hairy quoting and escaping later.
 eq="'"
 orig_pwd="`pwd`"
@@ -73,6 +79,9 @@ fi
 # exported
 force=""
 debug=""
+plain=""
+plain_out_file=""
+orig_file=""
 
 # If you add new commands be sure to change the wildcards below to make
 # sure they are unambiguous (i.e. only match one possible long option)
@@ -92,6 +101,28 @@ while [ $# -gt 0 ]; do
          echo "${usage}" 1>&2
          exit 1
         ;;
+      z-p | z--plain | z--p* )
+	 plain="t"
+	 shift
+	 if [ $# = 0 ]; then
+	    echo "${progname}: must specify file for plaintext output" 1>&2
+	    echo "" 1>&2
+	    echo "${usage}" 1>&2
+	    exit 1
+	 fi
+	 case z$1 in
+	    z-* )
+	       echo "${progname}: must specify file for plaintext output" 1>&2
+	       echo "" 1>&2
+	       echo "${usage}" 1>&2
+	       exit 1
+	      ;;
+	    * )
+	       plain_out_file="$1"
+	       shift
+	      ;;
+	 esac
+	;;
       z-- )
          shift
          break 
@@ -115,6 +146,13 @@ if [ $# -eq 0 ]; then
    echo "" 1>&2
    echo "${usage}" 1>&2
    exit 1
+fi
+
+if [ ${plain} ]; then
+   if [ $# -ne 1 ]; then
+      echo "${progname}: only one filename argument allowed when --plain." 1>&2
+      exit 1
+   fi
 fi
 
 if [ "z${debug}" = "zt" ]; then
@@ -161,6 +199,21 @@ for command_line_filename in "$@" ; do
       continue; 
    fi
 
+   # If we're making plaintext output, build the modified source file
+   # and reset $file and $filename_noext.
+   if [ "${plain}" ]; then
+      orig_file="${file}"
+      file="PLAIN${file}"
+      filename_noext="PLAIN${filename_noext}"
+      filename_newest="`set -$- \`ls -t \"${orig_file}\" \"${file}\" 2> /dev/null\`; echo \"\$1\"`"
+      if [ "${filename_newest}" = "${file}" ]; then
+         echo "${progname}: ${bq}${file}${eq} is up to date." 1>&2
+      else
+         echo ${plain_header_line} > ${file}
+         cat ${orig_file} >> ${file}
+      fi
+   fi
+      
    # If dvi file is newer than the texinfo source, don't do anything
    # (unless --force option was specified)
    if [ ! "${force}" ]; then
@@ -169,7 +222,18 @@ for command_line_filename in "$@" ; do
       filename_newest="`set -$- \`ls -t \"${filename_noext}.dvi\" \"${file}\" 2> /dev/null\`; echo \"\$1\"`"
       if [ "${filename_newest}" = "${filename_noext}.dvi" ]; then
          echo "${progname}: ${bq}${filename_noext}.dvi${eq} is up to date." 1>&2
-         continue
+	 # If we're doing plaintext output, check to see if the plaintext
+	 # output file is newer than the .dvi file.
+	 if [ "${plain}" ]; then
+            filename_newest="`set -$- \`ls -t \"${filename_noext}.dvi\" \"${plain_out_file}\" 2> /dev/null\`; echo \"\$1\"`"
+	    if [ "${filename_newest}" = "${plain_out_file}" ]; then
+	       echo "${progname}: ${bq}${plain_out_file}${eq} is up to date." 1>&2
+	    else
+	       echo "${progname}: remaking ${bq}${plain_out_file}${eq}." 1>&2
+	       ${dvidoc} ${filename_noext}.dvi > ${plain_out_file}
+	    fi
+            continue
+	 fi
       fi
    fi
 
@@ -264,6 +328,11 @@ for command_line_filename in "$@" ; do
          if [ ${retval} -eq 0 ]; then
             ${tex} "${file}"
          fi
+      fi
+
+      # If we're making plaintext output, do so here.
+      if [ ${plain} ]; then
+         ${dvidoc} ${filename_noext}.dvi > ${plain_out_file}
       fi
    fi
 
