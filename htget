@@ -3,7 +3,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-11-07
 
-# $Id: htget,v 1.1 1995/11/07 21:25:57 friedman Exp friedman $
+# $Id: htget,v 1.2 1995/12/18 04:49:11 friedman Exp friedman $
 
 # Commentary:
 
@@ -114,19 +114,24 @@ set fnord `echo "$1" | sed -ne 's/^http:\/\///
 nl='
 '
 
+cr=`echo x | tr x '\015'`
+
 case "$headers" in
   t )
     echo "GET $4 HTTP/1.0$nl" \
-     | tcpconnect -H$verbose "$2" "$3"
+     | tcpconnect -H$verbose "$2" "$3" \
+     | sed -e "/$cr\$/s/$cr\$//"
    ;;
   only )
     echo "GET $4 HTTP/1.0$nl" \
      | tcpconnect -H$verbose "$2" "$3" \
-     | sed -e '/^$/q'
+     | sed -e "/$cr\$/s/$cr\$//" \
+           -e '/^$/q'
    ;;
   * )
     echo "GET $4" \
-     | tcpconnect -H$verbose "$2" "$3"
+     | tcpconnect -H$verbose "$2" "$3" \
+     | sed -e "/$cr\$/s/$cr\$//"
    ;;
 esac
 
