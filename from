@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.42 2000/01/26 12:48:00 friedman Exp $
+# $Id: from,v 1.43 2000/01/28 17:22:54 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -243,7 +243,7 @@ sub main ()
           next;
         }
 
-      if ($file =~ /^:(pop-?3|pop)[:,]/oi)
+      if ($file =~ /^:(?:pop-?3|pop)[:,]/oi)
         {
           my ($ignore, $port, $host, $user, $pass) = split (/:/, $file);
 
@@ -279,7 +279,7 @@ sub initialize_variables ()
   # when writing to archive files.
   # The amount of whitespace between the address and the date seems to vary
   # on some systems.
-  $re_message_delimiter = '^From[ \t]+[^ \t]+[ \t]+... ... .. ..:..';
+  $re_message_delimiter = '^From\s+\S+\s+...\s+...\s+\d+\s+\d\d:\d\d';
 
   # According to RFC822, "The field-name must be composed of printable
   # ASCII characters (i.e. characters that have decimal values between 33
@@ -290,9 +290,8 @@ sub initialize_variables ()
   # some restrictions exist for the sake of formatting.
   $re_fmt_header_name = '[!"#$&\'*+,-./0-9;<=>?@A-Z\\^_`a-z{|}~]+';
 
-  $re_whitespace = "[ \f\n\r\t]+";
-  $re_blank_line = join ("", '^(', $re_whitespace, '|)$');
-  $re_format_modifier = '%[0-9.-]*';
+  $re_blank_line = '^\s*$';
+  $re_format_modifier = '%[\d.-]*';
 
   $hack_header_function{FROM}    = \&hack_From_data;
   $hack_header_function{TO}      = \&parse_rfc1522;
@@ -398,7 +397,7 @@ sub map_over_file_contents ($@)
       my $bytesread = $blocksize;
       my $offset = 0;
       $_ = "";
-      while ($bytesread == $blocksize)
+      while (defined $bytesread && $bytesread == $blocksize)
         {
           my $len = length;
           $_ = substr ($_, $offset) if ($offset > 0 && $offset < $len);
@@ -622,14 +621,10 @@ sub process_pop3_folder ($$$$)
 
       if (! $ignore_this_message_p && $opt_extractp)
         {
-          while (defined $lines->[$lineno])
-            {
-              print $lines->[$lineno], "\n";
-              $lineno++;
-            }
+          print $lines->[$lineno++], "\n"
+            while (defined $lines->[$lineno]);
           print "\n" if ($body_line_limit != 0);
         }
-
       $msgnumber++;
     }
   pop3_close ($sock);
@@ -655,7 +650,7 @@ sub process_pop3_folder_get ($$$)
         }
       else
         {
-           $header_contents .= "\n" . $lines->[$lineno]
+          $header_contents .= "\n" . $lines->[$lineno]
             unless ($opt_firstlinep && $header_contents ne '');
         }
       $lineno++;
@@ -690,11 +685,9 @@ sub maybe_print_headers ($$$)
               my $l = 0;
               print $lines->[$l++], "\n"
                 while ($l < $lines_header_end);
+              return;
             }
-          else
-            {
-              print_headers ();
-            }
+          print_headers ();
         }
     }
 }
@@ -728,83 +721,52 @@ sub add_header ($)
 # Try to extract real name from From: line when possible.
 sub hack_From_data ($)
 {
-  my $data = shift;
+  my $d = shift;
 
   # "\<" used below to avoid confusing cperl-mode font-lock;
   # this is not a perl metacharacter.
 
-  # From: foobar@host (real name)
-  # From: "real name" <foobar@host>
-  if ($data =~ /(\([^\)]+\)|\"[^"]+")/o)
-    {
-      $data = $1;
-      # Delete leading and trailing name delimiters (quotes or parens)
-      substr ($data, 0, 1) = '';
-      substr ($data, -1) = '';
-    }
-  # From: "" <foobar@host>
-  elsif ($data =~ /""[^\<]*\<[^\>]+\>/o)
-    {
-      $data =~ /\<([^\>]+)\>/o;
-      $data = $1;
-    }
-  # From: real name <foobar@host>
-  elsif ($data =~ m/^([^\<]+)\</o)
-    {
-      $data = $1;
-    }
-  # From: <foobar@host>
-  elsif ($data =~ /^\<(.*)\>/o)
-    {
-      $data = $1;
-    }
-  # From: foobar@host
-  else
-    {
-      return $data;
-    }
+  $d = $1
+    if ($d =~ m/\(([^)]+)\)/o           # From: foobar@host (real name)
+        || $d =~ m/"([^"]+)"/o          # From: "real name" <foobar@host>
+        || $d =~ m/"".*?\<([^\>]+)\>/o  # From: "" <foobar@host>
+        || $d =~ m/^(.*?)\</o           # From: real name <foobar@host>
+        || $d =~ m/^\<(.*?)\>/o);       # From: <foobar@host>
 
   # Strip any leading and trailing whitespace
-  $data =~ s/^[ \t]+//o;
-  $data =~ s/[ \t]+$//o;
+  $d =~ s/^\s+//o;
+  $d =~ s/\s+$//o;
 
-  parse_rfc1522 ($data);
+  parse_rfc1522 ($d);
 }
+
+my @month_conv = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec');
 
 # Prettify date
 sub hack_Date_data ($)
 {
-  my $data = shift;
-  $data =~ s/^[ \t]+//o;
-
-  my @month_conv = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec');
-
-  # Hack ISO-8601 date format: YYYY-MM-DD HH:MM:SS-hh:mm
-  # (where hh:mm is the timezone offset from UTC)
-  # This parsing doesn't attempt to convert the originating time zone to
-  # the local time.
-  if ($data =~ /\d+-\d+-\d+[ \t]\d+:\d+:\d+[ \t+-][0-9:]*/o)
-    {
-      my @fields = split (/[:\t -]+/o, $data);
-      return sprintf ("%s %-2.2d %-2.2d:%-2.2d",
-                      $month_conv[$fields[1]-1], $fields[2],
-                      $fields[3], $fields[4]);
-    }
+  my $fmt = "%s %-2.2d %-2.2d:%-2.2d";
 
   # Handle dates of the form:
   #    Mon, 14 Feb 1972 17:29:00 -0500
   #    14 Feb 1972 17:29:00 -0500 (EST)
-  if ($data =~ /\d+ ... \d+ \d+:\d+:\d/o)
-    {
-      my @fields = split (/[,:\t ]+/o, $data);
-      shift @fields if ($fields[0] =~ /^[a-z][a-z][a-z]/io);
+  return sprintf $fmt, $2, $1, $3, $4
+    if ($_[0] =~ /^\s*(?:\D+,?\s+|)(\d+)\s+(\D+)\s+\d+\s+(\d+):(\d+)/o);
 
-      return sprintf ("%s %-2.2d %-2.2d:%-2.2d",
-                      $fields[1], $fields[0], $fields[3], $fields[4]);
-    }
+  # ISO-8601 date format: YYYY-MM-DD HH:MM:SS-hh:mm
+  # (where hh:mm is the timezone offset from UTC)
+  # This parsing doesn't attempt to convert the originating time zone to
+  # the local time.
+  return sprintf $fmt, $month_conv[$1 -1], $2, $3, $4
+    if ($_[0] =~ /^\s*\d+-(\d+)-(\d+)\s+(\d+):(\d+):\d+/o);
 
-  return $data;
+  # Handle dates of the form:
+  #    Sat Jan  1 21:24:52 IST 2000
+  return sprintf $fmt, $1, $2, $3, $4
+    if ($_[0] =~ /\D+\s+(\D{3})\s+(\d+)\s+(\d+):(\d+):\d/o);
+
+  return $_[0];
 }
 
 sub print_headers
@@ -818,13 +780,11 @@ sub print_headers
       if (!defined $format_vector[$i])
         {
           # Truncate output string if appropriate.
-          if ($opt_columns > 0 && length ($str) > $opt_columns)
-            {
-              $str = join ("\n",
-                           map { (length ($_) > $opt_columns)
-                                   ? substr ($_, 0, $opt_columns) : $_; }
-                           split (/\n/, $str, -1));
-            }
+          $str = join ("\n",
+                       map { (length ($_) > $opt_columns)
+                               ? substr ($_, 0, $opt_columns) : $_; }
+                       split (/\n/, $str, -1))
+            if ($opt_columns > 0 && length ($str) > $opt_columns);
           print $str;
           return;
         }
@@ -961,12 +921,17 @@ sub qp_decode ($)
   return $data;
 }
 
+my $rfc1522_charset = join ("|", "iso-8859-1", "windows-1254");
+
 sub parse_rfc1522 ($)
 {
   my $input = shift;
   my $result = "";
 
-  while ($input =~ /(.*?)=\?iso-8859-1\?([^?]).*?\?([^?]*)\?=/gcio)
+  # Perl regexp notes:
+  #   *?     provides non-greedy matching
+  #   (?:re) provides grouping without creating a saved register
+  while ($input =~ m/(.*?)=\?(?:$rfc1522_charset)\?([^?]).*?\?([^?]*)\?=/gcio)
     {
       $result .= $1;
       my $encoding = lc ($2);
