@@ -8,13 +8,14 @@ exec ${PERL-perl} -Sx $0 ${1+"$@"}
 # Created: 2001-11-27
 # Public domain
 
-# $Id$
+# $Id: ptr,v 2.1 2001/11/27 08:01:53 friedman Exp $
 
 # Commentary:
 
 # Usage: ptr 192.168.1.30 127.0.0.1 ...
 # or invoke with no arguments and feed addresses one per line on stdin.
-# Lines which are not of the form n.n.n.n are ignored.
+# IP addresses will be picked out of lines which have other cruft in them,
+# so the input format is not very important.
 
 # The command `adnshost', from the adns (asynchronous dns) package is required.
 # See http://www.chiark.greenend.org.uk/~ian/adns/ or ftp://ftp.gnu.org/adns/
@@ -101,25 +102,30 @@ sub parse_results ($)
   return \%result;
 }
 
+sub max { return [ sort { -($a <=> $b) } @_ ]->[0]; }
+
 sub main ()
 {
   unless (@ARGV)
     {
       while (<STDIN>)
         {
-          s/^\s*(.*?)\s*\n/$1/o;
-          next if ($_ eq "");
-          next unless (/^\d+\.\d+\.\d+\.\d+$/o);
-          push @ARGV, $_;
+          push @ARGV, $1
+            while (m/(\d+\.\d+\.\d+\.\d+(?:\.in-addr\.arpa|))/igo);
         }
     }
 
   my $output = adns (map { ip2arpa ($_) } @ARGV);
   my $result = parse_results ($output);
 
+  my $maxlen = max (map { length } @ARGV);
+  my $fmt = sprintf "%%-%ds %%s\n", $maxlen;
+
   for my $ip (@ARGV)
     {
-      printf "%-15s %s\n", $ip, ($result->{ip2arpa ($ip)} || "???");
+      printf $fmt, $ip, ($result->{ip2arpa ($ip)}
+                         || $result->{$ip}
+                         || "");
     }
 }
 
