@@ -1,0 +1,185 @@
+#! /bin/sh
+# netscape-fe --- front end driver for multiple installations of Mozilla
+
+# Copyright (C) 1996, 1997 Noah S. Friedman
+
+# $Id$
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, you can either send email to this
+# program's maintainer or write to: The Free Software Foundation,
+# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
+
+# Commentary:
+
+# Front-end shell script for Mozilla, used to
+# manage multiple versions of netscape.
+
+# Strategy: Install this script as "$prefix/netscape".
+# This is what users should normally execute to run "netscape".
+
+# Give each version of Mozilla a separate hierarchy under
+# "$prefix", with the name "netscape-NN.NN" where NN.NN is the version number.
+# This script looks at what versions are available, and selects a version,
+# currently $DEFAULTVERSION.
+
+# However, users can specify their own choice to force the selection of a
+# particular version by setting the environment variable MOZVERSION to have
+# a value which is the version number of the netscape that they want to use
+# (just the numeric value), or to specify either the NEWEST or OLDEST
+# versions.
+
+# Code:
+
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+DEFAULTVERSION="${DEFAULTVERSION-NEWEST}"
+
+if [ "$prefix" = "" ] ; then
+  prefix=/usr/local/netscape
+fi
+
+if [ ! -d "$prefix" ] ; then
+  echo "Cannot find root of Mozilla tree ($prefix)."
+  exit 1
+fi
+
+mozprefix="$prefix/netscape-"
+
+# Find out which versions are available on the system and sort them
+# in numeric order.
+#
+# The largish sed script prefixes all version numbers with a sort key.
+# That key is constructed by padding out any single or double digits to 3
+# digits from the version number, then converting all occurences of `.' to
+# `0', and prefixing and suffixing the entire result with an additional
+# zero.  After sorting, the sort key is stripped from the output.
+# We do all this because `sort' cannot numerically sort decimal numbers and
+# will stop on the first `.'.
+# This may not work correctly if the version number has more than 4 levels
+# of minor versions (e.g. "1.2.3.4.5" may cause problems).
+
+availversions=`ls -1d $mozprefix*/netscape 2> /dev/null \
+                | sed -n \
+                      -e "s#^$mozprefix\([0-9b.][0-9b.]*\)/netscape.*#\1#" \
+                      -e '/b/{
+                            s/b/.0/g
+                            b nb
+                          }
+                          /\..*\./{
+                            s/\([^.]*\.[^.]*\)/\1.99/
+                            b nb
+                          }
+                          s/$/.99/
+                          :nb
+                         ' \
+                      -e 'h
+                          s/[^.]*[^0-9.][^.]*\.//g
+                          :0
+                          /[0-9.][0-9.]*\.[0-9.][0-9.]*\.[0-9.][0-9.]*\.[0-9.][0-9.]*/!{
+                            s/$/.0/
+                            b 0
+                          }
+                          s/^/./
+                          s/$/./
+                          :1
+                          s/\.\([0-9]\)\./.00\1./g
+                          s/\.\([0-9][0-9]\)\./.0\1./g
+                          t 1
+                          s/\./0/g
+                          G
+                          s/\n/ /' \
+                       -e 'p' \
+                 | sort -nu \
+                 | sed -n \
+                       -e 's/.* //' \
+                       -e '/\.99/{
+                             s/\.99//
+                             b r
+                           }
+                           /\.0[^.]*$/s/\.0\([^.]*\)$/b\1/
+                           :r
+                           p'`
+
+if [ "$availversions" = "" ] ; then
+	echo "No version of mozilla found in $prefix."
+	exit 1
+fi
+
+# This sets `oldest' to the oldest version available, and `newest'
+# to the newest version available.
+# On line 1, we save the original pattern in the hold space and restore it
+# in case it is the only line of input.
+eval `echo "$availversions" \
+       | sed -ne '1{h;s/^/oldest=/p;g;}
+                  ${s/^/newest=/p;}
+                 '`
+
+version="${MOZVERSION-$DEFAULTVERSION}"
+
+case "$version" in
+  [Oo][Ll][Dd][Ee][Ss][Tt]) version="$oldest" ;;
+  [Nn][Ee][Ww][Ee][Ss][Tt]) version="$newest" ;;
+  '') version="$oldest" ;;
+  *)
+    if [ ! -d "$mozprefix$version" ] ;  then
+      echo "$progname: $version: Cannot find requested version." 1>&2
+      version=
+    fi
+   ;;
+esac
+
+# If we don't have a version by now, then give up.
+if [ "$version" = "" ] ; then
+  exec 1>&2
+  echo "$progname: Cannot determine which version to use."
+  case "$availversions" in
+    */* )
+      echo "Available versions are:"
+      for f in $availversions; do
+        echo "   $f"
+      done | sort
+     ;;
+    * )
+      echo "Available versions are:" $availversions
+     ;;
+  esac
+  exit 1
+fi
+
+MOZILLA_HOME="$mozprefix$version"
+CLASSPATH="$MOZILLA_HOME/java/classes:$MOZILLA_HOME:$CLASSPATH"
+PATH="$PATH:$MOZILLA_HOME"
+export MOZILLA_HOME CLASSPATH PATH
+
+set fnord $MOZILLA_HOME/netscape ${1+"$@"}
+shift
+
+case "${MOZNAME+set}" in
+  set )
+    case "$BASH_VERSION" in
+      2.*) set fnord -a "$MOZNAME" ${1+"$@"} ;;
+      * )  set fnord ${1+"$@"} ;;
+    esac
+    shift
+   ;;
+esac
+
+exec ${1+"$@"}
+
+# netscape-fe ends here
