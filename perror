@@ -1,0 +1,36 @@
+#!/usr/bin/perl -w
+
+use POSIX qw(:errno_h);
+use strict;
+no strict qw(refs);
+
+sub strerror ($)
+{
+  my $err = shift;
+
+  if ($err =~ /^\d+$/) {}
+  elsif ($err =~ /^e/i) { $err = eval { &{uc $err} } }
+  else { $err = eval { &{uc ("e" . $err) } } }
+
+  POSIX::strerror ($err);
+}
+
+sub main ()
+{
+  my $onep = scalar @ARGV > 1;
+
+  for my $err (@ARGV)
+    {
+      my $str = strerror ($err);
+      if ($onep)
+        {
+          printf "%s: %s\n", $err, $str;
+        }
+      else
+        {
+          print $str, "\n";
+        }
+    }
+}
+
+main ();
