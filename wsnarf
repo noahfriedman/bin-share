@@ -1,15 +1,20 @@
 #! /bin/sh
 
-# $Id: wsnarf,v 1.1 1998/02/13 11:27:53 friedman Exp $
+# $Id: wsnarf,v 1.2 2002/01/02 21:28:55 friedman Exp $
+
+#user_agent='User-Agent: Mozilla/4.04 [en] (X11; I; Linux 2.0.33 i586)'
+user_agent='User-Agent: Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.0.0) Gecko/20020529'
 
 exec wget \
-  --header='User-Agent: Mozilla/4.04 [en] (X11; I; Linux 2.0.33 i586)' \
+  --header="$user_agent" \
   \
   --convert-links \
   --force-html \
   --server-response \
   --timestamping \
   --wait=0 \
+  --tries=0 \
+  --waitretry=85 \
   \
   --no-parent \
   --recursive \
