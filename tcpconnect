@@ -4,13 +4,9 @@
 # Created: 1995-04-15
 # Public domain
 
-# $Id$
+# $Id: tcpconnect,v 1.3 1995/09/01 21:56:45 friedman Exp friedman $
 
 # Commentary:
-
-# One way in which this might be improved is to look up all alternate
-# addresses for a host and try each one if previous ones fail.
-
 # Code:
 
 # Name by which this script was invoked.
