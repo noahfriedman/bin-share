@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- smartly produce DVI files from texinfo sources
-# $Id: texi2dvi,v 0.9 1998/04/14 14:43:39 karl Exp $
+# $Id: texi2dvi,v 0.10 1998/06/05 21:54:15 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98 Free Software Foundation, Inc.
 #
@@ -19,67 +19,58 @@
 # program's maintainer or write to: The Free Software Foundation,
 # Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
 #
-# Commentary:
-#
 # Author: Noah Friedman <friedman@gnu.org>
 #
 # Please send bug reports, etc. to bug-texinfo@gnu.org.
 # If possible, please send a copy of the output of the script called with
 # the `--debug' option when making a bug report.
-#
-# In the interest of general portability, some common bourne shell
-# constructs were avoided because they weren't guaranteed to be available
-# in some earlier implementations.  I've tried to make this program as
-# portable as possible.  Welcome to unix, where the lowest common
-# denominator is rapidly diminishing.
-#
-# Among the more interesting lossages I noticed among Bourne shells:
-#     * No shell functions.
-#     * No `unset' builtin.
-#     * `shift' cannot take a numeric argument, and signals an error if
-#       there are no arguments to shift.
-#
-# Code:
-
-# Name by which this script was invoked.
-progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.9 $'
-version=`set - $rcs_revision; echo $2`
+rcs_revision='$Revision: 0.10 $'
+rcs_version=`set - $rcs_revision; echo $2`
 
-# To prevent hairy quoting and escaping later.
-bq='`'
-eq="'"
+version="$0 (GNU Texinfo 3.12) $rcs_version
+Copyright (C) 1998 Free Software Foundation, Inc.
+There is NO warranty.  You may redistribute this software
+under the terms of the GNU General Public License.
+For more information about these matters, see the files named COPYING.
+"
 
 usage="Usage: $0 [OPTION]... FILE...
-Run a Texinfo document through TeX.
+Run each Texinfo FILE through TeX in turn until all cross-references are
+resolved, building all indices.  Expand macros with makeinfo before
+running TeX.  The directory containing each FILE is searched for
+included files.
 
 Options:
 -b, --batch          No interaction (\nonstopmode in TeX).
 -c, --clean          Remove all auxiliary files.
--D, --debug          Turn on shell debugging ($bq${bq}set -x$eq$eq).
--t, --texinfo CMD    Insert CMD after @setfilename before running TeX.
+-D, --debug          Turn on shell debugging (set -x).
+-I DIR		     Search DIR for Texinfo files.
+-t, --texinfo CMD    Insert CMD after @setfilename in copy of input file.
 --verbose            Report on what is done.
--h, --help           Display this help and exit.
--v, --version        Display version information and exit.
+-h, --help           Display this help and exit successfully.
+-v, --version        Display version information and exit successfully.
 
 The values of the TEX, TEXINDEX, and MAKEINFO environment variables are
 used to run those commands, if they are set.
 
 Email bug reports to bug-texinfo@gnu.org."
 
-# Initialize variables.
+# Initialize variables for option overriding and otherwise.
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
-# Some of these, like TEX and TEXINDEX, may be inherited from the environment.
-backup_extension=.bak # these files get deleted if all goes well.
 batch=
 clean=
 debug=
-orig_pwd="`pwd`"
+miincludes=
+nonopt=
 textra=
+txincludes=
 verbose=false
+
+backup_extension=.bak # these files get deleted if all goes well.
+orig_pwd="`pwd`"
 makeinfo="${MAKEINFO-makeinfo}"
 texindex="${TEXINDEX-texindex}"
 tex="${TEX-tex}"
@@ -89,57 +80,55 @@ TEXINPUTS_orig="$TEXINPUTS"
 export TEXINPUTS
 
 # Parse command line arguments.
-# Make sure that all wildcarded options are long enough to be unambiguous.
-# It's a good idea to document the full long option name in each case.
-# Long options which take arguments will need a `*' appended to the
-# canonical name to match the value appended after the `=' character.
-while :; do
-  test $# -eq 0 && break
+while test $# -gt 0; do
   
+  # Handle --option=value by splitting apart and putting back on argv.
   case "$1" in
-    -b | --batch | --b* ) batch=t; shift ;;
-    -c | --clean | --c* ) clean=t; shift ;;
-    -D | --debug | --d* ) debug=t; shift ;;
-    -h | --help | --h* )   echo "$usage"; exit 0 ;;
-    # OK, we should do real option parsing here, but be lazy for now.
-    -t | --texinfo | --t*) shift; textra="$textra $1"; shift ;; 
-    -v | --vers* )
-      echo "$progname (GNU Texinfo 3.12) $version"
-      echo "Copyright (C) 1998 Free Software Foundation, Inc.
-There is NO warranty.  You may redistribute this software
-under the terms of the GNU General Public License.
-For more information about these matters, see the files named COPYING."
-      exit 0 ;;
-    --verb* )            verbose=echo; shift ;;
-    -- )     # Stop option processing
+    --*=*)
+      opt=`echo "$1" | sed -e 's/=.*//'`
+      val=`echo "$1" | sed -e 's/[^=]*=//'`
       shift
-      break ;;
-    -* )
-      case "$1" in
-        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
-        * )     arg="$1" ;;
-      esac
-      exec 1>&2
-      echo "$progname: Unknown or ambiguous option $bq$arg$eq."
-      echo "$progname: Try $bq--help$eq for more information."
-      exit 1 ;;
-    * ) break ;;
+      set - "$opt" "$val" "$@"
+      ;;
+  esac
+
+  # This recognizes --bletch as --batch.  So what.
+  case "$1" in
+    -b | --b*) batch=t;;
+    -c | --c*) clean=t;;
+    -D | --d*) debug=t;;
+    -h | --h*) echo "$usage"; exit 0;;
+    -I | --I*)
+      shift
+      miincludes="$miincludes -I $1"
+      txincludes="$txincludes:$1"
+      ;;
+    -t | --t*)    shift; textra="$textra
+$1";;
+    -v | --vers*) echo "$version"; exit 0;;
+    --verb*)      verbose=echo;;
+    --)           shift; break;;
+    -*)
+      echo "$0: Unknown or ambiguous option \`$1'." >&2
+      echo "$0: Try \`--help' for more information." >&2
+      exit 1;;
+    *) nonopt="$nonopt $1";;
    esac
+   shift
 done
 
 # See if there are any command line args left (which will be interpreted as
 # filename arguments).
-if test $# -eq 0; then
-  exec 1>&2
-  echo "$progname: At least one file name is required as an argument."
-  echo "$progname: Try $bq--help$eq for more information."
+if test -z "$nonopt"; then
+  echo "$0: At least one file name is required as an argument." >&2
+  echo "$0: Try \`--help' for more information." >&2
   exit 2
 fi
 
 test "$debug" = t && set -x
 
-# Texify files
-for command_line_filename in ${1+"$@"}; do
+# TeXify files.
+for command_line_filename in $nonopt; do
   $verbose "Processing $command_line_filename ..."
 
   # See if file exists.  If it doesn't we're in trouble since, even
@@ -179,12 +168,6 @@ for command_line_filename in ${1+"$@"}; do
     directory=.
   fi
 
-  # Source file might @include additional texinfo sources.  Put `.' and
-  # directory where source file(s) reside in TEXINPUTS before anything
-  # else.  `.' goes first to ensure that any old .aux, .cps, etc. files in
-  # ${directory} don't get used in preference to fresher files in `.'.
-  TEXINPUTS=".:${directory}:${TEXINPUTS_orig}"
-
   # Expand macro commands in the original source file using Makeinfo;
   #   the macro syntax bfox implemented is impossible to implement in TeX.
   # Always use `end' footnote style, since the `separate' style
@@ -192,8 +175,8 @@ for command_line_filename in ${1+"$@"}; do
   # Discard main info output, the user asked to run TeX, not makeinfo.
   # Redirect output to /dev/null to throw away `Making info file...' msg.
   $verbose "Macro-expanding $command_line_filename to $filename_tmp ..."
-  $makeinfo --footnote-style=end -E $filename_tmp -o /dev/null \
-    $command_line_filename >/dev/null
+  $makeinfo --footnote-style=end -E $filename_tmp -I $directory \
+    $miincludes -o /dev/null $command_line_filename >/dev/null
 
   # But if there were no macros, or makeinfo failed for some reason,
   # just use the original file.  (It shouldn't make any difference, but
@@ -221,7 +204,13 @@ for command_line_filename in ${1+"$@"}; do
     filename_input=`basename $filename_input`
   fi
 
-  while true; do # will break out of loop below
+  # Source file might @include additional texinfo sources.  Put `.' and
+  # directory where source file(s) reside in TEXINPUTS before anything
+  # else.  `.' goes first to ensure that any old .aux, .cps, etc. files in
+  # ${directory} don't get used in preference to fresher files in `.'.
+  TEXINPUTS=".:${directory}${txincludes}:${TEXINPUTS_orig}"
+
+  while :; do # will break out of loop below
     # "Unset" variables that might have values from previous iterations and
     # which won't be completely reset later.
     definite_index_files=
@@ -300,6 +289,7 @@ for command_line_filename in ${1+"$@"}; do
 
     # If old and new list don't at least have the same file list, then one
     # file or another has definitely changed.
+    # 
     $verbose "Original index files =$orig_index_files"
     $verbose "New index files =$new_index_files"
     if test "z${orig_index_files}" != "z${new_index_files}"; then
@@ -346,7 +336,7 @@ for command_line_filename in ${1+"$@"}; do
   fi
 
   # Generate list of files to delete, then call rm once with the entire
-  # list.  This is significantly faster than multiple executions of rm.
+  # list.  This is noticeably faster than multiple executions of rm.
   file_list=
   for file in ${orig_index_files}; do
     file_list="${file_list} ${file}${backup_extension}"
@@ -360,4 +350,4 @@ for command_line_filename in ${1+"$@"}; do
 done
 
 $verbose "$0 done."
-true # exit successfully.
+true # exit successfully, not according to whatever we ended the loop with.
