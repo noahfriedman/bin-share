@@ -1,7 +1,7 @@
 #!/bin/sh
 # texi2dvi -- smartly produce DVI files from texinfo sources
 #
-# Copyright (C) 1992 Free Software Foundation.
+# Copyright (C) 1992, 1993 Free Software Foundation.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,12 +21,12 @@
 #              675 Mass Ave.
 #              Cambridge, MA 02139, USA. 
 #
-# Please send bug reports, etc. to friedman@prep.ai.mit.edu
+# Please send bug reports, etc. to bug-texinfo@prep.ai.mit.edu
 # If possible, please send a copy of the output of the script called with
 # the `--debug' option when making a bug report. 
 #
-# Version 0.3
-# Last modified 30-Oct-92
+# Version 0.4
+# Last modified 26-Mar-93
 #
 
 # Please note that in the interest of general portability, some common
@@ -42,13 +42,13 @@
 
 progname=`basename $0`
 
-usage="Usage: ${progname} {-D} {-f} {-h} [file1] {file2} {...}
-       {--debug} {--force} {--help}
+usage="Usage: ${progname} {-D} {-h} [file1] {file2} {...}
+       {--debug} {--help}
 
    Options in braces are optional.  Those in brackets are required. 
 "
 
-if [ $# -eq 0 ]; then
+if test $# -eq 0 ; then
    echo "${usage}" 1>&2;
    exit 1
 fi
@@ -60,33 +60,33 @@ bq="\`"  # To prevent hairy quoting and escaping later.
 eq="'"
 orig_pwd="`pwd`"
 
-if [ "z${TEXINDEX}" != "z" ]; then
+if test "z${TEXINDEX}" != "z" ; then
    texindex="${TEXINDEX}"
 fi
 
-if [ "z${TEX}" != "z" ]; then
+if test "z${TEX}" != "z" ; then
    tex="${TEX}"
 fi
+
+# Save this so we can construct a new TEXINPUTS path for each file to be
+# processed.
+TEXINPUTS_orig="${TEXINPUTS}"
+export TEXINPUTS
 
 # Parse command line options
 
 # "unset" option variables to make sure they weren't accidentally
 # exported
-force=""
 debug=""
 
 # If you add new commands be sure to change the wildcards below to make
 # sure they are unambiguous (i.e. only match one possible long option)
 # Be sure to show at least one instance of the full long option name to
 # document what the long option is canonically called. 
-while [ $# -gt 0 ]; do
+while test $# -gt 0 ; do
    case z$1 in
       z-D | z--debug | z--d* )
          debug="t"
-         shift
-        ;;
-      z-f | z--force | z--f* )
-         force="t"
          shift
         ;;
       z-h | z--help | z--h* )
@@ -111,7 +111,7 @@ done
 
 # See if there are any command line args left (which will be interpreted as
 # filename arguments)
-if [ $# -eq 0 ]; then
+if test $# -eq 0 ; then
    echo "${progname}: at least one file name is required as an argument." 1>&2
    echo "" 1>&2
    echo "${usage}" 1>&2
@@ -121,55 +121,36 @@ fi
 test "z${debug}" = "zt" && set -x
 
 # Texify files
-for command_line_filename in "$@" ; do
-   # Always chdir to original working directory so that all relative
-   # pathnames in command-line arguments are evaluated with respect to the
-   # parent environment, rather than the working directory of the last file
-   # (which might not have been the same). 
-   cd "${orig_pwd}"
-
+for command_line_filename in ${1+"$@"} ; do
    # Roughly equivalent to `dirname ...`, but more portable
    directory="`echo ${command_line_filename} | sed 's/\/[^\/]*$//'`"
-   file_texi="`basename ${command_line_filename}`"
+   filename_texi="`basename ${command_line_filename}`"
    # Strip off the last extension part (probably .texinfo or .texi)
-   filename_noext="`echo ${file_texi} | sed 's/\.[^.]*$//'`"
+   filename_noext="`echo ${filename_texi} | sed 's/\.[^.]*$//'`"
+
+   # If directory and file are the same, then it's probably because there's
+   # no pathname component.  Set dirname to `.', the current directory.
+   if test "z${directory}" = "z${command_line_filename}" ; then
+      directory="."
+   fi
+
+   # Source file might @include additional texinfo sources.  Put `.' and
+   # directory where source file(s) reside in TEXINPUTS before anything
+   # else.  `.' goes first to ensure that any old .aux, .cps, etc. files in
+   # ${directory} don't get used in preference to fresher files in `.'. 
+   TEXINPUTS=".:${directory}:${TEXINPUTS_orig}"
 
    # "Unset" variables that might have values from previous iterations and
    # which won't be completely reset later.
    definite_index_files=""
 
-   # If directory and file are the same, then it's probably because there's
-   # no pathname component.  Set dirname to `.', the current directory.
-   if [ "z${directory}" = "z${file_texi}" ]; then
-      directory="."
-   fi
-
-   # Change to directory where file is located. 
-   cd "${directory}"
-   if [ $? -ne 0 ]; then
-      echo "${progname}: could not chdir to ${bq}${directory}${eq}" 1>&2
-      continue
-   fi
-
    # See if file exists here.  If it doesn't we're in trouble since, even
    # though the user may be able to reenter a valid filename at the tex
    # prompt (assuming they're attending the terminal), this script won't be
    # able to find the right index files and so forth.
-   if [ ! -r "${file_texi}" ]; then
-      echo "${progname}: ${file_texi}: No such file or permission denied." 1>&2
+   if test ! -r "${command_line_filename}" ; then
+      echo "${progname}: ${command_line_filename}: No such file or permission denied." 1>&2
       continue; 
-   fi
-
-   # If dvi file is newer than the texinfo source, don't do anything
-   # (unless --force option was specified)
-   if [ -z "${force}" ]; then
-      # List file.dvi first, just in case mtimes are identical and ls -t
-      # sorts stably. 
-      filename_newest="`set -$- \`ls -t \"${filename_noext}.dvi\" \"${file_texi}\" 2> /dev/null\`; echo \"\$1\"`"
-      if [ "${filename_newest}" = "${filename_noext}.dvi" ]; then
-         echo "${progname}: ${bq}${filename_noext}.dvi${eq} is up to date." 1>&2
-         continue
-      fi
    fi
 
    # Find all files having root filename with a two-letter extension,
@@ -179,14 +160,14 @@ for command_line_filename in "$@" ; do
    possible_index_files="`eval echo ${filename_noext}.?? ${filename_noext}.aux`"
    for this_file in ${possible_index_files} ; do
       # If file is empty, forget it.  
-      if [ ! -s "${this_file}" ]; then
+      if test ! -s "${this_file}" ; then
          continue;
       fi
 
       # Examine first character of file.  If it's not a backslash or
       # single quote, then it's definitely not an index or xref file.
       first_character="`sed -n '1s/^\(.\).*$/\1/p;q' ${this_file}`"
-      if [ "${first_character}" = "\\" -o "${first_character}" = "'" ]; then
+      if test "${first_character}" = "\\" -o "${first_character}" = "'" ; then
          definite_index_files="${definite_index_files} ${this_file}"
       fi
    done
@@ -205,24 +186,24 @@ for command_line_filename in "$@" ; do
    # after running TeX a first time the index files don't change, then
    # there's no reason to run TeX again.  But we won't know that if the
    # index files are out of date or nonexistent.
-   if [ "${orig_index_files_sans_aux}" ]; then
+   if test "${orig_index_files_sans_aux}" ; then
       ${texindex} ${orig_index_files_sans_aux}
    fi
 
-   if ${tex} ${file_texi} ; then		# TeX run first time
+   if ${tex} ${command_line_filename} ; then		# TeX run first time
       definite_index_files=""
       # Get list of new index files
       possible_index_files="`eval echo ${filename_noext}.?? ${filename_noext}.aux`"
       for this_file in ${possible_index_files} ; do
          # If file is empty, forget it.
-         if [ ! -s ${this_file} ]; then
+         if test ! -s ${this_file} ; then
             continue;
          fi
 
          # Examine first character of file.  If it's not a backslash or
          # single quote, then it's definitely not an index or xref file.
          first_character="`sed -n '1s/^\(.\).*$/\1/p;q' ${this_file}`"
-         if [ "${first_character}" = "\\" -o "${first_character}" = "'" ]; then
+         if test "${first_character}" = "\\" -o "${first_character}" = "'" ; then
             definite_index_files="${definite_index_files} ${this_file}"
          fi
       done
@@ -233,7 +214,7 @@ for command_line_filename in "$@" ; do
 
       # If old and new list don't at least have the same file list, then one
       # file or another has definitely changed.  
-      if [ "${orig_index_files}" != "${new_index_files}" ]; then
+      if test "${orig_index_files}" != "${new_index_files}" ; then
          index_files_changed_p=t
       else
          # File list is the same.  We must compare each file until we find a
@@ -242,7 +223,7 @@ for command_line_filename in "$@" ; do
          for this_file in ${new_index_files} ; do
             # cmp -s will return nonzero exit status if files differ. 
             cmp -s "${this_file}" "${this_file}${backup_extension}"
-            if [ $? -ne 0 ] ; then
+            if test $? -ne 0  ; then
                # We only need to keep comparing until we find *one* that
                # differs, because we'll have to run texindex & tex no
                # matter what. 
@@ -254,14 +235,14 @@ for command_line_filename in "$@" ; do
 
       # If index files have changed since TeX has been run, or if the aux
       # file wasn't present originally, run texindex and TeX again.
-      if [ "${index_files_changed_p}" ] ; then
+      if test "${index_files_changed_p}"  ; then
          retval=0
-         if [ "${new_index_files_sans_aux}" ]; then
+         if test "${new_index_files_sans_aux}" ; then
             ${texindex} ${new_index_files_sans_aux} 
             retval=$?
          fi
-         if [ ${retval} -eq 0 ]; then
-            ${tex} "${file_texi}"
+         if test ${retval} -eq 0 ; then
+            ${tex} "${command_line_filename}"
          fi
       fi
    fi
@@ -272,7 +253,7 @@ for command_line_filename in "$@" ; do
    for file in ${orig_index_files} ; do
        file_list="${file_list} ${file}${backup_extension}"
    done
-   if [ "${file_list}" ]; then
+   if test "${file_list}" ; then
       rm -f ${file_list}
    fi
 done
