@@ -1,8 +1,57 @@
 #!/bin/sh
+# incgrep --- search all header files in known include directories for pattern
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1996-01-29
+# Public domain
 
-dirs=
-for d in /usr/include /usr/local/include /usr/local/gnu/include ; do
-  test -d "$d" && dirs="$dirs $d"
-done
+# $Id$
 
-find $dirs -follow -name '*.h' -print 2> /dev/null | xargs grep ${1+"$@"}
+# Commentary:
+
+# This script works better if you have GCC version 2 and GNU `find'.
+
+# Code:
+
+cc=${CC-gcc}
+
+includes='
+  /usr/local/gnu/include
+  /usr/local/include
+  /usr/include
+'
+
+if ($cc -v) > /dev/null 2>&1; then
+  version=`gcc -v 2>&1 \
+            | sed -ne '/gcc version/!d
+                       s/gcc version  *//
+                       s/^2\..*/2/
+                       p
+                      '`
+  case "$version" in
+    2 )
+      ccdir=`$cc -print-libgcc-file-name | sed -e 's/\/[^/]*$//'`
+      cpp=$ccdir/cpp
+
+      includes=`$cpp -v 2>&1 < /dev/null \
+                  | sed -ne '/#include <...> search starts here:/!d
+                             n
+                             :l
+                             /^End of search list./!{
+                               p
+                               n
+                               b l
+                             }'`
+     ;;
+  esac
+fi
+
+if (find --version) > /dev/null 2>&1 ; then
+   follow=-follow
+else
+   follow=
+fi
+
+find $includes $follow -name '*.h' -print 2> /dev/null \
+ | xargs grep ${1+"$@"}
+
+# incgrep ends here.
