@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.47 2002/03/04 21:14:27 friedman Exp $
+# $Id: from,v 1.48 2002/05/20 01:51:59 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -68,6 +68,11 @@ Options are:
 -h, --help                   You're looking at it.
 -H, --help-format            Get documentation about the format of the FMT
                              argument to \`--format'.
+-i, --me-match      REGEXP   Pattern to match against the From field
+                             to determine whether you are the sender
+                             (affects the {FROMTO} format specifier).
+                             Defaults to everything up until the first
+                             comma in your GECOS information.
 -M, --match-header  HEADERS  Seach only headers named HEADER for patterns
                              specified with \`--match'.
                              By default, the header searched is \`From'.
@@ -121,7 +126,9 @@ surrounded by curly braces, are:
     command line.
   * \`{FOLDER}'
     The name of this folder, as specified on the command line.
-
+  * \`{FROMTO}'
+    The sender of the message if it isn't you, or \"To <recipient>\"
+    otherwise.
 
 For example, given a message with headers of the form
 
@@ -188,6 +195,7 @@ sub parse_options ()
               "f|format=s",               \$opt_format,
               "h|help",                   \&usage,
               "H|help-format",            \&usage_fmt,
+              "i|me-match",               \$opt_me_match,
               "M|match-header=s",         \$opt_match_header,
               "m|match=s",                \$opt_match_regexp,
               "n|numbered",               \$opt_numbered,
@@ -200,6 +208,7 @@ sub parse_options ()
               "w|warnings",               \$^W);
 
   set_default_format () unless (defined $opt_format);
+  set_me_match () unless (defined $opt_me_match);
   # User might have set opt_pass in fromrc using a backquoted substitution
   chop $opt_pass if (substr ($opt_pass, -1, 1) eq "\n");
 }
@@ -352,6 +361,20 @@ sub default_spool_file ($;$)
   return undef;
 }
 
+sub set_me_match ()
+{
+  if (! $opt_me_match)
+    {
+      my $username = $ENV{USER} || $ENV{LOGNAME};
+      my @passwd = $username ? getpwnam ($username) : getpwuid ($>);
+      return unless @passwd;
+
+      ($opt_me_match = $passwd[6]) =~ s/,.*//o;
+      $opt_me_match =~ s/^\s*(.*?)\s*$/$1/o;
+      $opt_me_match =~ s/(\W)/\\$1/go;
+    }
+}
+
 sub set_default_format ()
 {
   if ($opt_extractp)
@@ -363,7 +386,7 @@ sub set_default_format ()
   else
     {
       $opt_format = ($opt_numbered? "%-3{FLINES} " : "")
-                    . "%-19.18From %-13.12Date %Subject\n";
+                    . "%-19.18{FROMTO} %-13.12Date %Subject\n";
 
     }
 }
@@ -464,6 +487,11 @@ sub make_format_vector ($)
       $tmp = uc ($tmp);
       my $tok = $format_token{$tmp} || 's';
       $header_save_p{$tmp} = 1;
+      if ($tmp eq '{FROMTO}')
+        {
+	  $header_save_p{'FROM'} = 1;
+	  $header_save_p{'TO'}   = 1;
+        }
       push @vector_header_name, $tmp;
 
       my $fmt = join ('', $modifier, $tok, $trailing_whitespace);
@@ -756,6 +784,21 @@ sub print_headers
   my $data = (shift || \%current_headers);
   my $str = "";
   my $i = 0;
+
+  if (! $data->{'{FROMTO}'})
+    {
+      if ($opt_me_match && $data->{'FROM'} =~ /$opt_me_match/o)
+        {
+	  my $to = $data->{'TO'};
+	  $to = $1 if $to =~ /^([^,]+),/o;
+	  $to =~ s/^\s*(.*?)\s*$/$1/o;
+	  $data->{'{FROMTO}'} = 'To ' . hack_From_data ($to);
+        }
+      else
+        {
+	  $data->{'{FROMTO}'} = $data->{'FROM'};
+        }
+    }
 
   while (1)
     {
