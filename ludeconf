@@ -1,12 +1,12 @@
 #!/bin/sh
 # ludeconf --- configure autoconfiscated packages for installation in lude
 
-# Copyright (C) 1997, 98, 2000 Noah S. Friedman
+# Copyright (C) 1997, 98, 2000, 2003 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-06-03
 
-# $Id: ludeconf,v 2.8 2000/12/03 10:51:04 friedman Exp $
+# $Id: ludeconf,v 2.9 2001/01/03 21:11:32 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -34,7 +34,7 @@ bq='`'
 eq="'"
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 2.8 $'
+rcs_revision='$Revision: 2.9 $'
 revision=`set fnord $rcs_revision; echo $3`
 
 usage="Usage: $progname {$progname-options} {-- {configure-options}}
@@ -267,25 +267,34 @@ case "$debug" in t ) set -x ;; esac
 
 case "$lude_depot" in
   '' )
-    depots='
-      /tools/ns
-      /opt/lude
-      /opt/local
-      /opt/X11
-      /opt/gnu
-      /usr/local
-    '
-    for dir in $depots ; do
-      if test -d "$dir/soft" ; then
-        lude_depot="$dir/soft"
-        break
-      fi
-    done
+    pwd=${PWD-`pwd`}
+    case $pwd in
+      */soft )   lude_depot=$pwd ;;
+      */soft/* ) lude_depot=`echo "$pwd" | sed -e 's/\/soft\/.*/\/soft/'` ;;
+      * )
+        depots="
+          /opt/lude
+          /tools/ns
+          /tools
+          /opt/local
+          /opt/X11
+          /opt/gnu
+          /usr/local
+          $pwd
+        "
+        for dir in $depots ; do
+          if test -d "$dir/soft" ; then
+            lude_depot="$dir/soft"
+            break
+          fi
+        done
 
-    case "$lude_depot" in
-      '' )
-        echo "$progname: Cannot determine LUDE depot." 1>&2
-        exit 1
+        case "$lude_depot" in
+          '' )
+            echo "$progname: Cannot determine LUDE depot." 1>&2
+            exit 1
+           ;;
+        esac
        ;;
     esac
    ;;
