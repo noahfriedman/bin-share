@@ -1,6 +1,6 @@
 #!/bin/sh
 exec ${PERL-perl} -Swx $0 ${1+"$@"}
-#!perl		  [perl will skip all lines in this file before this line]
+#!perl
 
 # tcpconnect --- connect via TCP to a specified host and port
 
@@ -9,7 +9,7 @@ exec ${PERL-perl} -Swx $0 ${1+"$@"}
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-04-15
 
-# $Id: tcpconnect,v 1.11 2001/09/09 09:34:19 friedman Exp $
+# $Id: tcpconnect,v 1.12 2001/09/09 09:38:21 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -92,9 +92,8 @@ sub netstream_gethostbyname ($)
   $h_errno = $? = 0;
   my @data = gethostbyname ($name);
   return @data if (scalar @data > 0);
-
   $h_errno = $? if ($? != 0);
-  return undef;
+  return; # distinct from `return undef' in an array context.
 }
 
 sub netstream_gethostbyaddr ($;$)
@@ -107,16 +106,6 @@ sub netstream_gethostbyaddr ($;$)
   $h_errno = $? if (!defined $name && $? != 0);
 
   return (defined $name && $name ne "") ? $name : inet_ntoa ($addr);
-}
-
-# mode 1 = buffering, 0 = no buffering
-sub set_buffering_mode ($$)
-{
-  my ($sock, $mode) = @_;
-
-  my $orig_handle = select ($sock);
-  $| = ($mode == 0);
-  select ($orig_handle);
 }
 
 # mode 1 = blocking, 0 = non-blocking
