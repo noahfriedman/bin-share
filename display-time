@@ -2,8 +2,9 @@
 # display-time --- mode-line data accumulator for my time.el
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1991-12-18
-# Last modified: 1994-03-15
 # Public domain
+
+# $Id$
 
 # Commentary:
 # Code:
@@ -169,7 +170,7 @@ while : ; do
       set fnord `grep '^From ' "$spoolfile" 2> /dev/null | wc -l`
       shift
       mail_result="mail:$1"
-      : > "$stampfile"
+      > "$stampfile"
      ;;
     esac
   else
