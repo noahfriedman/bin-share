@@ -1,0 +1,133 @@
+#!/bin/sh
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl
+
+# ptr --- resolve IP addresses to host names
+
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2001-11-27
+# Public domain
+
+# $Id$
+
+# Commentary:
+
+# Usage: ptr 192.168.1.30 127.0.0.1 ...
+# or invoke with no arguments and feed addresses one per line on stdin.
+# Lines which are not of the form n.n.n.n are ignored.
+
+# The command `adnshost', from the adns (asynchronous dns) package is required.
+# See http://www.chiark.greenend.org.uk/~ian/adns/ or ftp://ftp.gnu.org/adns/
+
+# Code:
+
+use strict;
+use Symbol;
+
+sub ip2arpa ($)
+{
+  local $_ = shift;
+  s/^(\d+)\.(\d+)\.(\d+)\.(\d+)\n?/$4.$3.$2.$1.in-addr.arpa/o;
+  return $_;
+}
+
+sub arpa2ip ($)
+{
+  local $_ = shift;
+  s/^(\d+)\.(\d+)\.(\d+)\.(\d+)\.in-addr\.arpa/$4.$3.$2.$1/io;
+  return $_;
+}
+
+sub adns (@)
+{
+  my @adns_cmd = ("adnshost", "--asynch", "--fmt-inline",
+                  "--pipe", "--type", "ptr",
+                  #"--tcp",
+                 );
+
+  my ($irh, $iwh, $orh, $owh) = (gensym, gensym, gensym, gensym);
+  pipe ($irh, $iwh);
+  pipe ($orh, $owh);
+
+  my $pid = fork;
+  if ($pid == 0)
+    {
+      open (STDIN,  "<&=" . fileno ($irh));
+      open (STDOUT, ">&=" . fileno ($owh));
+      map { close ($_) } ($irh, $iwh, $orh, $owh);
+      exec (@adns_cmd) || die "exec: $adns_cmd[0]: $!";
+    }
+  else
+    {
+      close ($irh);
+      close ($owh);
+      print $iwh map { $_ . "\n" } @_;
+      close ($iwh);
+      my @result = <$orh>;
+      wait;
+      close ($orh);
+      return \@result;
+    }
+}
+
+sub parse_results ($)
+{
+  my $data = shift;
+  my %cname;
+  my %result;
+  for my $ent (@$data)
+    {
+      next if ($ent =~ /^;/o);
+
+      my ($ip, $type, $name) = split (/\s+/o, $ent);
+
+      if (uc ($type) eq "CNAME")
+        {
+          $cname{$name} = $ip;
+        }
+      else
+        {
+          $result{$ip} = $name;
+        }
+    }
+
+  while (my ($canon, $alias) = each %cname)
+    {
+      next unless (exists $result{$canon});
+      $result{$alias} = $result{$canon};
+      delete $result{$canon};
+    }
+
+  return \%result;
+}
+
+sub main ()
+{
+  unless (@ARGV)
+    {
+      while (<STDIN>)
+        {
+          s/^\s*(.*?)\s*\n/$1/o;
+          next if ($_ eq "");
+          next unless (/^\d+\.\d+\.\d+\.\d+$/o);
+          push @ARGV, $_;
+        }
+    }
+
+  my $output = adns (map { ip2arpa ($_) } @ARGV);
+  my $result = parse_results ($output);
+
+  for my $ip (@ARGV)
+    {
+      printf "%-15s %s\n", $ip, ($result->{ip2arpa ($ip)} || "???");
+    }
+}
+
+main ();
+
+# local variables:
+# mode: perl
+# eval: (auto-fill-mode 1)
+# end:
+
+# ptr ends here
