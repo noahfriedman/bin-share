@@ -1,10 +1,10 @@
-#!/bin/sh
+#! /bin/sh
 # biffjr --- beep and notify when you have new mail
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1993-09-21
 # Public domain
 
-# $Id$
+# $Id: biffjr,v 1.4 1995/03/21 14:48:44 friedman Exp $
 
 # Commentary:
 
@@ -43,13 +43,19 @@ Options are:
                              This option implies $bq--ignore-tty-owner$eq.
 -h, --help                   You're looking at it.
 -i, --ignore-tty-owner       Do not examine ownership of tty to decide
-                             whether to terminate.  
+                             whether to terminate.
                              Use of this option alone is discouraged
                              because failure to kill this program at logout
                              will annoy the next user to log in.
                              Run this program in the shell foreground
                              instead, using $bq--foreground$eq.
 -m, --mail-file      MFILE   Path of mail spool file.
+-N, --no-incremental-from    Always summarize entire mail spool contents,
+                             not just messages which have arrive since the
+                             last report.
+                             This option implies ${bq}--from$eq, but if you
+                             wish to specify a particular summary program to
+                             use, you must supply it with that option anyway.
 -n, --no-bell                Do not beep when displaying messages.
                              Primarily intended for emacs shell buffers.
 -s, --sleep-interval SEC     Interval (in seconds) between mail checks.
@@ -74,55 +80,59 @@ save_current_args='
 restore_saved_args='
   {
     eval '\''{ eval set fnord $_saved_args ; }'\''
-    shift 
+    shift
   }'
 
-# Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
+# Usage: eval "$getopt"; value=$optarg
+# or     optarg_optional=t; eval "$getopt"; value=$optarg
 #
-# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument ARG
-# won't get used if first long option syntax was used. 
-# If 3rd argument OPTIONAL is set, then 2nd may be empty without resulting
-# in an error (i.e. option argument is optional)
+# This function automatically shifts the positional args as appropriate.
+# The argument to an option is optional if the variable `optarg_optional'
+# is non-empty.  Otherwise, the argument is required and getopt will cause
+# the program to exit on an error.  optarg_optional is reset to be empty
+# after every call to getopt.  The argument (if any) is stored in the
+# variable `optarg'.
 #
-# Returns number of positions caller should shift.
-# If retval = 3, caller should exit.
-get_option_argument='
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument
+# won't get used if first long option syntax was used.
+#
+# Note: because of broken bourne shells, using --foo=bar syntax can
+# actually screw the quoting of args that end with trailing newlines.
+# Specifically, most shells strip trailing newlines from substituted
+# output, regardless of quoting.
+getopt='
   {
-    option="$1" arg="$2" arg_optional="$3" shift_num=2
-    case "$option" in
+    optarg=
+    case "$1" in
       --*=* )
-        arg=`echo $option | sed -e "s/^[^=]*=//"` 
-        shift_num=1
+        optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
+        shift
        ;;
-    esac
-    case "$arg" in
-      "" )
-        case "$arg_optional" in
-          "" )
-            case "$option" in 
-              --*=* ) option=`echo $option | sed -e "s/=.*//"` ;;
-            esac
-            echo "$progname: option $bq$option$eq requires argument." 1>&2
-            echo "$usage" 1>&2
-            exit 3
+      * )
+        case ${2+set} in
+          set )
+            optarg="$2"
+            shift
+            shift
            ;;
+          * )
+            case "$optarg_optional" in
+              "" )
+                case "$1" in
+                  --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
+                  * ) option="$1" ;;
+                esac
+                exec 1>&2
+                echo "$progname: option $bq$option$eq requires argument."
+                echo "$progname: use $bq--help$eq to list option syntax."
+                exit 1
+               ;;
+           esac
+         ;;
         esac
-        exit 1
-       ;;  
+     ;;
     esac
-    echo "$arg"
-    exit $shift_num
-  }'
-
-# Some bourne shells don't allow a numeric argument to `shift'.
-# Usage: eval "shift_num=n; $shift_n_times"
-shift_n_times='
-  {
-    while : ; do
-      case "$shift_num" in 0 | "" ) break ;; esac
-      shift_num=`expr $shift_num - 1`
-      shift
-    done
+    optarg_optional=
   }'
 
 # Initialize variables.
@@ -133,18 +143,19 @@ debug=
 daemonp=f
 ignoretty=
 mail_file=${MAIL-$MAILPATH}
+new_messages_only_p=t
 show_from=
 sleep_interval=60
 
 eval "$save_current_args"
 
-# Parse command line arguments. 
+# Parse command line arguments.
 # Make sure that all wildcarded options are long enough to be unambiguous.
 # It's a good idea to document the full long option name in each case.
 # Long options which take arguments will need a `*' appended to the
-# canonical name to match the value appended after the `=' character. 
+# canonical name to match the value appended after the `=' character.
 while test $# != 0 ; do
-  case "$1" in 
+  case "$1" in
     # The --daemon option is used by this program when it recursively calls
     # itself in the background, but is not advertised to the user.
     # The --foreground option has mostly the same effect, but it also turns
@@ -158,10 +169,8 @@ while test $# != 0 ; do
       shift
      ;;
     -f | --from* | --fr* )
-      show_from=`(set - "$1" "$2" arg-optional; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+      eval "$getopt"
+      show_from=$optarg
 
       case "$show_from" in
         '' ) : ;;
@@ -183,34 +192,34 @@ while test $# != 0 ; do
       shift
      ;;
     -m | --mail-file* | --m* )
-      mail_file=`(set - "$1" "$2"; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+      eval "$getopt"
+      mail_file=$optarg
      ;;
-    -n | --no-bell | --n* )
+    -N | --no-incremental-from | --no-i )
+      new_messages_only_p=f
+      show_from=t
+      shift
+     ;;
+    -n | --no-bell | --no-b* )
       bells=
       shift
      ;;
     -s | --sleep-interval* | --s* )
-      sleep_interval=`(set - "$1" "$2"; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+      eval "$getopt"
+      sleep_interval=$optarg
      ;;
     -- )     # Stop option processing
       shift
       break
      ;;
-    --*=* )
-      arg=`echo $1 | sed -e 's/=.*//'`
-      echo "$progname: unknown option $bq$arg$eq" 1>&2
-      echo "$usage" 1>&2
-      exit 1
-     ;;
     -* )
-      echo "$progname: unknown option $bq$1$eq" 1>&2
-      echo "$usage" 1>&2
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
       exit 1
      ;;
     * )
@@ -245,7 +254,7 @@ case "$ignoretty" in
              s/ .*//
              p'
     tty_owner=`ls -ld "$TTY" | sed -ne "$tty_sed"`
-    case "$tty_owner" in 
+    case "$tty_owner" in
       "$USER" ) : ;;
       * )
         exec 1>&2
@@ -285,7 +294,9 @@ case "$bells" in t )
   bells=`echo ..... | tr '.' '\007'` ;;
 esac
 
-msgcount='NAN'
+msgcount=0
+prevmsgcount=1000000
+
 msgprefix="$bells*** $progname"
 
 oldstate=
@@ -295,10 +306,10 @@ while : ; do
     t ) : ;;
     * )
       tty_owner=`ls -ld "$TTY" | sed -ne "$tty_sed"`
-      case "$tty_owner" in 
+      case "$tty_owner" in
         "$USER" ) : ;;
         * )
-          exit 0 
+          exit 0
          ;;
       esac
      ;;
@@ -311,11 +322,35 @@ while : ; do
       * )
         oldstate="$state"
 
-        case "$show_from" in 
+        # The echo "you have new mail" bit is repeated here a lot, but is
+        # done so along with all the rest of the output, to minimize the
+        # delay between printing that and finishing other computations.
+        case "$show_from" in
           t )
-            echo "$msgprefix: You have new mail."
-            echo "$msgprefix: Spooled messages as of `date`:"
-            ${FROM-from}
+            case "$new_messages_only_p" in
+              f )
+                echo "$msgprefix: You have new mail."
+                echo "$msgprefix: Spooled messages as of `date`:"
+                ${FROM-from}
+               ;;
+              t )
+                set fnord `grep '^From ' "$mail_file" 2> /dev/null | wc -l`
+                shift
+                msgcount=${1-0}
+
+                if test $msgcount -lt $prevmsgcount ; then
+                  echo "$msgprefix: You have new mail ($msgcount total)."
+                  echo "$msgprefix: All spooled messages as of `date`:"
+                  ${FROM-from}
+                else
+                  echo "$msgprefix: You have new mail ($msgcount total)."
+                  echo "$msgprefix: Newly-arrived messages as of `date`:"
+                  ${FROM-from} | sed -e "1,${prevmsgcount}d"
+                fi
+
+                prevmsgcount=$msgcount
+              ;;
+            esac
            ;;
           * )
             set fnord `grep '^From ' "$mail_file" 2> /dev/null | wc -l`
@@ -326,6 +361,9 @@ while : ; do
         esac
        ;;
     esac
+  else
+    msgcount=0
+    prevmsgcount=1000000
   fi
 
   # If sleep exits abnormally, it's probably because of an invalid
