@@ -1,0 +1,44 @@
+#! /bin/sh
+# $Id: mkulinks-all,v 1.1 1995/11/08 22:24:28 friedman Exp $
+# As of 1995-06-27, this is run nightly by cron on axiom.cli.com.
+
+PATH=/usr/etc:$PATH:/usr/lib
+export PATH
+
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+tmpfile="/tmp/$progname$$"
+
+trap 'rm -f "$tmpfile"' 0 1 2 3 15
+
+for h in `ypmatch sparc netgroup`; do
+  if ping $h 3 > /dev/null 2>&1 ; then
+    rsh $h -n /usr/local/etc/mkulinks --errors-to=stdout \
+                                      --link-directory=/home \
+                                      --perl=/usr/local/bin/perl \
+                                      --remove-non-links \
+                                      --strip-non-user-links \
+                                      --verbose \
+     2>&1 | sed -e "/^Ignoring:/d
+                    s/^/[$h] /"
+  fi
+done > "$tmpfile" 2>&1
+
+if test -s "$tmpfile"; then
+  sendmail -oi -t < "$tmpfile" <<__EOF__
+From: $progname
+To: friedman
+Subject: $progname output
+Reply-To: friedman
+
+This is an automated report generated on `hostname`.
+To add or remove yourself from the list of recipients of this message, edit
+the "To:" field in the message template at the end of the file
+"$0".
+
+`cat`
+__EOF__
+  fi
+
+# eof
