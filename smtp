@@ -4,7 +4,7 @@
 # Created: 1995-04-15
 # Public domain
 
-# $Id: smtp,v 1.3 1995/10/30 00:03:05 friedman Exp $
+# $Id: smtp,v 1.4 1996/04/03 15:13:19 friedman Exp $
 
 case "$1" in
   aeneas )             h=aeneas.mit.edu            ;;
@@ -26,6 +26,6 @@ case "$1" in
   * )                  h="$1"                      ;;
 esac
 
-exec tcpconnect -Hv $h smtp
+exec tcpconnect -v $h smtp
 
 # smtp ends here
