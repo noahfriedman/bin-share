@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1996-02-27
 
-# $Id: getpopmail,v 2.1 1996/04/22 01:57:25 friedman Exp $
+# $Id: getpopmail,v 2.2 1996/05/09 22:18:47 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -25,17 +25,12 @@
 
 # Commentary:
 
-# This program has two external program dependencies.
-# 1) You must have my modified `popclient' program (unmodified source is
-#    available from the Linux Slackware source distribution and other
-#    locations).  My copy is available via the URL
-#    ftp://alpha.gnu.ai.mit.edu/friedman/packages/popclient.tar.gz
-#    In particular, my version accepts a -P option which reads the remote
-#    password from standard input instead of the tty.
+# This program has some external program dependencies.
+# 1) You must have `popclient' and `expect'.
+# 2) If you use the --probe option, you need to write external script
+#    called `network-up-p' which tests to see if the pop servers or network
+#    in general are reachable.
 #
-# 2) An external script called `network-up-p' which tests to see if the pop
-#    servers or network in general are reachable.
-
 # This script reads a configuration file with lines of the form
 #
 #     server : user : password : protocol : flags
@@ -68,6 +63,7 @@ Options are:
 -D, --debug                  Enable debugging.
 -c, --config    FILE         Use configuration file FILE.
 -h, --help                   You're looking at it.
+-p, --probe                  Make sure pop server responds to pings first.
 -q, --quiet                  Discard all output.
                              This is the default if stdin is not a tty.
 -v, --verbose                Be verbose.
@@ -85,6 +81,7 @@ GETPOPMAILCF=${GETPOPMAILCF-$HOME/.getpopmail.cf}
 export GETPOPMAILCF
 
 debug=
+probe=
 
 if [ -t 0 ]; then
   verbose=t
@@ -166,6 +163,10 @@ while : ; do
       echo "$usage" 1>&2
       exit 0
      ;;
+    -p | --probe | --p* )
+      probe=t
+      shift
+     ;;
     -q | --quiet | --q* )
       verbose=
       shift
@@ -208,134 +209,42 @@ case "$verbose" in
   * ) exec > /dev/null 2>&1 < /dev/null ;;
 esac
 
-network-up-p || exit $?
+case "$probe" in t )
+  network-up-p -v || exit $? ;;
+esac
 
-# By using a here-document to include the source of the perl script (to
-# avoid command line length limits), we usurp the normal stdin the inferior
-# process might have expected.  So dup stdin onto fd 9, and before the
-# inferior process is started, it will be reduped back onto fd 0.
-exec ${PERL-perl} - 9<&0 <<'__EOF__'
+exec 3< "$GETPOPMAILCF" || exit $?
 
-&main;
+while read x 0<&3; do
 
-sub main
-{
-  $0 = 'getpopmail';
+    case "$x" in
+      '#'* | '' ) continue ;;
+      *'#'* )     x=`echo "$x" | sed -e 's/#.*//'` ;;
+    esac
 
-  @ARGV = ($ENV{'GETPOPMAILCF'});
+    oIFS="$IFS"
+    IFS=":"
+    set fnord $x
+    IFS="$oIFS"
 
-  # See comments preceding perl invocation for an explanation.
-  if (! open (STDIN, "<&9"))
-    {
-      &errmsg ("cannot recover stdin from fd 9", "$!");
-      exit (1);
-    }
-  close (9);
+    set $*
+    shift
 
-  while (<>)
-    {
-      local (@tok) = &parse_line ($_);
+    server=$1 user=$2 pass=$3 protocol=$4 flags=$5
+    set fnord
+    shift
 
-      next if ($tok[0] eq '');
+    case "$probe" in t )
+      network-up-p -v "$server" || continue ;;
+    esac
 
-      if (&network_up_p ($tok[0]))
-        {
-          &popclient (@tok);
-        }
-
-    }
-}
-
-sub parse_line
-{
-  local ($line) = @_;
-  local ($i, @tok);
-
-  chop $line;
-  $line =~ s/[ \t]*#.*//o;
-
-  # We might want embedded whitespace in fields
-  #@tok = split (/[ \t:]+/, $line);
-  @tok = split (/:/, $line);
-  $i = 0;
-  while ($i <= $#tok)
-    {
-      # Strip leading and trailing whitespace
-      $tok[$i] =~ s/^[ \t]+//o;
-      $tok[$i] =~ s/[ \t]+$//o;
-      $i++;
-    }
-
-  return @tok;
-}
-
-sub network_up_p
-{
-  if (&spawn ('network-up-p', '-v', @_) == 0)
-    {
-      return 1;
-    }
-  return 0;
-}
-
-# This function doesn't use spawn since it must set up some pipes to feed
-# passwords to the popclient.
-sub popclient
-{
-  local ($server, $user, $pw, $protocol, $flags) = @_;
-  local ($pid);
-
-  pipe (POPREAD, POPWRITE);
-  $pid = fork;
-
-  if (! defined $pid)
-    {
-      die "Can't fork: $!\n";
-    }
-
-  if ($pid == 0)
-    {
-      # child
-      open (STDIN, "<&POPREAD");
-      close (POPWRITE);
-      close (POPREAD);
-      exec ('popclient', '-u', $user, '-P', "-v$protocol$flags", $server);
-    }
-  else
-    {
-      # parent
-      print POPWRITE $pw . "\n";
-      close (POPWRITE);
-      close (POPREAD);
-      wait;
-      return $?
-    }
-
-}
-
-sub spawn
-{
-  local (@args) = @_;
-  local ($pid) = fork;
-
-  if (! defined $pid)
-    {
-      die "Can't fork: $!\n";
-    }
-
-  if ($pid == 0)
-    {
-      # child
-      exec (@args);
-    }
-  else
-    {
-      # parent
-      wait;
-      return $?
-    }
-}
-
+    expect -f - <<__EOF__
+      set timeout -1
+      spawn popclient -u "$user" "-v$protocol$flags" "$server"
+      expect "password:"
+      send "$pass\r"
+      expect eof
 __EOF__
+done
 
 # eof
