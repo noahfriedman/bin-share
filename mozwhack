@@ -4,7 +4,7 @@
 # Author: Noah Friedman <friedman@netscape.com>
 # Created: 1997-09-18
 
-# $Id$
+# $Id: mozwhack,v 1.1 1997/09/19 07:41:30 friedman Exp $
 
 # Commentary:
 
@@ -23,9 +23,9 @@
 
 # You must have the libAutoAdmin.so plugin in order to use Mission Control.
 # That file must be located in $MOZILLA_HOME, not $MOZILLA_HOME/plugins.
-# Furthermore, as of Communicator 4.03, the MOZILLA_HOME environment
-# variable must end with a trailing `/', or the executable will attempt to
-# load the wrong file name for the autoadmin module.
+# Furthermore, in Communicator 4.03, the MOZILLA_HOME environment variable
+# must end with a trailing `/', or the executable will attempt to load the
+# wrong file name for the autoadmin module.  (This is fixed in 4.05.)
 
 # Code:
 
@@ -417,7 +417,7 @@ sub fix_perms
 
   return if (! defined (@attrs));
   chmod ($attrs[2], $outfile);
-  chown ($attrs[4], $attrs[$5], $outfile);
+  chown ($attrs[4], $attrs[5], $outfile);
   chmod ($attrs[2], $outfile);
 }
 
