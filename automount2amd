@@ -4,7 +4,7 @@
 # Created: 1996-11-06
 # Public domain
 
-# $Id$
+# $Id: automount2amd,v 2.1 1997/02/01 07:59:24 friedman Exp $
 
 # Commentary:
 # Code:
@@ -56,7 +56,7 @@ sub main
           $rhoststring = "";
           foreach $machine (@machines)
             {
-              if ($machine !~ /\./o)
+              if ($machine !~ /\./o && defined ($DOMAIN))
                 {
                   $machine .= ".$DOMAIN";
                 }
