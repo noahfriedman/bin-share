@@ -1,13 +1,18 @@
 #! /bin/sh
-# $Id$
+# $Id: untar,v 1.2 1996/10/23 01:43:32 friedman Exp $
 
 for f in ${1+"$@"}; do
-  z=
   case "$f" in
-    *.tgz | *.gz | *.[Zz] ) z=z ;;
+    *.t[ag]z | *.tar.gz | *.tar.[Zz] | *.nif )
+      ${GZIP-gzip} -dc "$f" | ${TAR-tar} -xpvf -
+     ;;
+    *.zip | *.jar )
+      ${UNZIP-unzip} -oL "$f"
+     ;;
+    *.tar )
+      ${TAR-tar} -xpvf "$f"
+     ;;
   esac
-
-  ${TAR-tar} -xpv${z}f "$f"
 done
 
 # eof

@@ -1,0 +1,19 @@
+#! /bin/sh
+# $Id$
+
+for dir in ${1+"$@"} ; do
+  # Protect against accidental trailing slash, i.e. if someone does
+  # dist-tar foo/, don't create foo/.tar.gz only to delete foo
+  # afterward.
+  case "$dir" in
+    */ ) dir=`echo "$dir" | sed -e 's=/$==g'` ;;
+  esac
+
+  echo "dist-tar: packing $dir.tar.gz"
+
+  tar -cvf - "$dir" | gzip --best > "$dir.tar.gz" \
+   && touch -r "$dir" "$dir.tar.gz" \
+   && rm -rf "$dir"
+done
+
+# eof
