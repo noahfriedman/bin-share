@@ -4,11 +4,11 @@
 # Created: 1994-10-26
 # Public domain.
 
-# $Id: econfig,v 1.5 1995/09/18 00:32:03 friedman Exp friedman $
+# $Id: econfig,v 1.6 1995/09/23 22:01:17 friedman Exp $
 
 # Commentary:
 
-# If using this at cli.com, read the file
+# If using this at splode.com, read the file
 # /usr/local/src/gnu/emacs/19dev/README
 
 # Code:
