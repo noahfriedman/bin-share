@@ -1,0 +1,14 @@
+#!/bin/sh
+# $Id$
+
+case "$#" in
+  0 ) echo "Usage: delete-backups [dir]" 1>&2; exit 1 ;;
+esac
+
+if xargs --version > /dev/null 2>&1; then
+  find ${1+"$@"} \( -name '*~' -o -name '#*#' \) -print0 \
+   | xargs --no-run-if-empty --null rm -vf
+else
+  find ${1+"$@"} \( -name '*~' -o -name '#*#' \) -print \
+   | xargs rm -f
+fi
