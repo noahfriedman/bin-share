@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/usr/local/gnubin/bash
 # ns, 14-Aug-91 Noah Friedman <friedman@prep.ai.mit.edu>
-# Last updated 03-Feb-93
+# Last updated 30-Sep-93
 #
 # A front end for nslookup(1) to provide more access to the interactive
 # features on the command line.  It also does some smart manipulation of
@@ -29,7 +29,6 @@ Usage: ${progname} {-D} {-q querytype} {-s server} [-t tty]|[host|ipaddr] ...
    Arguments in [] are required.  Those in {} are optional.
 
    default querytype is "${querytype}" 
-   default server is "${name_server}" 
 
    querytype can be one of: ANY CNAME HINFO MX NS PTR SOA
    recordtype can be one of: a d h m s t
@@ -61,7 +60,7 @@ function main ()
 function initialize_variables ()
 {
     progname="${0##*/}"       # equivalent to "basename $0"
-    name_server="albert.gnu.ai.mit.edu"
+    name_server=""
     querytype="PTR"
 
     bq="\`"  # To prevent hairy quoting and escaping later.
@@ -217,19 +216,25 @@ function reverse ()
 
 function do_nslookup ()
 {
+ local set_name_server_str=""
  local host_str=""
  
-    if [ "${recordtype}" ]; then
+    if [ -n "${recordtype}" ]; then
        ls_str="ls -${recordtype} "
        ns_output_regexp="^ .*"
     else
        ns_output_regexp="[Aa]uthoritative|=|(\*\*\*)"
     fi
 
+    if [ -n "${name_server}" ]; then
+       set_name_server_str="server ${name_server}\n"
+    fi
+
     for host in $* ; do
        host_str="${host_str}\n${ls_str}${host}"
     done
-    ns_string="server ${name_server}\nset q=${querytype}${host_str}"
+      
+    ns_string="${set_name_server_str}set q=${querytype}${host_str}"
 
     echo -e "${ns_string}" | nslookup 2>&1 | egrep "${ns_output_regexp}"
 }
