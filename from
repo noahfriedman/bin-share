@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-01-19
 
-# $Id: from,v 1.11 1995/10/22 21:39:56 friedman Exp $
+# $Id: from,v 1.12 1996/03/03 22:51:35 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -601,34 +601,124 @@ sub hack_From_data
 
   # From: foobar@host (real name)
   # From: "real name" <foobar@host>
-  if ($data =~ /\([^)]+\)|(\"[^\"]+\")/o)
+  if ($data =~ /\([^\)]+\)|(\"[^\"]+\")/o)
     {
       $data = $&;
       # Delete leading and trailing name delimiters (quotes or parens)
       substr ($data, 0, 1) = '';
       substr ($data, -1) = '';
-      return $data;
     }
-
   # From: "" <foobar@host>
-  if ($data =~ /\"\"[^<]*<[^>]+>/o)
+  elsif ($data =~ /\"\"[^<]*<[^>]+>/o)
     {
       $data =~ /"<[^>]+>"/;
       $data = $&;
-      substr($data, 0, 1) = '';
-      substr($data, -1) = '';
-      return $data;
+      substr ($data, 0, 1) = '';
+      substr ($data, -1) = '';
     }
-
   # From: real name <foobar@host>
-  if ($data =~ /^[^<]+</o)
+  elsif ($data =~ /^[^<]+</o)
     {
       $data = $&;
       chop $data;
+    }
+  # From: foobar@host
+  else
+    {
       return $data;
     }
 
-  # From: foobar@host
+  # Strip any leading and trailing whitespace
+  $data =~ s/^[ \t]+//;
+  $data =~ s/[ \t]+$//;
+
+  return &parse_rfc1522 ($data);
+}
+
+# Parse names of the form =?ISO-8859-1?Q?Fran=E7ois_Pinard?=
+#                      or =?ISO-8859-1?B?4672616EE76F69732050696E617264?=
+# See RFC1522 for more details.
+sub parse_rfc1522
+{
+  local ($data) = @_;
+
+  if ($data =~ /^=\?iso-8859-1\?[^?]*\?[^?]*\?=$/io)
+    {
+      local ($str) = $data;
+      local ($encoding);
+
+      $str =~ s/^=\?iso-8859-1\?//io;
+
+      $encoding = $str;
+      $encoding =~ s/\?.*//io;
+
+      if ($encoding =~ /^[Qq]$/o
+          || $encoding =~ /^quoted-printable$/io)
+        {
+          # Encoding type is Quoted-Printable
+
+          local ($newstr) = "";
+          local ($i) = $[;
+
+          # Strip away encoding and trailing `?=', leaving the quoted name.
+          $str =~ s/^[^?]*\?//;
+          $str =~ s/\?=$//;
+
+          # Convert all occurences of `_' to ` '.
+          $str =~ s/_/ /og;
+
+          # Convert "=XX" (where XX is the hexidecimal representation of an
+          # ascii character) to ascii.
+          while ($i >= $[)
+            {
+              local ($s);
+
+              $i = index ($str, "=");
+              if ($i < $[)
+                {
+                  next;
+                }
+
+              $s = sprintf ("%c", hex (substr ($str, $i + 1, 2)));
+              $newstr = $newstr . substr ($str, 0, $i) . $s;
+              $str = substr ($str, $i + 3);
+            }
+          $data = $newstr . $str;
+        }
+      elsif ($encoding =~ /^[Bb]/o
+             || $encoding =~ /^base64$/io)
+        {
+          # Encoding type is BASE64
+
+          local ($newstr) = "";
+          local ($len) = 0;
+          local ($pos) = 0;
+
+          # Strip away encoding and trailing `?=', leaving the base64 string
+          $str =~ s/^[^?]*\?//;
+          $str =~ s/\?=$//;
+
+          $len = length ($str);
+
+          # There should be an even number of chars in the base64 string.
+          # If not, immediately return since we cannot reliably parse it.
+          if (($len % 2) != 0)
+            {
+              return $data;
+            }
+
+          while ($pos < $len)
+            {
+              local ($x) = sprintf ("%c", hex (substr ($str, $pos, 2)));
+              $newstr = $newstr . $x;
+
+              $pos += 2;
+            }
+
+          $data = $newstr;
+        }
+    }
+
   return $data;
 }
 
