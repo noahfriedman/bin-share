@@ -1,12 +1,15 @@
 #! /bin/sh
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl     [perl will skip all lines in this file before this line]
+
 # from --- show you who your mail is from
 
-# Copyright (C) 1992, 95, 96, 97, 98, 99, 00, 2002 Noah S. Friedman
+# Copyright (C) 1992, 95, 96, 97, 98, 99, 00, 02, 2003 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.50 2002/07/19 03:12:35 friedman Exp $
+# $Id: from,v 1.51 2002/12/23 01:51:48 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -25,22 +28,16 @@
 
 # Commentary:
 
-# The pop3 portions of this program strive to be compliant with RFC1939.
-# Perl 5 is required.
-
 # Thanks to Jonathan Kamens <jik@kamens.brookline.ma.us> for
 # the `{FROMTO}' virtual header field.
 
 # Code:
 
-exec ${PERL-perl} -Sx $0 ${1+"$@"}
-#!perl     [perl will skip all lines in this file before this line]
-
 use 5.003;
-use strict;
-no strict "vars";
+use strict qw(!vars);
 
 use Getopt::Long;
+use POSIX qw(strftime);
 use Symbol;
 
 sub usage
@@ -92,11 +89,35 @@ Options are:
 -u, --unread-only            Only show information about unread messages
                              (i.e. those that do not have a \`R' in
                              the Status header field).\n
-It is possible to get headers for messages residing on POP3 servers.
-To specify a POP3 folder, use the syntax \`:pop3:host:username:password'
-on the command line, or embed it in your MAIL environment variable.
-To specify a particular port to use with the pop3 protocol, the first field
-of the remote specification can contain a port number, e.g. \`:pop3,110:'.\n";
+
+To specify a POP3 folder:
+
+  Syntax: pop:HOST:PORT:AUTH:USER:PASS
+
+  Fields may be blank, in which case:
+
+    * HOST defaults to \`localhost'
+    * PORT defaults to 110
+    * AUTH defaults to \`pass' (this is the only currently supported
+      authentication protocol anyway).
+    * USER defaults to your current username
+    * PASS is obtained from the POPPASS environment variable.
+      (This default will also be used if this field is set to \`*'.)
+
+To specify an IMAP folder:
+
+  Syntax: imap:HOST:PORT:MAILBOX:AUTH:USER:PASS
+
+  Fields may be blank, in which case:
+
+    * HOST defaults to \`localhost'
+    * PORT defaults to 143
+    * MAILBOX defaults to \`inbox'.
+    * AUTH defaults to \`login' (this is the only currently supported
+      authentication protocol anyway).
+    * USER defaults to your current username
+    * PASS is obtained from the POPPASS environment variable.
+      (This default will also be used if this field is set to \`*'.)\n\n";
   exit (1);
 }
 
@@ -179,10 +200,10 @@ sub parse_options ()
                   ? ((defined $ENV{COLUMNS}) ? $ENV{COLUMNS} - 1 : 79)
                   : 0);
   $opt_user = default_user ();
-  $opt_pass = (getenv ('POPPASS') || 'none');
+  $opt_pass = $ENV{POPPASS} || 'none';
 
   # Precedence for defs (highest->lowest): options, ~/.fromrc.pl, default
-  $fromrc = (getenv ("FROMRCPL") || "$ENV{HOME}/.fromrc.pl");
+  $fromrc = $ENV{FROMRCPL} || "$ENV{HOME}/.fromrc.pl";
   eval { require "$fromrc" } if (-f $fromrc);
   exit 1+err ($fromrc, $@) if ($@ ne "" && $@ !~ /not return a true value/o);
 
@@ -244,7 +265,7 @@ sub main ()
 
   for my $file (@ARGV)
     {
-      if ($file !~ /^:pop/oi && $file ne "-" && ! -r $file)
+      if ($file !~ /^(?:pop|imap).*?:/oi && $file ne "-" && ! -r $file)
         {
           my $fh = gensym;
           # Set $! appropriately.
@@ -255,15 +276,49 @@ sub main ()
           next;
         }
 
-      if ($file =~ /^:(?:pop-?3|pop)[:,]/oi)
+      # pop:HOST:PORT:AUTH:USER:PASSWORD
+      # Only auth method currently supported is `pass'
+      if ($file =~ /^pop-?3?:(.*?):(.*?):(.*?):(.*?):(.*)/oi)
         {
-          my ($ignore, $port, $host, $user, $pass) = split (/:/, $file);
+          my ($host, $port, $auth, $user, $pass) = ($1, $2, lc ($3), $4, $5);
 
-          $port =~ s/.*,//o if ($port =~ /,/);
-          $user = $opt_user if (!defined $user || $user eq '');
-          $pass = $opt_pass if (!defined $pass || $pass eq '');
-          process_pop3_folder ($host, $port, $user, $pass);
+          $auth = "pass" if ($auth eq '');
+          unless ($auth eq 'pass')
+            {
+              err ($3, "Unsupported POP authentication protocol");
+              exit (1);
+            }
+
+          $host = "localhost" if ($host eq '');
+          $port = 110         if ($port eq '');
+          $user = $opt_user   if ($user eq '');
+          $pass = $opt_pass   if ($pass eq '' || $pass eq '*');
+          process_remote_folder ('POP3', $host, $port, $auth, $user, $pass);
         }
+
+      # imap:HOST:PORT:MAILBOX:AUTH:USER:PASSWORD
+      # Only auth method currently supported is `login'
+      elsif ($file =~ /^imap:(.*?):(.*?):(.*?):(.*?):(.*?):(.*)/oi)
+        {
+          my ($host, $port, $mbox, $auth, $user, $pass)
+            = ($1, $2, $3, lc ($4), $5, $6);
+
+          $auth = "login" if ($auth eq '');
+          unless ($auth eq 'login')
+            {
+              err ($3, "Unsupported IMAP authentication protocol");
+              exit (1);
+            }
+
+          $host = "localhost" if ($host eq '');
+          $port = 143         if ($port eq '');
+          $mbox = "inbox"     if ($mbox eq '');
+          $user = $opt_user   if ($user eq '');
+          $pass = $opt_pass   if ($pass eq '' || $pass eq '*');
+          process_remote_folder
+            ('IMAP', $host, $port, $auth, $user, $pass, $mbox);
+        }
+
       elsif ($opt_countp)
         {
           my $n = folder_message_count ($file);
@@ -292,7 +347,9 @@ sub main ()
 
 sub initialize_variables ()
 {
-  $ctime_now = my_ctime ();
+  $ctime_now = strftime ("%a %b %d %H:%M:%S %Y", (($ENV{TZ} || '') eq 'UTC'
+                                                  ? gmtime    (time)
+                                                  : localtime (time)));
 
   # This is perhaps a little too specific, but some MTAs do not
   # quote 'From ' at the beginning of a line in the body, especially
@@ -341,8 +398,8 @@ sub default_user ()
 
   for my $var (@envvars)
     {
-      my $val = getenv ($var);
-      return $val if (defined $val);
+      my $val = $ENV{$var};
+      return $val if defined $val && $val ne '';
     }
   return scalar getpwuid ($<);
 }
@@ -351,7 +408,7 @@ sub default_spool_file ($;$)
 {
   return $opt_mail if (defined $opt_mail);
 
-  my $mailfile = getenv ("MAIL");
+  my $mailfile = $ENV{MAIL};
   return $mailfile if (defined $mailfile);
 
   my $user = shift;
@@ -372,7 +429,7 @@ sub set_me_match ()
 {
   if (! $opt_me_match)
     {
-      my $username = $ENV{USER} || $ENV{LOGNAME};
+      my $username = default_user ();
       my @passwd = $username ? getpwnam ($username) : getpwuid ($>);
       return unless @passwd;
 
@@ -586,21 +643,20 @@ sub process_file ($)
   close ($fh);
 }
 
-sub process_pop3_folder ($$$$)
+sub process_remote_folder ($$$$$$;$)
 {
-  my ($host, $port, $user, $pass) = @_;
+  my ($proto, $host, $port, $auth, $user, $pass, $mbox) = @_;
   my $total_message_count;
   my $msgnumber;
 
-  my $sock = open_network_stream ($host, $port) || return 0;
-  disable_stdio_buffering ($sock);
-  pop3_login ($sock, $user, $pass) || return 0;
+  my $folder = $proto->new ($host, $port);
+  return 0 unless $folder && $folder->$auth ($user, $pass);
 
-  $total_message_count = pop3_message_count ($sock);
+  $total_message_count = $folder->message_count ($mbox);
 
   if ($opt_countp && ! $opt_unread_only)
     {
-      pop3_close ($sock);
+      $folder->close;
       print $total_message_count, "\n";
       return 1;
     }
@@ -617,7 +673,7 @@ sub process_pop3_folder ($$$$)
           # If we're searching for a particular message for extraction, get
           # just the headers first to see if this is a matching message.
           # Then and only then should we try retrieving the body below.
-          process_pop3_folder_get ($sock, $msgnumber, 0);
+          process_remote_folder_get ($folder, $msgnumber, 0);
           if (! message_header_pattern_matched_p ())
             {
               $msgnumber++;
@@ -627,11 +683,11 @@ sub process_pop3_folder ($$$$)
         }
 
       my ($lineno, $lines)
-        = process_pop3_folder_get ($sock, $msgnumber, $body_line_limit);
+        = process_remote_folder_get ($folder, $msgnumber, $body_line_limit);
       $total_message_lines++;
       $current_headers{'{FLINES}'} = $msgnumber;
       $current_headers{'{TLINES}'} = $total_message_lines;
-      $current_headers{'{OCTETS}'} = pop3_message_size ($sock, $msgnumber)
+      $current_headers{'{OCTETS}'} = $folder->message_size ($msgnumber)
         if $header_save_p{'{OCTETS}'};
 
       maybe_print_headers ($lineno, $lines, $opt_all_headers);
@@ -644,15 +700,15 @@ sub process_pop3_folder ($$$$)
         }
       $msgnumber++;
     }
-  pop3_close ($sock);
+  $folder->close;
 }
 
-sub process_pop3_folder_get ($$$)
+sub process_remote_folder_get ($$$)
 {
-  my ($sock, $msgnumber, $body_line_limit) = @_;
-  my $pop3_data = pop3_retrieve_lines ($sock, $msgnumber, $body_line_limit);
-  my $header_line_count = $pop3_data->[0];
-  my $lines = $pop3_data->[1];
+  my ($folder, $msgnumber, $body_line_limit) = @_;
+  my $data = $folder->retrieve_lines ($msgnumber, $body_line_limit);
+  my $header_line_count = $data->[0];
+  my $lines = $data->[1];
   my $header_contents = '';
   my $lineno = 0;
 
@@ -846,50 +902,6 @@ sub err
   return undef;
 }
 
-sub getenv
-{
-  return $ENV{$_[0]}
-    if (defined ($ENV{$_[0]}) && $ENV{$_[0]} ne '');
-  return undef;
-}
-
-sub truep
-{
-  return 1 if (getenv ($_[0]) eq 't');
-  return 0;
-}
-
-sub disable_stdio_buffering
-{
-  for my $handle (@_)
-    {
-      my $orig_handle = select ($handle);
-      $| = 1;
-      select ($orig_handle);
-    }
-}
-
-sub my_ctime (;$)
-{
-  my $time = (shift || time);
-  my $TZ = (getenv ('TZ') || '');
-  my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) =
-    ($TZ eq 'UTC') ? gmtime ($time) : localtime ($time);
-
-  $TZ = $isdst ? $4 : $1
-    if ($TZ =~ /^([^:\d+\-,]{3,})([+-]?\d{1,2}(:\d{1,2}){0,2})([^\d+\-,]{3,})?/o);
-  $TZ .= " " if ($TZ ne "");
-
-  my @weekday = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat");
-  my @month   = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec");
-
-  $year += 1900;
-  sprintf ("%s %s %02d %02d:%02d:%02d %s%4d",
-           $weekday[$wday], $month[$mon], $mday, $hour, $min, $sec,
-           $TZ, $year);
-}
-
 
 my @base64_decode_vector;
 
@@ -975,49 +987,119 @@ sub parse_rfc1522 ($)
 }
 
 
-sub pop3_login ($$$)
+package Netstream;
+
+use Socket;
+use Symbol;
+use strict;
+
+# fh may be a filehandle or a reference to an array of handles
+# mode 1 = buffering, 0 = no buffering
+sub set_buffering_mode
 {
-  my ($sock, $login, $pass) = @_;
+  my ($fh, $mode) = @_;
+  my $orig = select (ref $fh eq 'ARRAY' ? $fh->[0] : $fh);
 
-  # greeting
-  return 1 if (pop3_response_ok_p ($sock)
-               && pop3_send_command_ok_p ($sock, "USER " . $login)
-               && pop3_send_command_ok_p ($sock, "PASS " . $pass));
+  for my $handle (ref $fh eq 'ARRAY' ? @$fh : $fh)
+    {
+      select ($handle);
+      $| = ($mode == 0);
+    }
+  select ($orig);
+}
 
-  pop3_close ($sock);
+sub open_network_stream ($$)
+{
+  my ($rhostname, $port) = @_;
+
+  my $proto = getprotobyname ("tcp");
+  (undef, undef, $port) = getservbyname ($port, "tcp") if ($port !~ /^\d+$/o);
+
+  my @rhostaddr;
+  if ($rhostname =~ /^[0-9.]+$/o)
+    {
+      push @rhostaddr, inet_aton ($rhostname);
+    }
+  else
+    {
+      @rhostaddr = gethostbyname ($rhostname);
+      return err ($rhostname, "cannot resolve host name.")
+        unless (defined $rhostaddr[0] && $rhostaddr[0] ne "");
+      splice (@rhostaddr, 0, 4);
+    }
+
+  my $sock = gensym;
+  socket ($sock, AF_INET, SOCK_STREAM, $proto) || return err ("socket", $!);
+  while ($#rhostaddr >= 0)
+    {
+      next unless connect ($sock, sockaddr_in ($port, shift @rhostaddr));
+      set_buffering_mode ($sock, 0);
+      return $sock;
+    }
+  return err ("socket", $!);
+}
+
+
+package POP3;
+
+use strict;
+
+sub new
+{
+  my ($type, $host, $port) = @_;
+  my $class = ref ($type) || $type;
+  my $self = bless {}, $class;
+
+  my $sock = Netstream::open_network_stream ($host, $port) || return undef;
+  $self->{sock} = $sock;
+
+  return $self;
+}
+
+# implements `pass' authentication method
+sub pass
+{
+  my ($self, $login, $pass) = @_;
+
+  return 1 if ($self->response_ok_p # greeting
+               && $self->send_command_ok_p ("USER " . $login)
+               && $self->send_command_ok_p ("PASS " . $pass));
+
+  $self->close;
   return 0;
 }
 
-sub pop3_message_count ($)
+sub message_count
 {
-  my $sock = $_[0];
-  pop3_send_command ($sock, "STAT");
-  my $results = pop3_parse_response ($sock);
+  my $self = shift;
+  $self->send_command ("STAT");
+  my $results = $self->parse_response;
   return $results->[1];
 }
 
-sub pop3_message_size ($)
+sub message_size
 {
-  my ($sock, $msgnumber) = @_;
-  pop3_send_command ($sock, "LIST $msgnumber");
-  my $results = pop3_parse_response ($sock);
+  my ($self, $msgnumber) = @_;
+  $self->send_command ("LIST $msgnumber");
+  my $results = $self->parse_response;
   return $results->[2] if ($results->[0] eq "+OK");
   return undef;
 }
 
-sub pop3_retrieve_lines ($$$)
+sub retrieve_lines
 {
-  my ($sock, $msgnumber, $bodylines) = @_;
+  my ($self, $msgnumber, $bodylines) = @_;
   $bodylines += 0;  # force into numeric context
 
-  pop3_send_command ($sock, ($bodylines < 0
-                             ? "RETR $msgnumber"
-                             : "TOP $msgnumber $bodylines"));
-  return undef unless (pop3_response_ok_p ($sock));
+  $self->send_command ($bodylines < 0
+                       ? "RETR $msgnumber"
+                       : "TOP $msgnumber $bodylines");
+  return undef unless ($self->response_ok_p);
 
   my $i = 0;
   my $headers_end = 0;
   my @lines;
+  my $sock = $self->{sock};
   while (<$sock>)
     {
       s/[\r\n]+$//o;
@@ -1039,121 +1121,240 @@ sub pop3_retrieve_lines ($$$)
   return [ $headers_end, \@lines ];
 }
 
-sub pop3_send_command ($$)
+sub send_command
 {
-  my $sock = shift;
+  my $self = shift;
+  my $sock = $self->{sock};
   print $sock $_[0], "\r\n";
 }
 
-sub pop3_response_ok_p ($)
+sub response_ok_p ($)
 {
-  my $sock = shift;
-  my $response = pop3_read_response ($sock);
+  my $self = shift;
+  my $response = $self->read_response;
 
   return 1 if ($response =~ /^\+OK/oi);
   return 0;
 }
 
-sub pop3_send_command_ok_p ($$)
+sub send_command_ok_p
 {
-  my $sock = shift;
-  pop3_send_command ($sock, $_[0]);
-  pop3_response_ok_p ($sock);
+  my $self = shift;
+  $self->send_command (@_);
+  $self->response_ok_p;
 }
 
-sub pop3_parse_response ($)
+sub parse_response
 {
-  my $sock = shift;
-  my $response = pop3_read_response ($sock);
+  my $self = shift;
+  my $response = $self->read_response;
   $response =~ s/[\r\n]+$//o;
   [ split (/[ \t]+/o, $response) ];
 }
 
-sub pop3_read_response ($)
+sub read_response
 {
-  my $sock = shift;
+  my $self = shift;
+  my $sock = $self->{sock};
   my $line = <$sock>;
   #$line =~ s/[\r\n]+$//o;
   return $line;
 }
 
-sub pop3_close ($)
+sub close
 {
-  my $sock = shift;
+  my $self = shift;
   # Should we send a quit in general, or just close the connection?
   # RFC1725 section 6 says doing the latter avoids entering the UPDATE
   # state, which should avoid changing any read/unread status headers.
   # However, some pop3 servers do not make this distinction and update
   # status headers anyway.
-  #pop3_send_command ($sock, 'QUIT');
-  shutdown ($sock, 2);  # 2 == SHUTDOWN_BOTH
+  #$self->send_command ('QUIT');
+  shutdown ($self->{sock}, 2);  # 2 == SHUTDOWN_BOTH
+  delete $self->{sock};
 }
 
 
-# Convert integers from host byte order to network byte order.
-# Network byte order is big-endian.
-sub htonl ($)
+package IMAP;
+
+use strict;
+
+sub new
 {
-  return $_[0] unless (unpack ("c2", pack ("i", 1)));
-  return pack ('C4', reverse unpack ('C4', $_[0]));
+  my ($type, $host, $port) = @_;
+  my $class = ref ($type) || $type;
+  my $self = bless {}, $class;
+
+  my $sock = Netstream::open_network_stream ($host, $port) || return undef;
+  $self->{sock} = $sock;
+
+  return $self;
 }
 
-sub ipaddr_aton ($)
+# implements `login' authentication method
+sub login
 {
-  my $addr = shift;
+  my ($self, $login, $pass) = @_;
 
-  return $addr unless ($addr =~ /^\d+$/o);
+  return 1
+    if ($self->response_ok_p ("*")  # greeting
+        && $self->send_command_ok_p ("AUTH",
+                                     sprintf ("login %s %s",
+                                              $login, $pass)));
 
-  # String is in 255.255.255.255 format
-  return pack ('C4', split (/\./, $addr))
-    if (index ($addr, ".") >= 0);
-
-  # If string is not in octet form but instead is a flat ascii IP,
-  # then just convert it to network byte order.
-  # Convert addr to the dotted decimal representation for it.
-  #
-  # source IP addresses are specified in this flat format in the
-  # IRC DCC protocol; I don't know if it's common anywhere else.
-  htonl (pack ("I", $addr));
+  $self->close;
+  return 0;
 }
 
-sub open_network_stream ($$)
+sub message_count
 {
-  use Socket;
+  my ($self, $folder) = @_;
 
-  my ($rhostname, $port) = @_;
+  $self->send_command ("EXAMINE", "examine $folder");
+  my $result = $self->read_response ("EXAMINE");
 
-  my $proto = getprotobyname ("tcp");
-  (undef, undef, $port) = getservbyname ($port, "tcp") if ($port !~ /^\d+$/o);
+  my $count = $1
+    if $result =~ /^\* (\d+) EXISTS\r?\n/mio;
+  return $count;
+}
 
-  my @rhostaddr;
-  if ($rhostname =~ /^[0-9.]+$/o)
+sub message_size
+{
+  my ($self, $msgnumber) = @_;
+
+  $self->send_command ("SIZE", "fetch $msgnumber rfc822.size");
+  my $result = $self->read_response ("SIZE");
+
+  return $1
+    if $result =~ /^\* \d+ FETCH \(RFC822.SIZE (\d+)\)/mio;
+  return undef;
+}
+
+sub retrieve_lines
+{
+  my ($self, $msgnumber, $bodylines) = @_;
+  $bodylines += 0;  # force into numeric context
+
+  $self->send_command ("RETR", "fetch $msgnumber rfc822.header");
+  local $_ = $self->read_response ("RETR");
+
+  return undef
+    unless (/^\* \d+ fetch \(rfc822.header {(\d+)}\r?\n/gmio);
+  my $header_octets = $1;
+  my @lines = split (/\r?\n/, substr ($_, pos ($_), $header_octets), -1);
+  # Discard empty null field; this should leave 1 blank line, which is the
+  # header/body separator line.
+  pop @lines;
+  my $headers_end = scalar @lines;
+
+  if ($bodylines < 0)
     {
-      push @rhostaddr, ipaddr_aton ($rhostname);
+      $self->send_command ("RETR", "fetch $msgnumber rfc822.text.peek");
+      $_ = $self->read_response ("RETR");
+      push @lines, split (/\r?\n/, substr ($_, pos ($_), $1))
+        if (/^\* \d+ fetch \(rfc822.text {(\d+)}\r?\n/gmio);
     }
-  else
+  elsif ($bodylines > 0)
     {
-      @rhostaddr = gethostbyname ($rhostname);
-      return err ($rhostname, "cannot resolve host name.")
-        unless (defined $rhostaddr[0] && $rhostaddr[0] ne "");
-      splice (@rhostaddr, 0, 4);
+      my $text_octets = $self->message_size ($msgnumber) - $header_octets;
+      my $blocksize = 1024;
+      my $text = "";
+      my $newlines = 0;
+      my $octets = 0;
+      while (1)
+        {
+          my $start = $octets + 1;
+          $self->send_command
+            ("RETR", "partial $msgnumber rfc822.text.peek $start $blocksize");
+          $_ = $self->read_response ("RETR");
+
+          last unless (/^\* \d+ fetch \(rfc822.text {(\d+)}\r?\n/gmio);
+          $octets += $1;
+          my $newtext = substr ($_, pos ($_), $1);
+          $newlines++ while ($newtext =~ /\n/go);
+          $text .= $newtext;
+
+          last if ($octets == $text_octets || $newlines >= $bodylines);
+        }
+
+      my @text = split (/\r?\n/, $text, $bodylines+1);
+      pop @text if $newlines > $bodylines;
+      push @lines, @text;
     }
 
-  my $sock = gensym;
-  socket ($sock, AF_INET, SOCK_STREAM, $proto) || return err ("socket", $!);
-  while ($#rhostaddr >= 0)
+  return [ $headers_end, \@lines ];
+}
+
+sub send_command
+{
+  my ($self, $tag, $text) = @_;
+  my $sock = $self->{sock};
+  print $sock $tag, " ", $text, "\r\n";
+}
+
+sub read_response
+{
+  my $self = shift;
+  my $tag = quotemeta (shift);
+  my $wantarray = wantarray;
+
+  my $sock = $self->{sock};
+  my @lines;
+  while (1)
     {
-      connect ($sock, sockaddr_in ($port, shift @rhostaddr)) && return $sock;
+      local $_ = <$sock>;
+      push @lines, $_;
+      if (/^\* .*{(\d+)}\r\n$/o)
+        {
+          my $cont = $1;
+          my $pos = 0;
+          while ($pos < $cont)
+            {
+              my $read = read ($sock, $_, $cont - $pos, $pos);
+              $pos += $read;
+            }
+          push @lines, $wantarray ? split (/\n/, $_, -1) : $_ ;
+        }
+      last if (/^$tag (?:OK|NO|BAD|PREAUTH)/);
     }
-  return err ("socket", $!);
+
+  $wantarray ? @lines : join ("", @lines);
+}
+
+sub response_ok_p
+{
+  my ($self, $tag) = @_;
+
+  my @response = $self->read_response ($tag);
+  my $last = pop @response;
+
+  $tag = quotemeta ($tag);
+  return undef unless $last =~ /^$tag (OK|NO|BAD|PREAUTH)/;
+  return 1 if ($1 eq "OK");
+  return 0;
+}
+
+sub send_command_ok_p
+{
+  my ($self, $tag, $text) = @_;
+  $self->send_command ($tag, $text);
+  $self->response_ok_p ($tag);
+}
+
+sub close
+{
+  my $self = shift;
+
+  $self->send_command_ok_p ("LOGOUT", "logout");
+  shutdown ($self->{sock}, 2); # 2 = SHUTDOWN_BOTH
+  delete $self->{sock};
 }
 
 
+package main;
+
 main ();
 
 # local variables:
 # mode: perl
-# eval: (auto-fill-mode 1)
 # end:
-
-# from ends here
