@@ -1,5 +1,5 @@
 #! /bin/sh
-# $Id: untar,v 1.6 2000/09/17 12:34:50 friedman Exp $
+# $Id: untar,v 1.7 2001/01/02 13:57:09 friedman Exp $
 
 for f in ${1+"$@"}; do
   case "$f" in
@@ -17,6 +17,9 @@ for f in ${1+"$@"}; do
      ;;
     *.rpm )
       rpm2cpio "$f" | cpio -dimv --no-absolute-filenames
+     ;;
+    *.lzh )
+      lha x "$f"
      ;;
   esac
 done
