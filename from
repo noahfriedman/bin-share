@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-01-19
 
-# $Id: from,v 1.20 1997/03/05 21:49:46 friedman Exp $
+# $Id: from,v 1.21 1997/03/28 09:33:51 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -647,6 +647,7 @@ sub make_format_vector
 sub process_file
 {
   local ($file) = @_;
+  local ($header_contents) = "";
 
   if (! open (F, "<$file"))
     {
@@ -666,7 +667,17 @@ sub process_file
       if ($_ =~ /$re_message_delimiter/o)
         {
           undef (%current_headers);
+          $header_contents = "";
           $in_message_body_p = $nil;
+          next;
+        }
+
+      # If we're finished reading header continuation line (evidenced by
+      # coming upon a new header name), finish processing this header.
+      if ($_ =~ /^$re_header_name/o && $header_contents ne '')
+        {
+          &add_header ($header_contents);
+          $header_contents = $_;
           next;
         }
 
@@ -699,7 +710,8 @@ sub process_file
           next;
         }
 
-      &add_header ($_);
+      # Otherwise, append current header info.
+      $header_contents .= "\n$_";
     }
   if ($count_only_p)
     {
@@ -736,12 +748,22 @@ sub process_pop3_folder
       local ($lineno) = 0;
       local ($header_line_count, @lines)
         = &pop3_retrieve_lines ($msgnumber, $body_line_limit);
+      local ($header_contents) = '';
 
       undef (%current_headers);
 
       while ($lineno < $header_line_count)
         {
-          &add_header ($lines[$lineno]);
+          if ($lines[$lineno] =~ /^$re_header_name/o
+              && $header_contents ne '')
+            {
+              &add_header ($header_contents);
+              $header_contents = $lines[$lineno];
+            }
+          else
+            {
+              $header_contents .= "\n$lines[$lineno]";
+            }
           $lineno++;
         }
 
