@@ -1,12 +1,12 @@
 #! /bin/sh
-# bash-login --- invoke bash when using /bin/sh as shell
+# bash-login --- invoke bash when using /bin/sh as login shell
 
-# Copyright (C) 1996 Noah S. Friedman
+# Copyright (C) 1996, 1999 Noah S. Friedman
 
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1996-10-11
 
-# $Id: bash-login,v 1.6 1997/03/10 19:58:18 friedman Exp $
+# $Id: bash-login,v 1.7 1997/08/07 03:05:51 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -28,8 +28,20 @@
 # This script allows you to set your login shell to /bin/sh, but invoke
 # bash transparently on login.  If bash can't be found, restart the bourne
 # shell.  This script should either be `execed' from .profile or else
-# copied into it wholesale.
-
+# copied into it wholesale.  One possible .profile logic is:
+#
+#         case "${BASH_LOGIN_FAILED_P+set}:$LOGGED" in
+#           set:* | *:t ) : ;;
+#           * )
+#             case "$0" in
+#               -sh | -*/sh )
+#                 p=$HOME/bin/share/bash-login
+#                 test -f "$p" && exec /bin/sh "$p"
+#                ;;
+#             esac
+#            ;;
+#         esac
+#
 # This allows you to set your login shell to something safe in heterogenous
 # environments where bash may not exist, but you want to use it if it's
 # available.
@@ -51,6 +63,7 @@ Options are:
 -L, --no-login               Do not invoke bash as a login shell.
 -p, --print-path             Print path of bash command that would be run.
                              Print nothing if bash cannot be found.
+-S, --no-set-default-shell   Do not change value of \$SHELL.
 -v, --verbose                Be verbose.
 "
 
@@ -60,6 +73,7 @@ Options are:
 debug=
 verbose=
 printp=
+setshellp=t
 loginp=t
 
 # Usage: eval "$getopt"; value=$optarg
@@ -127,12 +141,16 @@ while : ; do
       echo "$usage" 1>&2
       exit 0
      ;;
-    -L | --no-login   | -n* )
+    -L | --no-login   | -no-l* )
       loginp=nil
       shift
      ;;
     -p | --print-path | --p* )
       printp=t
+      shift
+     ;;
+    -S | --no-set-default-shell | --no-s* )
+      setshellp=
       shift
      ;;
     -v | --verbose | --v* )
@@ -175,9 +193,12 @@ pathdirs='
   /usr/local/gnubin
   /usr/local/gnu/bin
   /tools/contrib/bin
-  /opt/local/bin
-  /opt/gnu/bin
   /tools/ns/bin
+  /opt/gnu/bin
+  /opt/local/bin
+  /opt/lude/bin
+  /usr/bin
+  /bin
 '
 
 for d in $pathdirs; do
@@ -212,19 +233,24 @@ if { bash -c : ; } 2> /dev/null ; then
        ;;
     esac
 
-    no_exit_on_failed_exec=t
-    SHELL=`type -path bash`
-    export SHELL no_exit_on_failed_exec
+    oSHELL="$SHELL"
+    case "'"$setshellp"'" in
+      t )
+        SHELL=`type -path bash`
+        export SHELL
+       ;;
+    esac
 
+    no_exit_on_failed_exec=t
     exec $execflag bash ${1+"$@"}
 
-    SHELL=/bin/sh
-    exec $execflag sh ${1+"$@"}
+    SHELL="$oSHELL"
+    BASH_LOGIN_FAILED_P=t
+    export BASH_LOGIN_FAILED_P
+    exec $execflag $SHELL ${1+"$@"}
   '
 else
-    SHELL=/bin/sh
-    export SHELL
-    exec sh ${1+"$@"}
+    exec /bin/sh ${1+"$@"}
 fi
 
 # bash-login ends here
