@@ -2,13 +2,14 @@
 # mkdirhier --- make directory hierarchy
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-01-10
-# Last modified: 1994-03-15
 # Public domain
+
+# $Id$
 
 # Commentary:
 # Code:
 
-# Name by which this script was invoked. 
+# Name by which this script was invoked.
 progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 
 # To prevent hairy quoting and escaping later.
@@ -29,13 +30,16 @@ Options are:
 debug=
 verbose=
 
-# Parse command line arguments. 
+# If --verbose is specified, fd 3 is duped to fd 1 instead.
+exec 3> /dev/null
+
+# Parse command line arguments.
 # Make sure that all wildcarded options are long enough to be unambiguous.
 # It's a good idea to document the full long option name in each case.
 # Long options which take arguments will need a `*' appended to the
-# canonical name to match the value appended after the `=' character. 
+# canonical name to match the value appended after the `=' character.
 while test $# != 0; do
-  case "$1" in 
+  case "$1" in
     -D | --debug | --d* )
       debug=t
       shift
@@ -45,22 +49,21 @@ while test $# != 0; do
       exit 1
      ;;
     -v | --verbose | --v* )
-      verbose=t
+      exec 3>&1
       shift
      ;;
     -- )     # Stop option processing
       shift
       break
      ;;
-    --*=* )
-      arg=`echo $1 | sed -e 's/=.*//'`
-      echo "$progname: unknown option $bq$arg$eq" 1>&2
-      echo "$usage" 1>&2
-      exit 1
-     ;;
     -* )
-      echo "$progname: unknown option $bq$1$eq" 1>&2
-      echo "$usage" 1>&2
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
       exit 1
      ;;
     * )
@@ -71,12 +74,10 @@ done
 
 case "$debug" in t ) set -x ;; esac
 
-defaultIFS=' 	
-'
-IFS="${IFS-$defaultIFS}"
 errstatus=0
 
-for file in ${1+"$@"} ; do 
+for file
+do
   # If filename begins with a `-', put `./' in front of it to avoid
   # confusing mkdir.
   case "$file" in
@@ -84,18 +85,18 @@ for file in ${1+"$@"} ; do
   esac
 
   oIFS="$IFS"
-  # Some sh's can't handle IFS=/ for some reason.
-  IFS='%'
-  set fnord `echo $file | sed -e 's@/@%@g' -e 's@^%@/@'`
-  shift
+  IFS='/'
+  set fnord $file
   IFS="$oIFS"
+  shift
 
   pathcomp=
-  for d in ${1+"$@"} ; do
+  for d
+  do
     pathcomp="$pathcomp$d"
 
     if test ! -d "$pathcomp" ; then
-      case "$verbose" in t ) echo "$progname: mkdir $pathcomp" ;; esac
+      echo "$pathcomp" 1>&3
       mkdir "$pathcomp" || errstatus=$?
     fi
 
