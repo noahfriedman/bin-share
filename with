@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-08-14
 
-# $Id: with,v 1.6 1996/02/16 01:42:04 friedman Exp $
+# $Id: with,v 1.7 1996/03/03 23:03:57 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
 # Commentary:
 
 # TODO: create optional socket streams for stdin or stdout before invoking
-# subprocess
+# subprocess.
 
 # Code:
 
@@ -40,7 +40,7 @@ eq="'"
 usage="Usage: $progname {options} [command {args...}]
 
 Options are:
--b, --background,     Run process in background.
+-b, --background      Run process in background.
 -c, --cwd       DIR   Run with DIR as the current working directory.
                       This directory is relative to the root directory as
                       specified by ${bq}--root$eq, or $bq/$eq.
@@ -130,6 +130,7 @@ getopt='
                 exit 1
                ;;
            esac
+           shift
          ;;
         esac
      ;;
