@@ -1,0 +1,8 @@
+#!/bin/sh
+
+dirs=
+for d in /usr/include /usr/local/include /usr/local/gnu/include ; do
+  test -d "$d" && dirs="$dirs $d"
+done
+
+find $dirs -follow -name '*.h' -print 2> /dev/null | xargs grep ${1+"$@"}
