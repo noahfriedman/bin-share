@@ -1,10 +1,16 @@
 #!/bin/sh
 #
-# Copyright (C) 1991 Free Software Foundation.
+# texi2dvi - prepare Texinfo files for printing.  
+#
+# Copyright (C) 1990, 1991 Free Software Foundation.
+#
+# Roland McGrath <roland@gnu.ai.mit.edu>
+# Version 0.10
+# 24 Sep 91
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2, or (at your option)
+# the Free Software Foundation; either version 1, or (at your option)
 # any later version.
 #
 # This program is distributed in the hope that it will be useful,
@@ -64,7 +70,7 @@ for file in $*; do
     if [ "$new_idx_files" = "${base}.??" ]; then
       new_idx_files=''
     else
-      oidx_files="$new_idx_files"
+      oidx_files="$idx_files"
       new_idx_files=''
       for idx_file in $oidx_files; do
 	if [ "`sed -n '1s/^\(.\).*$/\1/p' $idx_file`" = \\ ]; then
@@ -113,3 +119,4 @@ for file in $*; do
   fi
 
 done	   # for file
+
