@@ -4,7 +4,7 @@
 # Created: 1995-06-23
 # Public domain.
 
-# $Id: mkulinks,v 1.3 1995/11/08 04:55:36 friedman Exp friedman $
+# $Id: mkulinks,v 1.4 1995/11/08 22:20:57 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -248,7 +248,7 @@ sub getdirentries
 
   if (! opendir (DIRHNDL, $dir))
     {
-      iferr ("opendir", "$dir", "$!.");
+      &iferr ("opendir", "$dir", "$!.");
       return %files;
     }
 
@@ -273,7 +273,7 @@ sub prune_directory
 
   if (! opendir (DIRHNDL, $dir))
     {
-      iferr ("opendir", "$dir", "$!.");
+      &iferr ("opendir", "$dir", "$!.");
       return 0;
     }
 
