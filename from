@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.49 2002/05/20 02:23:23 friedman Exp $
+# $Id: from,v 1.50 2002/07/19 03:12:35 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -299,7 +299,11 @@ sub initialize_variables ()
   # when writing to archive files.
   # The amount of whitespace between the address and the date seems to vary
   # on some systems.
-  $re_message_delimiter = '^From\s+\S+\s+...\s+...\s+\d+\s+\d\d:\d\d';
+  #
+  # It is rare, but I have seen whitespace (quoted) in the address part of
+  # the envelope, e.g.
+  #   From "Speakeasy <support"@speakeasy.net  Thu Dec 19 22:46:37 2002
+  $re_message_delimiter = '^From\s+.*?\s+\S{3}\s+\S{3}\s+\d+\s+\d\d:\d\d';
 
   # According to RFC822, "The field-name must be composed of printable
   # ASCII characters (i.e. characters that have decimal values between 33
