@@ -4,7 +4,7 @@
 # Created: 1995-08-14
 # Public domain
 
-# $Id$
+# $Id: with,v 1.1 1995/08/20 18:13:10 friedman Exp friedman $
 
 # Commentary:
 
@@ -250,7 +250,11 @@ esac
 WITH_PROGNAME="$progname"
 export WITH_PROGNAME
 
-exec perl $debug $includes - ${1+"$@"} <<'__EOF__'
+# By using a here-document to include the source of the perl script (to
+# avoid command line length limits), we usurp the normal stdin the inferior
+# process might have expected.  So dup stdin onto fd 9, and before the
+# inferior process is started, it will be reduped back onto fd 0.
+exec perl $debug $includes - ${1+"$@"} 9<&0 <<'__EOF__'
 
 &main;
 
@@ -258,6 +262,15 @@ sub main
 {
   $with_progname = $ENV{'WITH_PROGNAME'};
   delete $ENV{'WITH_PROGNAME'};
+
+  # See comments preceding perl invocation for an explanation.
+  if (! open (STDIN, "<&9"))
+    {
+      printf (STDERR "$with_progname: cannot recover stdin from fd 9: $!\n");
+      exit (1);
+    }
+
+  close (9);
 
   # Push some include dirs which are pretty standard, just in case.
   # Perl5 does not usually install .ph files.
@@ -283,7 +296,7 @@ sub main
   &set_pgrp;
 
   exec ({$progname} @ARGV);
-  printf(STDERR "$with_progname: $!\n");
+  printf (STDERR "$with_progname: $!\n");
   exit (1);
 }
 
