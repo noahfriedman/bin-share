@@ -1,8 +1,10 @@
-#!/usr/local/bin/perl
-# 02-Aug-92 Noah Friedman <friedman@prep.ai.mit.edu>
-#
-# Public domain.
-#
+#! /usr/local/bin/perl
+# mfinger --- local finger client
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1992-08-02
+# Public domain
+
+# $Id$
 
 &main;
 
@@ -22,8 +24,11 @@ sub main
     }
 
   # SMTP server for expanding mail aliases
-  #$SMTPHOST = "localhost";
-  $SMTPHOST = "albert";
+  $SMTPHOST = "localhost";
+  if (defined ($ENV{'SMTPHOST'}))
+    {
+      $SMTPHOST = $ENV{'SMTPHOST'};
+    }
 
   # Canonical spool file
   $SPOOLFILE = "/usr/spool/mail/$uname";
@@ -47,14 +52,14 @@ sub main
   &flushprint;
 }
 
-sub printline 
+sub printline
 {
-  @PRINTLINES = (@PRINTLINES, @_); 
+  @PRINTLINES = (@PRINTLINES, @_);
 }
 
 sub flushprint
 {
-  local ($i) = 0; 
+  local ($i) = 0;
 
   while ("$PRINTLINES[$i]")
     {
@@ -73,8 +78,8 @@ sub print_passwd_info
 
   if ("$gcos[1]$gcos[2]$gcos[3]" ne "")
     {
-      &printline (sprintf ("Office: %-31s Home: %s\n", 
-                           "$gcos[1], " . &phonefmt($gcos[2]), 
+      &printline (sprintf ("Office: %-31s Home: %s\n",
+                           "$gcos[1], " . &phonefmt($gcos[2]),
                            &phonefmt($gcos[3])));
     }
 
@@ -96,31 +101,31 @@ sub phonefmt
 
   $new = substr ("$num", $len - 4);
   $num = substr ("$num", 0, $len - 4);
-  $len -= 4; 
+  $len -= 4;
 
   while ($len > 0)
     {
       $new = substr ("$num", &max ($len - 3, 0)) . "-$new" ;
       $num = substr ("$num", 0, &max ($len - 3, 0));
-      $len -= 3; 
+      $len -= 3;
     }
 
   if ("$num")
     {
       $new = "$num-$new";
     }
-  
+
   return "$new";
 }
 
-sub max 
+sub max
 {
   return ($_[0] > $_[1]) ? $_[0] : $_[1] ;
 }
 
 sub getgroupsbyname
 {
-  local ($uid) = @_; 
+  local ($uid) = @_;
   local ($uname, $passwd, $gid, $gname, $members, @groups);
 
   if ($uid =~ /[0-9][0-9]*/)
@@ -132,16 +137,16 @@ sub getgroupsbyname
       ($uname, $passwd, $uid, $gid) = getpwnam ($uid);
     }
 
-  if ("$uname" eq "") 
-    { 
-      return (); 
+  if ("$uname" eq "")
+    {
+      return ();
     }
 
   if (($gname) = getgrgid ($gid))
     {
       @groups = ($gname);
     }
-  
+
   while (($gname, $passwd, $gid, $members) = getgrent ())
     {
       if ("$members" =~ /^$uname /o
@@ -158,7 +163,7 @@ sub getgroupsbyname
 sub print_lastlog
 {
   local ($tm, $tty, $rhost) = &lastlog ($uid);
-  
+
   if ($tm == 0)
     {
       &printline ("Never logged in to this host.\n");
@@ -190,7 +195,7 @@ sub lastlog
       @ll_fodder = (0, 0 x 8, 0 x 16);
       $ll_size = length (pack ($ll_template, @ll_fodder));
       seek (FILE, $ll_size * $uid, 0);
-    
+
       read (FILE, $ll_info, $ll_size);
       close (FILE);
 
@@ -233,7 +238,7 @@ sub print_unread_mail_age
   &printline ("Has not read mail for " . &age_of ($st_atime) . ".\n");
 }
 
-sub age_of 
+sub age_of
 {
   local (@time_mult, @time_name, $seconds, $output, $val, $i);
 
@@ -278,7 +283,7 @@ sub print_forwarding_alias
     }
 
   $str = $aliases[0];
-  $i = 1; 
+  $i = 1;
   while ("$aliases[$i]")
     {
       $str .= ", $aliases[$i]";
@@ -299,7 +304,7 @@ sub expand_mail_alias
   local ($sockaddr) = "S n a4 x8";
 
   # So we don't have to include socket.ph
-  # These are probably correct, but not guaranteed to be. 
+  # These are probably correct, but not guaranteed to be.
   local ($AF_INET) = 2;
   local ($SOCK_STREAM) = 1;
 
@@ -312,7 +317,7 @@ sub expand_mail_alias
     {
       ($name, $aliases, $port) = getservbyname ($port, "tcp");
     }
-      
+
   ($name, $aliases, $type, $len, $thisaddr) = gethostbyname ($hostname);
   ($name, $aliases, $type, $len, $rhostaddr) = gethostbyname ($rhost);
 
@@ -332,7 +337,7 @@ sub expand_mail_alias
   select (S); $| = 1; select (STDOUT);
 
   # Avoid deadlock by forking.
-  $child = fork(); 
+  $child = fork();
 
   if ($child == 0)
     {
@@ -345,7 +350,7 @@ sub expand_mail_alias
   else
     {
       $i = 0;
-      while (<S>) 
+      while (<S>)
         {
           if ($_ =~ /^250[- ]/)
             {
@@ -373,7 +378,7 @@ sub print_number_new_msgs
   @st_info = stat ("$SPOOLFILE");
   if (open (FILE, "< $SPOOLFILE"))
     {
-      $n = 0; 
+      $n = 0;
       while (<FILE>)
         {
           if (/^From /)
@@ -454,11 +459,8 @@ sub ctime
   $year += ($year < 70) ? 2000 : 1900;
 
   return sprintf ("%s %s %02d %02d:%02d:%02d %s%4d",
-                  $weekday[$wday], $month[$mon], $mday, $hour, $min, $sec, 
+                  $weekday[$wday], $month[$mon], $mday, $hour, $min, $sec,
                   $TZ, $year);
 }
 
-
-# local variables:
-# mode: c
-# end:
+# mfinger ends here
