@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2000-01-14
 
-# $Id: gnuedit,v 1.1 2000/01/14 11:56:34 friedman Exp $
+# $Id: gnuedit,v 1.2 2000/01/28 04:07:18 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -274,23 +274,24 @@ sub files_writable_by_uid ($@)
   return $? >= 255 ? $? - 255 : $?;
 }
 
-sub gnuedit_make_evalform ($$)
+sub gnuedit_make_evalform ($$;$)
 {
-  my ($filename, $realfilename) = @_;
+  my ($filename, $realfilename, $remoteprefix) = @_;
 
   (my $basename     = $filename)     =~ s|.*/||o;
   (my $realbasename = $realfilename) =~ s|.*/||o;
 
   my $fn = "gnuedit-frob";
   my $fmt = "(defun %s ()
-               (and (equal buffer-file-name \"%s\")
+               (and (equal buffer-file-name \"%s%s\")
                     (rename-buffer \"%s (%s)\" t))
                (remove-hook \'find-file-hooks \'%s)
                (fmakunbound \'%s))
              (add-hook \'find-file-hooks \'%s)";
   $fmt =~ s/\n\s+/ /go;
 
-  sprintf ($fmt, $fn, $realfilename, $basename, $realbasename, $fn, $fn, $fn);
+  sprintf ($fmt, $fn, $remoteprefix || "", $realfilename,
+           $basename, $realbasename, $fn, $fn, $fn);
 }
 
 
@@ -305,13 +306,45 @@ sub gethostname ()
   return $host;
 }
 
-
-sub gnuedit ($$$$)
+sub hosts_match ($$)
 {
-  my ($uid, $host, $port, $files) = @_;
+  my ($h1, $h2) = @_;
+
+  my ($h1name, $h1alias, $h1addrtype, $h1l, @h1addrs) = gethostbyname ($h1);
+  my ($h2name, $h2alias, $h2addrtype, $h2l, @h2addrs) = gethostbyname ($h2);
+  my @h1names = map { scalar gethostbyaddr ($_, $h1addrtype) } @h1addrs;
+  my @h2names = map { scalar gethostbyaddr ($_, $h2addrtype) } @h2addrs;
+
+  foreach $h1 (@h1names)
+    {
+      next unless (defined $h1 && $h1 ne "");
+      foreach $h2 (@h2names)
+        {
+          next unless (defined $h2 && $h2 ne "");
+          return 1 if ($h1 eq $h2);
+        }
+    }
+  return 0;
+}
+
+
+sub gnuedit ($$$$$$$)
+{
+  my ($uid, $username, $host, $port, $thishost, $remote_type, $files) = @_;
 
   my $gnuclient = $ENV{GNUCLIENT_PROGRAM} || "gnuclient";
-  my @gnuclient_options = ("-h", $host, "-p", $port);
+  my @gnuclient_options;
+  my $remoteprefix;
+
+  if (!($uid == $< && $uid == $>) || defined $thishost)
+    {
+      @gnuclient_options = ("-h", $host, "-p", $port);
+      if (defined $thishost)
+        {
+          $remoteprefix = "/$username\@$thishost:";
+          push @gnuclient_options, "-r", $remoteprefix;
+        }
+    }
 
   if ($uid == $< && $uid == $>)
     {
@@ -359,11 +392,12 @@ sub gnuedit ($$$$)
         }
       my $tmpfilestat = xstat ($tmpfile);
 
-      if (!spawn ($gnuclient, @gnuclient_options,
-                  "-eval", gnuedit_make_evalform ($file, $tmpfile),
+      if (!spawn ($gnuclient, @gnuclient_options, "-eval",
+                  gnuedit_make_evalform ($file, $tmpfile, $remoteprefix),
                   $tmpfile))
         {
-          errmsg ($gnuclient, "exited abnormally; aborting changes") if ($? != 0);
+          errmsg ($gnuclient, "exited abnormally; aborting changes")
+            if ($? != 0);
           xunlink ($tmpfile);
           $exit_status++;
           next;
@@ -398,15 +432,35 @@ sub gnuedit ($$$$)
 sub main
 {
   my $gnuserv_port_base = 21490;
-  my $uid = getpwnam ($ENV{LOGNAME} || $ENV{USER} || getpwuid ($<));
+  my $username = $ENV{LOGNAME} || $ENV{USER} || getpwuid ($<);
+  my $uid = getpwnam ($username);
   my $gnuport = $ENV{GNU_PORT} || $gnuserv_port_base + $uid;
   my $gnuhost = $ENV{GNU_HOST} || "localhost";
+  my $myhostname;
+  my $thishost;
+  my $remote_type = "ftp";
 
   Getopt::Long::config ('bundling', 'autoabbrev');
-  GetOptions ("v|verbose", \$verbose);
-  gnuedit ($uid, $gnuhost, $gnuport, \@ARGV);
+  GetOptions ("h|host=s",        \$gnuhost,
+              "m|my-hostname=s", \$myhostname,
+              "r|remote-type=s", \$remote_type,
+              "p|port=i",        \$gnuport,
+              "v|verbose",       \$verbose);
+
+  if ($gnuhost !~ /^localhost(|\..*)$/o)
+    {
+      my $hostname = $myhostname || gethostname ();
+      $thishost = $hostname unless (hosts_match ($gnuhost, $hostname));
+    }
+
+  gnuedit ($uid, $username, $gnuhost, $gnuport, $thishost, $remote_type, \@ARGV);
 }
 
 main ();
+
+# local variables:
+# mode: perl
+# eval: (auto-fill-mode 1)
+# end:
 
 # gnuedit ends here
