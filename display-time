@@ -4,7 +4,7 @@
 # Created: 1991-12-18
 # Public domain
 
-# $Id: display-time,v 1.4 1994/09/17 18:11:22 friedman Exp friedman $
+# $Id: display-time,v 1.5 1995/05/11 18:08:05 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -163,7 +163,7 @@ while : ; do
   loadavg_result=
   case "$check_loadavg" in t )
     loadavg=`uptime \
-              | sed -ne 's/.*load average:[ 	]*//
+              | sed -ne 's/.*load averages*:[ 	]*//
                          s/[, 	].*//
                          p'`
     loadavg_result="loadavg:$loadavg"
