@@ -9,7 +9,7 @@ exec ${PERL-perl} -wSx $0 ${1+"$@"}
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-08-02
 
-# $Id: fmtcols,v 2.9 2001/05/22 17:11:57 friedman Exp $
+# $Id: fmtcols,v 2.10 2001/11/25 05:19:34 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -47,11 +47,18 @@ sub max { return [ sort { -($a <=> $b) } @_ ]->[0]; }
 # Surprisingly, doing repeated global regexp matching on a buffer instead
 # of reading line-at-a-time, eliminates an extra copy and tends to make
 # scanning a little bit faster than using line-at-a-time with <$fh>.
+#
+# Because data is read in blocks, there is no way for the called function
+# to tell when a given block represents eof or not, so when reading text
+# files a line with no newline may either be due to a line split across a
+# block or eof.  To disambiguate this case, a final newline will be added
+# to the data by this function if it is missing.  This means this method of
+# reading data is probably not suitable for binary files.
 sub map_over_file_contents ($@)
 {
   my $fn = shift;
   my $fh = gensym;
-  my $blocksize = 10 * 1024 * 1024; # 10mb
+  my $blocksize = 1024 * 1024; # 1mb, but perl only reads 4k max? investigate.
 
   my $file;
   foreach $file (@_)
@@ -75,6 +82,11 @@ sub map_over_file_contents ($@)
             if ($offset > 0 && $offset < $len);
           $_ = "" if ($offset < 0 || $offset >= $len);
           $bytesread = sysread ($fh, $_, $blocksize, length);
+          # If read returns 0 bytes, we are at the end of the file; append
+          # a final newline if missing.
+          $_ .= "\n" if ($bytesread == 0
+                         && $_ ne "" # check if fn has consumed all data
+                         && substr ($_, -1) ne "\n");
           $offset = &$fn (\$_) || 0;
         }
       close ($fh);
@@ -100,7 +112,7 @@ sub read_input ($@)
   map_over_file_contents
     sub {
       my $lastpos = 0;
-      while (${$_[0]} =~ m/(.*)(?:\n|\Z)/gmo)
+      while (${$_[0]} =~ m/(.*)\n/gmo)
         {
           last if ($lastpos == pos ${$_[0]});
           $lastpos = pos ${$_[0]};
@@ -114,7 +126,7 @@ sub read_input ($@)
               next;
             }
 
-          my @fields = split (/$fieldsep/o, $1, $numfields);
+          my @fields = split (/$fieldsep/o, $l, $numfields);
           my $i = 0;
 
           push @line, \@fields;
@@ -204,13 +216,13 @@ sub parse_options ()
   my $num_fields;
   my $rj_numeric;
   my $skip_lines;
-  my $ignore_re;
+  my @ignore_re;
   my $width_limit;
   my %right_justify;
   my @rightcols;
 
   Getopt::Long::config ('bundling', 'autoabbrev');
-  GetOptions ("i|ignore-matching=s",       \$ignore_re,
+  GetOptions ("i|ignore-matching=s@",      \@ignore_re,
               "k|skip-lines=i",            \$skip_lines,
               "N|numeric-right-justify:i", \$rj_numeric,
               "n|num-fields=i",            \$num_fields,
@@ -219,6 +231,14 @@ sub parse_options ()
               "S|output-separator=s",      \$outsep,
               "s|separator=s",             \$fieldsep,
               "h|help",                    \&usage);
+
+  my $ignore_re;
+  if (@ignore_re)
+    {
+      $ignore_re = (scalar @ignore_re == 1
+                    ? $ignore_re[0]
+                    : "(?:" . join ("|", @ignore_re) . ")");
+    }
 
   my $col;
   foreach $col (split (/\s*,\s*/o, join (",", @rightcols)))
@@ -244,6 +264,7 @@ sub usage ()
 Options are:
 -h, --help                      You're looking at it.
 -r, --right-justify  F0,F1,...  Right-justify fields F0, F1, ...
+                                This option may be specified more than once.
 -N, --numeric-right-justify N   Right-justify any fields which are all-numeric.
                                 Optional argument N means skip first N lines of
                                 input before examining fields for numeric
@@ -251,6 +272,7 @@ Options are:
                                 First N lines are still column-aligned unless
                                 \`-skip-lines' option is specified.
 -i, --ignore-matching  REGEXP   Do not column-align lines matching REGEXP.
+                                This option may be specified more than once.
 -k, --skip-lines       N        Do not column-align first N lines of input.
 -s, --separator        SEP      Field separator between columns.
                                 This can be any regular expression.
