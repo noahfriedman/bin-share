@@ -1,12 +1,12 @@
 #! /bin/sh
 # from --- show you who your mail is from
 
-# Copyright (C) 1992, 1995-2000 Noah S. Friedman
+# Copyright (C) 1992, 95, 96, 97, 98, 99, 00, 2002 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.46 2001/10/06 10:42:38 friedman Exp $
+# $Id: from,v 1.47 2002/03/04 21:14:27 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -298,7 +298,7 @@ sub initialize_variables ()
   # some restrictions exist for the sake of formatting.
   $re_fmt_header_name = '[!"#$&\'*+,-./0-9;<=>?@A-Z\\^_`a-z{|}~]+';
 
-  $re_blank_line = '^\s*$';
+  $re_blank_line = '^$';
   $re_format_modifier = '%[\d.-]*';
 
   $hack_header_function{FROM}    = \&hack_From_data;
@@ -368,74 +368,52 @@ sub set_default_format ()
     }
 }
 
-# This function reads blocks of data into a buffer and then calls an
-# anonymous subroutine with a reference to the data.  That subroutine
-# should return the offset of any unexamined data remaining so that it can
-# be prepended to the next block of read data; in this way, data which
-# fails to match a regexp because it was truncated should be successfully
-# matched next time.  (It also may return -1 to indicate discarding all
-# existing data.)
-#
-# This is useful for doing repeated global regexp matching on a buffer
-# instead of reading line-at-a-time, thereby eliminating a lot of extra
-# copying and making scanning significantly faster.  If the file is larger
-# than a certain size, read multiple blocks.  This is still significantly
-# faster than line-at-a-time with <$fh>.
-sub map_over_file_contents ($@)
+sub openfile ($)
 {
-  my $fn = shift;
+  my $file = shift;
   my $fh = gensym;
-  my $blocksize = 10 * 1024 * 1024; # 10mb
 
+  if ($file eq "-")
+    {
+      unless (open ($fh, "<&STDIN"))
+        {
+          err ("stdin", $!);
+          exit (1);
+        }
+    }
+  elsif (!sysopen ($fh, $file, 0))
+    {
+      err ($file, $!);
+      exit (1);
+    }
+  return $fh;
+}
+
+sub print_envelopes (@)
+{
   for my $file (@_)
     {
-      if ($file eq "-")
+      my $fh = openfile ($file);
+      while (<$fh>)
         {
-          if (!open ($fh, "<&STDIN"))
-            {
-              err ("stdin", $!);
-              next;
-            }
-        }
-      elsif (!sysopen ($fh, $file, 0))
-        {
-          err ($file, $!);
-          next;
-        }
-
-      my $bytesread = $blocksize;
-      my $offset = 0;
-      $_ = "";
-      while (defined $bytesread && $bytesread == $blocksize)
-        {
-          my $len = length;
-          $_ = substr ($_, $offset) if ($offset > 0 && $offset < $len);
-          $_ = "" if ($offset < 0 || $offset >= $len);
-          $bytesread = sysread ($fh, $_, $blocksize, length);
-          $offset = &$fn (\$_);
+          print if /$re_message_delimiter/o;
         }
       close ($fh);
     }
 }
 
-sub print_envelopes (@)
-{
-  my $delim = $re_message_delimiter . ".*\n";
-  map_over_file_contents
-    sub {
-      print $1 while (${$_[0]} =~ /($delim)/gcmo);
-      return pos ${$_[0]};
-    }, @_;
-}
-
 sub folder_message_count (@)
 {
   my $n = 0;
-  map_over_file_contents
-    sub {
-      $n++ while (${$_[0]} =~ /$re_message_delimiter/gcmo);
-      return pos ${$_[0]};
-    }, @_;
+  for my $file (@_)
+    {
+      my $fh = openfile ($file);
+      while (<$fh>)
+        {
+          $n++ if /$re_message_delimiter/o;
+        }
+      close ($fh);
+    }
   return $n;
 }
 
@@ -503,81 +481,74 @@ sub process_file ($)
   my $in_message_body_p = 1;
   my $folder_message_lines = 0;
 
-  map_over_file_contents
-    sub {
-      my $data = shift;
+  my $fh = openfile ($file);
+  while (<$fh>)
+    {
+      chomp;
 
-      while (1)
+      # If we hit an RFC822 message delimiter, clean up in preparation for
+      # getting info about the next message.
+      if ($in_message_body_p && /$re_message_delimiter/o)
         {
-          # If we hit an RFC822 message delimiter, clean up in preparation for
-          # getting info about the next message.
-          if ($in_message_body_p && $$data =~ /\G${re_message_delimiter}.*\n/gcmo)
-            {
-              undef @headers;
-              $header_contents = "";
-              undef %current_headers;
-              $in_message_body_p = 0;
-              next;
-            }
-
-          # If we're finished reading header continuation lines (evidenced by
-          # coming upon a new header name), finish processing this header.
-          if ($header_contents ne "" && $$data =~ /\G^(${re_header_name}.*)\n/gcmo)
-            {
-              push (@headers, $header_contents) if ($opt_all_headers);
-              add_header ($header_contents);
-              $header_contents = $1;
-              next;
-            }
-
-          # If we're not in the message body, and we come upon a blank line,
-          # we're at the end of the headers for this message.
-          if (! $in_message_body_p && $$data =~ /\G$re_blank_line\n/gcmo)
-            {
-              # Add last buffered header.
-              push (@headers, $header_contents) if ($opt_all_headers);
-              add_header ($header_contents);
-              $header_contents = "";
-
-              $total_message_lines++;
-              $folder_message_lines++;
-              $current_headers{'{TLINES}'} = $total_message_lines;
-              $current_headers{'{FLINES}'} = $folder_message_lines;
-              $current_headers{'{FOLDER}'} = $file;
-
-              $in_message_body_p = 1;
-              $body_line_count = 0;
-
-              maybe_print_headers ($#headers+1, \@headers, $opt_all_headers);
-            }
-
-          if ($in_message_body_p
-              && $opt_extractp
-              && ! $ignore_this_message_p
-              && (($body_line_limit < 0)
-                  || ($body_line_count <= $body_line_limit)))
-            {
-              last unless ($$data =~ /\G^(.*)\n/gcmo);
-              print "\n" if ($body_line_count == 0);
-              print $1, "\n";
-              $body_line_count++;
-              next;
-            }
-
-          if ($in_message_body_p
-              || ($opt_firstlinep && $header_contents ne ""))
-            {
-              last unless ($$data =~ /\G^.*\n/gcmo);
-              next;
-            }
-
-          # Otherwise, append current header info.
-          last unless ($$data =~ /\G^(.*)\n/gcmo);
-          $header_contents .= "\n" if ($header_contents ne "");
-          $header_contents .= $1;
+          undef @headers;
+          $header_contents = "";
+          undef %current_headers;
+          $in_message_body_p = 0;
+          next;
         }
-      return pos $$data;
-    }, $file;
+
+      # If we're finished reading header continuation lines (evidenced by
+      # coming upon a new header name), finish processing this header.
+      if ($header_contents ne "" && /^$re_header_name/o)
+        {
+          push (@headers, $header_contents) if ($opt_all_headers);
+          add_header ($header_contents);
+          $header_contents = $_;
+          next;
+        }
+
+      # If we're not in the message body, and we come upon a blank line,
+      # we're at the end of the headers for this message.
+      if (! $in_message_body_p && /$re_blank_line/o)
+        {
+          # Add last buffered header.
+          push (@headers, $header_contents) if ($opt_all_headers);
+          add_header ($header_contents);
+          $header_contents = "";
+
+          $total_message_lines++;
+          $folder_message_lines++;
+          $current_headers{'{TLINES}'} = $total_message_lines;
+          $current_headers{'{FLINES}'} = $folder_message_lines;
+          $current_headers{'{FOLDER}'} = $file;
+
+          $in_message_body_p = 1;
+          $body_line_count = 0;
+
+          maybe_print_headers (scalar @headers, \@headers, $opt_all_headers);
+        }
+
+      if ($in_message_body_p
+          && $opt_extractp
+          && ! $ignore_this_message_p
+          && (($body_line_limit < 0)
+              || ($body_line_count <= $body_line_limit)))
+        {
+          chomp;
+          print "\n" if ($body_line_count == 0);
+          print $_, "\n";
+          $body_line_count++;
+          next;
+        }
+
+      next if ($in_message_body_p
+               || ($opt_firstlinep && $header_contents ne ""));
+
+      # Otherwise, append current header info.
+      $header_contents .= "\n" if ($header_contents ne "");
+      $header_contents .= $_;
+    }
+  close ($fh);
 }
 
 sub process_pop3_folder ($$$$)
