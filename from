@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.30 1999/11/11 19:02:15 friedman Exp $
+# $Id: from,v 1.31 1999/12/29 19:07:23 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -433,30 +433,26 @@ case "${FROM_FORMAT+set}" in
    ;;
 esac
 
-FROM_PROGNAME=$progname
-
-export FROM_PROGNAME COLUMNS
 export FROM_ALL_HEADERS_P FROM_COUNTP FROM_EXTRACTP FROM_FIRSTLINEP
 export FROM_PARSEP FROM_UNREAD_ONLY_P FROM_LINELIMIT FROM_MATCH_HEADER
 export FROM_MATCH_REGEXP FROM_FORMAT FROM_USER
-export MAIL POPPASS
+export COLUMNS MAIL POPPASS
 
 # this commented quote rebalances perl mode font-lock: "
-exec $perl $debug -x $0 ${1+"$@"}
+exec $perl $debug -Sx $0 ${1+"$@"}
 #!perl     [perl will skip all lines in this file before this line]
 
-main();
+use Symbol;
+use strict;
+no strict "vars";
 
-sub main
+sub main ()
 {
-  my $i = 0;
-
-  $from_progname = getenv ('FROM_PROGNAME');
+  $0 =~ s/.*\///o;
   initialize_variables ();
-  make_format_vector (getenv ("FROM_FORMAT"));
+  make_format_vector (getenv ('FROM_FORMAT'));
 
-  $header_save_p{'STATUS'} = 1
-    if ($unread_only_p);
+  $header_save_p{STATUS} = 1 if ($unread_only_p);
 
   if ($from_match_header ne '')
     {
@@ -467,49 +463,34 @@ sub main
       $header_save_p{$from_match_header} = 1;
     }
 
-  $i = 0;
   for my $file (@ARGV)
     {
-      if ($file !~ /^:pop/oi
-          && $file ne "-"
-          && ! -r $file)
+      if ($file !~ /^:pop/oi && $file ne "-" && ! -r $file)
         {
+          my $fh = gensym;
           # Set $! appropriately.
-          open (F, $file);
+          open ($fh, $file);
           err ($file, "$!.");
-          close (F);
-
-          splice (@ARGV, $i, 1);
+          close ($fh);
           $exit_status = 1;
+          next;
         }
-      $i++;
-    }
 
-  for my $file (@ARGV)
-    {
       if ($file =~ /^:(pop-?3|pop)[:,]/oi)
         {
-          my ($ignore, $port, $host, $user, $pass) = split (/:/, $file);
+          my (undef, $port, $host, $user, $pass) = split (/:/, $file);
 
           $port =~ s/.*,//o if ($port =~ /,/);
-          if (! defined ($user) || $user eq '')
+          if (!defined $user || $user eq '')
             {
               for my $envvar ('USER', 'LOGNAME')
                 {
-                  if (defined ($ENV{$envvar}))
-                    {
-                      $user = $ENV{$envvar};
-                      last;
-                    }
+                  last if ($user = getenv ($envvar));
                 }
             }
 
-          if (! defined ($pass) || $pass eq '')
-            {
-              $pass = getenv ('POPPASS');
-              $pass = 'none'
-                if (! defined ($pass));
-            }
+          $pass = (getenv ('POPPASS') || 'none')
+            if (!defined $pass || $pass eq '');
 
           process_pop3_folder ($host, $port, $user, $pass);
         }
@@ -521,7 +502,7 @@ sub main
   exit ($exit_status);
 }
 
-sub initialize_variables
+sub initialize_variables ()
 {
   $t = 1;
   $nil = 0;
@@ -551,8 +532,8 @@ sub initialize_variables
   $re_blank_line = '(^' . $re_whitespace . '$)|(^$)';
   $re_format_modifier = '%[0-9.-]*';
 
-  $hack_header_function{'FROM'} = 'hack_From_data';
-  $hack_header_function{'DATE'} = 'hack_Date_data';
+  $hack_header_function{FROM} = \&hack_From_data;
+  $hack_header_function{DATE} = \&hack_Date_data;
 
   $format_token{'{TLINES}'} = 'd';
   $format_token{'{FLINES}'} = 'd';
@@ -573,7 +554,7 @@ sub initialize_variables
   $from_match_regexp = getenv ('FROM_MATCH_REGEXP');
 
   $body_line_limit = 0;
-  if (getenv ('FROM_LINELIMIT') ne '')
+  if (getenv ('FROM_LINELIMIT'))
     {
       $body_line_limit = getenv ('FROM_LINELIMIT') + 0;
     }
@@ -583,15 +564,15 @@ sub initialize_variables
     }
 }
 
-sub make_format_vector
+sub make_format_vector ($)
 {
   my ($format) = @_;
   my ($fstring, $tmp, $i, $modifier, $tok) = ($format, '', 0);
   my $re_token = "$re_format_modifier" . "[^%]*";
 
-  undef (%header_save_p);
-  undef (%vector_header_name);
-  undef (@format_vector);
+  undef %header_save_p;
+  undef %vector_header_name;
+  undef @format_vector;
 
   # Here we temporarily disable multi-line scanning ($* = 0) and do not use
   # /(re)|(re)/, but rather use two pattern matching comparisons.  This is
@@ -641,52 +622,39 @@ sub make_format_vector
       # Make header name all upper case to distinguish from extraneous data
       # like the `prefix' element.
       $tmp = uc ($tmp);
-
-      if (defined ($format_token{$tmp}))
-        {
-          $tok = $format_token{$tmp};
-        }
-      else
-        {
-          $tok = 's';
-        }
-
+      $tok = $format_token{$tmp} || 's';
       $header_save_p{$tmp} = 1;
       $vector_header_name[$i] = $tmp;
       $format_vector[$i] = $modifier . $tok . $trailing_whitespace;
     }
 }
 
-sub process_file
+sub process_file ($)
 {
-  my ($file) = @_;
+  my $file = shift;
   my $header_contents = "";
   my @all_headers;
   my $all_headers_count = 0;
+  my $fh = gensym;
 
-  if (! open (F, "<$file"))
-    {
-      err ("open", $file, "$!");
-      return;
-    }
+  open ($fh, $file) || return err ("open", $file, "$!");
 
   $folder_message_lines = 0;
   $counted_messages = 0;
   $in_message_body_p = $t;
 
-  while (<F>)
+  while (<$fh>)
     {
-      chop $_;
+      chop;
 
       # If we hit an RFC822 message delimiter, clean up in preparation for
       # getting info about the next message.
       if ($in_message_body_p && $_ =~ /$re_message_delimiter/o)
         {
-          undef (@all_headers);
+          undef @all_headers;
+          undef %current_headers;
+          undef $header_contents;
           $all_headers_count = 0;
-
-          undef (%current_headers);
-          undef ($header_contents);
           $in_message_body_p = $nil;
           next;
         }
@@ -710,7 +678,7 @@ sub process_file
           $all_headers[$all_headers_count++] = $header_contents
             if ($all_headers_p);
           add_header ($header_contents);
-          undef ($header_contents);
+          undef $header_contents;
 
           $total_message_lines++;
           $folder_message_lines++;
@@ -721,14 +689,8 @@ sub process_file
           $in_message_body_p = $t;
           $body_line_count = 0;
 
-          if ($all_headers_p)
-            {
-              maybe_print_headers ($all_headers_count, \@all_headers);
-            }
-          else
-            {
-              maybe_print_headers ();
-            }
+          maybe_print_headers
+            ($all_headers_count, \@all_headers, $all_headers_p);
         }
 
       if ($in_message_body_p)
@@ -745,7 +707,7 @@ sub process_file
         }
 
       # Otherwise, append current header info.
-      if (! defined ($header_contents))
+      if (!defined $header_contents)
         {
           $header_contents = $_;
         }
@@ -755,26 +717,25 @@ sub process_file
         }
     }
 
-  print "$counted_messages\n"
-    if ($count_only_p);
-  close (F);
+  print "$counted_messages\n" if ($count_only_p);
+  close ($fh);
 }
 
-sub process_pop3_folder
+sub process_pop3_folder ($$$$)
 {
   my ($host, $port, $user, $pass) = @_;
   my $total_message_count;
   my $msgnumber;
 
-  initialize_sockvars;
-  tcpconnect ($host, $port) || return 0;
-  pop3_login ($user, $pass) || return 0;
+  my $sock = open_network_stream ($host, $port) || return 0;
+  disable_stdio_buffering ($sock);
+  pop3_login ($sock, $user, $pass) || return 0;
 
-  $total_message_count = pop3_message_count;
+  $total_message_count = pop3_message_count ($sock);
 
   if ($count_only_p && ! $unread_only_p)
     {
-      pop3_close;
+      pop3_close ($sock);
       print "$total_message_count\n";
       return 1;
     }
@@ -786,17 +747,12 @@ sub process_pop3_folder
 
   while ($msgnumber <= $total_message_count)
     {
-      my $lines;
-      my $lineno = 0;
-
-      if ($extract_body_p
-          && $from_match_header ne ''
-          && $body_line_limit != 0)
+      if ($extract_body_p && $from_match_header ne '' && $body_line_limit != 0)
         {
           # If we're searching for a particular message for extraction, get
           # just the headers first to see if this is a matching message.
           # Then and only then should we try retrieving the body below.
-          process_pop3_folder_get ($msgnumber, 0);
+          process_pop3_folder_get ($sock, $msgnumber, 0);
           if (! message_header_pattern_matched_p ())
             {
               $msgnumber++;
@@ -805,26 +761,19 @@ sub process_pop3_folder
             }
         }
 
-      ($lineno, $lines)
-        = process_pop3_folder_get ($msgnumber, $body_line_limit);
+      my ($lineno, $lines)
+        = process_pop3_folder_get ($sock, $msgnumber, $body_line_limit);
       $total_message_lines++;
       $current_headers{'{FLINES}'} = $msgnumber;
       $current_headers{'{TLINES}'} = $total_message_lines;
 
-      if ($all_headers_p)
-        {
-          maybe_print_headers ($lineno, $lines);
-        }
-      else
-        {
-          maybe_print_headers ();
-        }
+      maybe_print_headers ($lineno, $lines, $all_headers_p);
 
       if (! $ignore_this_message_p && $extract_body_p)
         {
-          while (defined (${$lines}[$lineno]))
+          while (defined $lines->[$lineno])
             {
-              print "${$lines}[$lineno]\n";
+              print $lines->[$lineno] . "\n";
               $lineno++;
             }
           print "\n" if ($body_line_limit != 0);
@@ -832,30 +781,30 @@ sub process_pop3_folder
 
       $msgnumber++;
     }
-  pop3_close;
+  pop3_close ($sock);
 }
 
-sub process_pop3_folder_get
+sub process_pop3_folder_get ($$$)
 {
-  my ($msgnumber, $body_line_limit) = @_;
+  my ($sock, $msgnumber, $body_line_limit) = @_;
   my $lineno = 0;
   my ($header_line_count, $lines)
-    = pop3_retrieve_lines ($msgnumber, $body_line_limit);
+    = pop3_retrieve_lines ($sock, $msgnumber, $body_line_limit);
   my $header_contents = '';
 
-  undef (%current_headers);
+  undef %current_headers;
 
   while ($lineno < $header_line_count)
     {
       if ($header_contents ne ''
-          && ${$lines}[$lineno] =~ /^$re_header_name/o)
+          && $lines->[$lineno] =~ /^$re_header_name/o)
         {
           add_header ($header_contents);
-          $header_contents = ${$lines}[$lineno];
+          $header_contents = $lines->[$lineno];
         }
       else
         {
-          $header_contents .= "\n${$lines}[$lineno]"
+          $header_contents .= "\n" . $lines->[$lineno]
             if ($header_contents eq '' || ! $first_header_line_only_p);
         }
       $lineno++;
@@ -867,31 +816,29 @@ sub process_pop3_folder_get
 }
 
 # This uses way, way too many free variables
-sub maybe_print_headers
+sub maybe_print_headers ($$$)
 {
   # $lines should be a reference to an array of lines.
-  my ($lines_header_end, $lines) = @_;
+  my ($lines_header_end, $lines, $all_headers_p) = @_;
 
   $ignore_this_message_p = $t;
 
   if (! ($unread_only_p
-         && $current_headers{'STATUS'} =~ /[Rr]/o)
-      && message_header_pattern_matched_p () )
+         && $current_headers{STATUS} =~ /[Rr]/o)
+      && message_header_pattern_matched_p ())
     {
       $counted_messages++;
       $ignore_this_message_p = $nil;
       if (! $count_only_p)
         {
-          if ($extract_body_p)
-            {
-              printf ("From ----------Message-%.3d---------- %s\n",
-                      $total_message_lines, $ctime_now);
-            }
+          printf ("From ----------Message-%.3d---------- %s\n",
+                  $total_message_lines, $ctime_now)
+            if ($extract_body_p);
 
-          if (defined ($lines_header_end))
+          if (defined $lines_header_end && $all_headers_p)
             {
               my $l = 0;
-              print "${$lines}[$l++]\n"
+              print $lines->[$l++] . "\n"
                 while ($l < $lines_header_end);
             }
           else
@@ -909,7 +856,7 @@ sub add_header
   my $header;
   my $data;
 
-  return if (! ($line =~ /^[^ :]*: /o));
+  return unless ($line =~ /^[^ :]*: /o);
 
   $header = uc ($&);
   # Get rid of trailing `: ';
@@ -950,7 +897,7 @@ sub hack_From_data
   # From: "" <foobar@host>
   elsif ($data =~ /\"\"[^<]*<[^>]+>/o)
     {
-      $data =~ /"<[^>]+>"/;
+      $data =~ /"<[^>]+>"/o;
       $data = $&;
       substr ($data, 0, 1) = '';
       substr ($data, -1) = '';
@@ -965,7 +912,7 @@ sub hack_From_data
   elsif ($data =~ /^<.*/o)
     {
       $data = $&;
-      $data =~ s/[<>]//g;
+      $data =~ s/[<>]//go;
     }
   # From: foobar@host
   else
@@ -974,8 +921,8 @@ sub hack_From_data
     }
 
   # Strip any leading and trailing whitespace
-  $data =~ s/^[ \t]+//;
-  $data =~ s/[ \t]+$//;
+  $data =~ s/^[ \t]+//o;
+  $data =~ s/[ \t]+$//o;
 
   parse_rfc1522 ($data);
 }
@@ -984,70 +931,63 @@ sub hack_From_data
 #                      or =?ISO-8859-1?Q?Fran=E7ois_Pinard?=
 #                      or =?ISO-8859-1?B?4672616EE76F69732050696E617264?=
 # See RFC1522 for more details.
-sub parse_rfc1522
+sub parse_rfc1522 ($)
 {
-  my ($data) = @_;
+  my $data = shift;
 
-  if ($data =~ /=\?iso-8859-1\?[^?]*\?[^?]*\?=/io)
+  return $data unless ($data =~ /=\?iso-8859-1\?[^?]*\?[^?]*\?=/io);
+
+  my $str = $data;
+  $str =~ s/^=\?iso-8859-1\?//io;
+
+  my $encoding = lc ($str);
+  $encoding =~ s/\?.*//o;
+
+  if ($encoding eq 'q' || $encoding eq 'quoted-printable')
     {
-      my $str = $data;
-      $str =~ s/^=\?iso-8859-1\?//io;
+      # Encoding type is Quoted-Printable
+      my $newstr = "";
+      my $i = $[;
 
-      my $encoding = lc ($str);
-      $encoding =~ s/\?.*//io;
+      # Strip away encoding and trailing `?=', leaving the quoted name.
+      $str =~ s/^[^?]*\?//o;
+      $str =~ s/\?=//o;
+      $str =~ y/_/ /;
 
-      if ($encoding eq 'q' || $encoding eq 'quoted-printable')
+      # Convert "=XX" (where XX is the hexidecimal representation of an
+      # ascii character) to ascii.
+      while ($i >= $[)
         {
-          # Encoding type is Quoted-Printable
-          my $newstr = "";
-          my $i = $[;
+          $i = index ($str, "=");
+          next if ($i < $[);
 
-          # Strip away encoding and trailing `?=', leaving the quoted name.
-          $str =~ s/^[^?]*\?//;
-          $str =~ s/\?=//;
-
-          # Convert all occurences of `_' to ` '.
-          $str =~ s/_/ /og;
-
-          # Convert "=XX" (where XX is the hexidecimal representation of an
-          # ascii character) to ascii.
-          while ($i >= $[)
-            {
-              $i = index ($str, "=");
-              next if ($i < $[);
-
-              my $s = sprintf ("%c", hex (substr ($str, $i + 1, 2)));
-              $newstr = $newstr . substr ($str, 0, $i) . $s;
-              $str = substr ($str, $i + 3);
-            }
-          $data = $newstr . $str;
+          my $s = sprintf ("%c", hex (substr ($str, $i + 1, 2)));
+          $newstr .= join ('', substr ($str, 0, $i), $s);
+          $str = substr ($str, $i + 3);
         }
-      elsif ($encoding eq 'b' || $encoding eq 'base64')
-        {
-          # Encoding type is BASE64
-          my $newstr = "";
-          my $pos = 0;
-
-          # Strip away encoding and trailing `?=', leaving the base64 string
-          $str =~ s/^[^?]*\?//;
-          $str =~ s/\?=//;
-
-          my $len = length ($str);
-
-          # There should be an even number of chars in the base64 string.
-          # If not, immediately return since we cannot reliably parse it.
-          return $data if (($len % 2) != 0);
-          while ($pos < $len)
-            {
-              my $x = sprintf ("%c", hex (substr ($str, $pos, 2)));
-              $newstr .= $x;
-
-              $pos += 2;
-            }
-          $data = $newstr;
-        }
+      $data = $newstr . $str;
     }
+  elsif ($encoding eq 'b' || $encoding eq 'base64')
+    {
+      # Encoding type is BASE64
 
+      # Strip away encoding and trailing `?=', leaving the base64 string
+      $str =~ s/^[^?]*\?//o;
+      $str =~ s/\?=//o;
+
+      # There should be an even number of chars in the base64 string.
+      # If not, immediately return since we cannot reliably parse it.
+      my $len = length ($str);
+      return $data if (($len % 2) != 0);
+      my $newstr = "";
+      my $pos = 0;
+      while ($pos < $len)
+        {
+          $newstr .= sprintf ("%c", hex (substr ($str, $pos, 2)));
+          $pos += 2;
+        }
+      $data = $newstr;
+    }
   return $data;
 }
 
@@ -1055,7 +995,7 @@ sub parse_rfc1522
 sub hack_Date_data
 {
   my ($data) = @_;
-  $data =~ s/^[ \t]+//;
+  $data =~ s/^[ \t]+//o;
 
   # Hack ISO-8601 date format: YYYY-MM-DD HH:MM:SS-hh:mm
   # (where hh:mm is the timezone offset from UTC)
@@ -1086,15 +1026,9 @@ sub hack_Date_data
 
 sub print_headers
 {
-  my ($data) = @_;
-  my $format;
-  my $header;
+  my $data = shift || \%current_headers;
   my $str;
-  my $num;
   my $i = 0;
-
-  $data = \%current_headers
-    if (!defined $data);
 
   while (1)
     {
@@ -1124,18 +1058,17 @@ sub print_headers
           return;
         }
 
-      $header = $vector_header_name[$i];
-      $format = $format_vector[$i];
+      my $header = $vector_header_name[$i];
+      my $format = $format_vector[$i];
       $format = eval "\"$format\"" if ($format =~ /\\/o);
-      $str .= sprintf ($format, ${$data}{$header});
+      $str .= sprintf ($format, $data->{$header});
       $i++;
     }
 }
 
 sub message_header_pattern_matched_p
 {
-  return $t
-    if ($from_match_header eq '');
+  return $t if ($from_match_header eq '');
 
   return $t
     if (defined ($current_headers{$from_match_header})
@@ -1146,20 +1079,20 @@ sub message_header_pattern_matched_p
 
 sub err
 {
-  printf (STDERR join(": ", $from_progname, @_) . "\n");
+  printf (STDERR join (": ", $0, @_) . "\n");
+  return undef;
 }
 
 sub getenv
 {
-  return "$ENV{$_[0]}"
-    if (defined ($ENV{$_[0]}));
+  return $ENV{$_[0]}
+    if (defined ($ENV{$_[0]}) && $ENV{$_[0]} ne '');
   return undef;
 }
 
 sub truep
 {
-  return $t
-    if (getenv ($_[0]) eq 't');
+  return $t if (getenv ($_[0]) eq 't');
   return $nil;
 }
 
@@ -1185,71 +1118,62 @@ sub my_ctime
 }
 
 
-sub pop3_login
+sub pop3_login ($$$)
 {
-  my ($login, $pass) = @_;
+  my ($sock, $login, $pass) = @_;
 
   # greeting
-  if (pop3_response_ok_p
-      && pop3_send_command_ok_p ("USER $login")
-      && pop3_send_command_ok_p ("PASS $pass"))
-    {
-      return 1;
-    }
+  return 1 if (pop3_response_ok_p ($sock)
+               && pop3_send_command_ok_p ($sock, "USER $login")
+               && pop3_send_command_ok_p ($sock, "PASS $pass"));
 
-  pop3_close;
+  pop3_close ($sock);
   return 0;
 }
 
-sub pop3_message_count
+sub pop3_message_count ($)
 {
-  pop3_send_command ("STAT");
-  my @results = pop3_parse_response;
+  my $sock = $_[0];
+  pop3_send_command ($sock, "STAT");
+  my @results = pop3_parse_response ($sock);
   return $results[1];
 }
 
-sub pop3_retrieve_lines
+sub pop3_retrieve_lines ($$$)
 {
-  my ($msgnumber, $bodylines) = @_;
+  my ($sock, $msgnumber, $bodylines) = @_;
   my ($i, $headers_end) = 0;
   my @lines;
 
   $bodylines += 0;  # force into numeric context
   if ($bodylines < 0)
     {
-      pop3_send_command ("RETR $msgnumber");
+      pop3_send_command ($sock, "RETR $msgnumber");
     }
   else
     {
-      pop3_send_command ("TOP $msgnumber $bodylines");
+      pop3_send_command ($sock, "TOP $msgnumber $bodylines");
     }
-  if (! pop3_response_ok_p)
+  if (! pop3_response_ok_p ($sock))
     {
-      pop3_close;
+      pop3_close ($sock);
       return 0;
     }
 
-  while (<S>)
+  while (<$sock>)
     {
-      s/[\r\n]+$//;
+      s/[\r\n]+$//o;
 
       # The end of the transmission always ends with a single period on a
       # line by itself.
-      if ($_ eq '.')
-        {
-          return ($headers_end, \@lines);
-        }
+      return ($headers_end, \@lines) if ($_ eq '.');
       # Otherwise, any period at the beginning of a line is quoted with an
       # additional period.  Periods after the first aren't quoted, so at
       # the most we need strip only one.
-      s/^\.//;
+      s/^\.//o;
 
       # The first blank line signals the end of headers.
-      if ($_ eq '' && $headers_end == 0)
-        {
-          $headers_end = $i;
-        }
-
+      $headers_end = $i if ($_ eq '' && $headers_end == 0);
       $lines[$i] = $_;
       $i++;
     }
@@ -1257,238 +1181,150 @@ sub pop3_retrieve_lines
   return ($headers_end, \@lines);
 }
 
-sub pop3_send_command
+sub pop3_send_command ($$)
 {
-  printf (S "%s\r\n", $_[0]);
+  my $sock = shift;
+  printf ($sock "%s\r\n", $_[0]);
 }
 
-sub pop3_response_ok_p
+sub pop3_response_ok_p ($)
 {
-  my $response = pop3_read_response;
+  my $sock = shift;
+  my $response = pop3_read_response ($sock);
 
-  return (1) if ($response =~ /^\+OK/oi);
-  return (0);
+  return 1 if ($response =~ /^\+OK/oi);
+  return 0;
 }
 
-sub pop3_send_command_ok_p
+sub pop3_send_command_ok_p ($$)
 {
-  pop3_send_command (@_);
-  pop3_response_ok_p;
+  my $sock = shift;
+  pop3_send_command ($sock, $_[0]);
+  pop3_response_ok_p ($sock);
 }
 
-sub pop3_parse_response
+sub pop3_parse_response ($)
 {
-  my $response = pop3_read_response;
+  my $sock = shift;
+  my $response = pop3_read_response ($sock);
 
   # In the future this may be the wrong thing, but for now we have no
   # additional exception processing interest.
   if ($response !~ /^\+OK/oi)
     {
-      pop3_close;
+      pop3_close ($sock);
       return;
     }
   $response =~ s/[\r\n]+$//o;
   split (/[ \t]+/, $response);
 }
 
-sub pop3_read_response
+sub pop3_read_response ($)
 {
-  my $line;
+  my $sock = shift;
 
-  while ($line = <S>)
+  while (my $line = <$sock>)
     {
       # $line =~ s/[\r\n]+$//o;
       return $line;
     }
 }
 
-sub pop3_close
+sub pop3_close ($)
 {
+  my $sock = shift;
   # Should we send a quit in general, or just close the connection?
   # RFC1725 section 6 says doing the latter avoids entering the UPDATE
   # state, which should avoid changing any read/unread status headers.
-  #pop3_send_command ("QUIT");
-  shutdown (S, 2);  # 2 == SHUTDOWN_BOTH
+  # However, some pop3 servers do not make this distinction and update
+  # status headers anyway.
+  #pop3_send_command ($sock, 'QUIT');
+  shutdown ($sock, 2);  # 2 == SHUTDOWN_BOTH
 }
 
 
 # Args: host, port
-sub tcpconnect
+sub open_network_stream ($$)
 {
+  use Socket;
+
   my ($rhostname, $port) = @_;
-  my ($proto, $name, $aliases, $type, $len, $thisaddr);
-  my (@rhostaddr, $rhostaddrlen);
-  my ($in, $out);
+  my @rhostaddr;
 
-  my $hostname = `hostname`;
-  chop $hostname;
+  my (undef, undef, $proto) = getprotobyname ("tcp");
+  (undef, undef, $port) = getservbyname ($port, "tcp") if ($port !~ /^\d+$/o);
 
-  ($name, $aliases, $proto) = getprotobyname ("tcp");
-
-  if ($port !~ /^\d+$/o)
+  if ($rhostname =~ /^[0-9.]+$/o)
     {
-      ($name, $aliases, $port) = getservbyname ($port, "tcp");
-    }
-
-  ($name, $aliases, $type, $len, $thisaddr) = gethostbyname ($hostname);
-
-  if ($rhostname =~ /^[0-9.][0-9.]*$/o)
-    {
-      $canon_rhostname = my_gethostbyaddr ($rhostname, $type);
+      $canon_rhostname = my_gethostbyaddr ($rhostname, AF_INET);
       @rhostaddr = ip_canonical ($rhostname);
     }
   else
     {
-      ($name, $aliases, $type, $len, @rhostaddr) = gethostbyname ($rhostname);
-      if ($name eq "")
-        {
-          print STDERR "$progname: $rhostname: cannot resolve host name.\n";
-          return 0;
-        }
-      $canon_rhostname = $name;
+      ($canon_rhostname, undef, undef, undef, @rhostaddr)
+        = gethostbyname ($rhostname);
+      return err ($rhostname, "cannot resolve host name.")
+        unless (defined $canon_rhostname && $canon_rhostname ne "");
     }
 
-  # Do not use Socket::sockaddr_in even if available, since it does not
-  # work for sparc-sun-solaris2.4.  In particular, the pack structure it
-  # uses is "S n C4 x8", which is wrong.
-  $sockaddr = "S n a4 x8";
-  $thishost = pack ($sockaddr, AF_INET, 0, $thisaddr);
+  my $sock = gensym;
+  socket ($sock, AF_INET, SOCK_STREAM, $proto) || return err ("socket", "$!");
 
-  $rhostaddrlen = $#rhostaddr + 1;
-  $ok = 0;
-  while ($ok == 0 && $#rhostaddr > -1)
+  while ($#rhostaddr >= 0)
     {
-      $rhost = pack ($sockaddr, AF_INET, $port, $rhostaddr[0]);
-      close (S);
-
-      if (! socket (S, AF_INET, SOCK_STREAM, $proto))
-        {
-          print STDERR "$progname: socket: $!";
-          return 0;
-        }
-
-      if (! connect (S, $rhost))
-        {
-          shift (@rhostaddr);
-          if ($#rhostaddr >= 0)
-            {
-              next;
-            }
-          else
-            {
-              return 0;
-            }
-        }
-      else
-        {
-          $ok = 1;
-        }
+      my $rhost = sockaddr_in ($port, $rhostaddr[0]);
+      return $sock if (connect ($sock, $rhost));
+      shift @rhostaddr;
     }
-
-  disable_stdio_buffering (S);
-  return 1;
-}
-
-sub initialize_sockvars
-{
-  # Args to shutdown.
-  $SHUTDOWN_RECEIVE = 0;
-  $SHUTDOWN_SEND    = 1;
-  $SHUTDOWN_BOTH    = 2;
-
-  if ( int ($]) <= 4 )
-    {
-      # Push some include dirs which are pretty standard, just in case.
-      # Perl5 does not usually install .ph files.
-      push (@INC, "$ENV{HOME}/lib/perl",
-                  "/usr/local/gnu/lib/perl",
-                  "/usr/local/lib/perl",
-                  "/usr/lib/perl"
-           );
-
-      if (! require_soft ("sys/socket.ph"))
-        {
-          # Backdown if socket.ph cannot be found.
-          # These are probably correct, but not guaranteed to be.
-          # For example, on sparc-sun-solaris2.4, SOCK_STREAM is 2, not 1.
-          sub AF_INET     { return 2; }
-          sub SOCK_STREAM { return 1; }
-        }
-    }
-  else
-    {
-      eval "use Socket;";
-    }
+  return undef;
 }
 
 sub my_gethostbyaddr
 {
   my ($addrstring, $type) = @_;
-  my $addr = 0;
-  my $name = "";
 
-  $addr = ip_canonical ($addrstring);
+  my $addr = ip_canonical ($addrstring);
   $addrstring = sprintf ("%d.%d.%d.%d", unpack ("C4", $addr));
-  $name = gethostbyaddr($addr, $type);
+  my $name = gethostbyaddr ($addr, $type);
 
-  return $addrstring
-    if ($name eq "");
+  return $addrstring if ($name eq "");
   return $name;
 }
 
-sub ip_canonical
+sub ip_canonical ($)
 {
-  my ($addrstring) = @_;
-  my $addr = $addrstring;
+  my $addr = shift;
 
-  if ($addrstring =~ /^[0-9.][0-9.]*$/o)
-    {
-      if ($addrstring =~ /[.]/o)
-        {
-          # String is in 255.255.255.255 format
-          my @octet = split (/[.]/o, $rhostname);
-          $addr = pack ('C4', @octet);
-        }
-      else
-        {
-          # If string is not in octet form but instead is a flat ascii IP,
-          # then just convert it to network byte order.
-          # Convert addrstring to the dotted decimal representation for it.
-          #
-          # source IP addresses are specified in this flat format in the
-          # IRC DCC protocol; I don't know if it's common anywhere else.
-          $addrstring = pack ("I", "$addrstring");
-          $addr = htonl ($addrstring);
-        }
-    }
-  return $addr;
-}
+  return $addr unless ($addr =~ /^[0-9.]+$/o);
 
-sub this_host_big_endian_p
-{
-  my $x = 1;
-  my @y = unpack ("c2", pack ("i", $x));
+  # String is in 255.255.255.255 format
+  return pack ('C4', split (/[.]/o, $addr))
+    if (index ($addr, ".") >= 0);
 
-  if ($y[0] == 1)
-    {
-      # we're little-endian
-      return 0;
-    }
-  # we're big-endian
-  return 1;
+  # If string is not in octet form but instead is a flat ascii IP,
+  # then just convert it to network byte order.
+  # Convert addr to the dotted decimal representation for it.
+  #
+  # source IP addresses are specified in this flat format in the
+  # IRC DCC protocol; I don't know if it's common anywhere else.
+  htonl (pack ("I", "$addr"));
 }
 
 # Convert integers from host byte order to network byte order.
 # Network byte order is big-endian.
-sub htonl
+sub htonl ($)
 {
-  my ($h) = @_;
+  my $h = shift;
+  my $big_endian_p = 1;
 
-  if (this_host_big_endian_p ())
-    {
-      return $h;
-    }
+  # Test to see if we are little-endian
+  {
+    my $x = 1;
+    my @y = unpack ("c2", pack ("i", $x));
+    $big_endian_p = 0 if ($y[0] == 1);
+  }
 
+  return $h if ($big_endian_p);
   my @o = unpack ('C4', $h);
   $h = pack ('C4', $o[3], $o[2], $o[1], $o[0]);
   return $h;
@@ -1504,20 +1340,7 @@ sub disable_stdio_buffering
     }
 }
 
-sub require_soft
-{
-  my ($f) = @_;
-
-  for my $dir (@INC)
-    {
-      if (-f "$dir/$f")
-        {
-          require "$f";
-          return "$dir";
-        }
-    }
-  return 0;
-}
+main();
 
 # local variables:
 # mode: perl
