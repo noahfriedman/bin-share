@@ -1,0 +1,263 @@
+#!/bin/sh
+# el2elc --- byte-compile emacs lisp files
+
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Maintainer: friedman@prep.ai.mit.edu
+# Created: 1990-01-01
+# Last modified: 1994-03-15
+# Public domain
+
+# Commentary:
+# Code:
+
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options}
+
+Options are:
+-D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-h, --help                   You're looking at it.
+-i, --ignore-errors          Continue compiling files in spite of previous
+                             errors.  
+-l, --load       LFILE       Load elisp code in LFILE before
+                             byte-compiling.  Repeated instances of this
+                             option will load multiple files.
+-s, --source-directory       Deposit .elc files in same directory as .el
+                             files.  By default all .elc files go into the
+                             current directory.
+-v, --verbose                Be verbose about byte compilation.
+"
+
+# Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
+#
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument ARG
+# won't get used if first long option syntax was used.
+# If 3rd argument OPTIONAL is set, then 2nd may be empty without resulting
+# in an error (i.e. option argument is optional)
+#
+# Returns number of positions caller should shift.
+# If retval = 3, caller should exit.
+get_option_argument='
+  {
+    option="$1" arg="$2" arg_optional="$3" shift_num=2
+    case "$option" in
+      --*=* )
+        arg=`echo $option | sed -e "s/^[^=]*=//"`
+        shift_num=1
+       ;;
+    esac
+    case "$arg" in
+      "" )
+        case "$arg_optional" in
+          "" )
+            case "$option" in
+              --*=* ) option=`echo $option | sed -e "s/=.*//"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$usage" 1>&2
+            exit 3
+           ;;
+        esac
+        exit 1
+       ;;
+    esac
+    echo "$arg"
+    exit $shift_num
+  }'
+
+# Some bourne shells don't allow a numeric argument to `shift'.
+# Usage: eval "shift_num=n; $shift_n_times"
+shift_n_times='
+  {
+    while : ; do
+      case "$shift_num" in 0 | "" ) break ;; esac
+      shift_num=`expr $shift_num - 1`
+      shift
+    done
+  }'
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=nil
+error_fatal_p=t
+verbose=nil
+loadfiles=
+sourcedirp=nil
+TMPDIR=${TMPDIR-/tmp}
+
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
+while test $# != 0; do
+  case "$1" in
+    -D | --debug | --d* )
+      debug=t
+      shift
+     ;;
+    -h | --help | --h )
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -i | --ignore-errors | --i* )
+      error_fatal_p=nil
+      shift
+     ;;
+    # Provided as an example of how to process options with arguments
+    -l | --load* | --l* )
+      file=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+
+      loadfiles="$loadfiles \"$file\""
+     ;;
+    -s | --source-directory | --s* )
+      sourcedirp=t
+      shift
+     ;;
+    -v | --verbose | --v* )
+      verbose=t
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    --*=* )
+      arg=`echo $1 | sed -e 's/=.*//'`
+      echo "$progname: unknown option $bq$arg$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -* )
+      echo "$progname: unknown option $bq$1$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+case "$debug" in t ) set -x ;; esac
+
+# Put double quotes around all filename args
+{
+  _saved_args=
+  while : ; do
+    case $# in 0 ) break ;; esac
+    eval _saved_args$#=\\\"\$1\\\"
+    _saved_args="$_saved_args \"\$_saved_args$#\""
+    shift
+  done
+  eval 'eval set fnord $_saved_args'
+  shift
+}
+
+trap '{
+        exitstat=$?
+
+        rm -rf "$tmpdir"
+
+        trap "" 1 2 3 15
+        exit $exitstat
+      }' 1 2 3 15
+
+tmpdir=$TMPDIR/$progname$$
+mkdir "$tmpdir" | exit 1
+
+cat > "$tmpdir/$progname.el" << __EOF__
+
+(require 'backquote)
+
+(defvar el2elc-byte-compile-file-list '(${1+"$@"}))
+(defvar el2elc-error-fatal-p $error_fatal_p)
+(defvar el2elc-load-file-list '($loadfiles))
+(defvar el2elc-source-directory-p $sourcedirp)
+(defvar el2elc-tmp-directory (file-name-as-directory "$TMPDIR"))
+(defvar el2elc-verbose $verbose)
+
+(defmacro el2elc-ignore-errors (code)
+  (` (cond
+      (el2elc-error-fatal-p
+       (, code))
+      (t
+       (condition-case nil
+           (, code)
+         (error nil))))))
+
+(defun el2elc-byte-compile-file (file)
+  (let ((byte-compile-verbose el2elc-verbose))
+    (el2elc-ignore-errors
+      (byte-compile-file file))))
+
+(defun el2elc-load-init-files (&rest files)
+  (or files (setq files el2elc-load-file-list))
+  (mapcar
+   (function (lambda (file) 
+               (load file el2elc-verbose)))
+   files))
+
+(defun el2elc (&rest files)
+  (or files (setq files el2elc-byte-compile-file-list))
+  (let ((current-directory (expand-file-name default-directory)))
+    (cond 
+     (el2elc-source-directory-p
+      (mapcar 'el2elc-byte-compile-file files))
+     (t
+      (mapcar
+       (function 
+        (lambda (file)
+          (el2elc-ignore-errors
+            (setq file (expand-file-name file))
+            (let ((dirname (or (file-name-directory file)
+                               current-directory))
+                  (basename (file-name-nondirectory file))
+                  el-file
+                  elc-file)
+              (cond
+               ((string= dirname current-directory)
+                (el2elc-byte-compile-file file))
+               ((not (file-exists-p (concat current-directory basename)))
+                (setq el-file (concat current-directory basename))
+                (copy-file file el-file)
+                (el2elc-byte-compile-file el-file)
+                (delete-file el-file))
+               (t
+                (cond
+                 ((string= dirname el2elc-tmp-directory)
+                  (setq el-file file)
+                  (el2elc-byte-compile-file el-file))
+                 (t
+                  (setq el-file (concat el2elc-tmp-directory basename))
+                  (copy-file file el-file)
+                  (el2elc-byte-compile-file el-file)
+                  (delete-file el-file)))
+                (setq elc-file (concat el-file "c"))
+                (copy-file (concat el-file "c")
+                           (concat current-directory basename "c")
+                           'overwrite-if-already-exists)
+                (delete-file elc-file)))))))
+       files)))))
+
+(el2elc-load-init-files)
+(el2elc)
+
+__EOF__
+
+${EMACS-emacs} -nw -q -batch -l "$tmpfile/$progname.el" -kill
+
+exitstat=$?
+rm -rf "$tmpdir"
+exit $exitstat
+
+# el2elc ends here
