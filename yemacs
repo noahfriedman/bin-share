@@ -4,7 +4,7 @@
 # Created: 1994-10-25
 # Public domain.
 
-# $Id: yemacs,v 1.2 1995/01/05 23:35:03 friedman Exp friedman $
+# $Id: yemacs,v 1.3 1995/08/29 21:11:34 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -28,6 +28,8 @@ Options are:
                              This is a string of the form {cpu}-{vendor}-{os}.
 -h, --help                   You're looking at it.
 -l, --list-available         List all available configurations and toolkits.
+-P, --print-file-name        Print the complete file name of the emacs
+                             executable to stdout and exit.
 -p, --prefix        PREFIX   Build-tree prefix; this is the base where
                              all uninstalled build trees reside.
 -q, --quick                  Tell emacs not to load any init files.
@@ -50,6 +52,7 @@ Default toolkit is $bq$toolkit$eq
 debug=
 listp=
 quick=
+printp=
 
 # Usage: eval "$getopt"; value=$optarg
 # or     optarg_optional=t; eval "$getopt"; value=$optarg
@@ -127,7 +130,11 @@ while : ; do
       listp=t
       shift
      ;;
-    -p | --prefix* | --p* )
+    -P | --print-file-name | --pri* )
+      printp=t
+      shift
+     ;;
+    -p | --prefix* | --pre* )
       eval "$getopt"
       prefix=$optarg
      ;;
@@ -163,7 +170,15 @@ done
 case "$debug" in t ) set -x ;; esac
 
 case "$listp" in
-  '' ) exec $prefix/$config/$toolkit/src/emacs $quick ${1+"$@"} ;;
+  '' )
+    case "$printp" in
+      t )
+        echo $prefix/$config/$toolkit/src/emacs
+        exit 0
+       ;;
+      * ) exec $prefix/$config/$toolkit/src/emacs $quick ${1+"$@"} ;;
+    esac
+   ;;
   * )
     cd $prefix || exit 1
     echo "Available configurations/toolkits:"
