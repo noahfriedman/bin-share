@@ -1,0 +1,38 @@
+#!/bin/sh
+
+# $Id$
+
+wget=`run-next -p $0 || false`
+
+# So many web servers out there discriminate against wget's user-agent,
+# so fabricate a different one.
+user_agent='Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.7.5) Gecko/20041107 Mozilla/1.2'
+
+exec $wget \
+  --user-agent="$user_agent" \
+  \
+  --verbose \
+  --progress=bar:force \
+  --server-response \
+  --timestamping \
+  \
+  --wait=0 \
+  --tries=0 \
+  --waitretry=60 \
+  \
+  --dns-timeout=30 \
+  --connect-timeout=30 \
+  --read-timeout=300 \
+  \
+  --execute 'robots = off' \
+  --html-extension \
+  --cache=off \
+  \
+  --cookies=on \
+  --load-cookies=$HOME/etc/misc/.wget/cookies.txt \
+  \
+  --passive-ftp \
+  \
+  ${1+"$@"}
+
+# wget ends here
