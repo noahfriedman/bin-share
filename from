@@ -4,7 +4,7 @@
 # Created: 1992-01-19
 # Public domain
 
-# $Id: from,v 1.9 1995/10/17 21:38:44 friedman Exp friedman $
+# $Id: from,v 1.10 1995/10/19 22:47:06 friedman Rel friedman $
 
 # Commentary:
 # Code:
@@ -117,24 +117,26 @@ truncation) of the From and Date lines.
 # Initialize variables.
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
+FROMRC=${FROMRC-$HOME/.fromrc}
 FROM_PARSEP=t
+FROM_NUMBERED=
+FROM_USER=$USER
 debug=
 envelopep=
-folderno=
 
 # if stdout is not a tty, then disable truncation (user may explicitly
 # enables it later by use of the --columns option).
 if test -t 1; then
-  COLUMNS=${COLUMNS-80}
-  case "$TERM" in
-    emacs )
-      # Decrement number of columns by 1 since last column in emacs buffers
-      # causes wraparound.
-      COLUMNS=`expr $COLUMNS - 1`
-   ;;
-  esac
+  # Decrement number of columns by 1 since output in last column causes
+  # wraparound on many (most?) terminals.
+  COLUMNS=`expr ${COLUMNS-80} - 1`
 else
   COLUMNS=0
+fi
+
+# Precedence for defs (highest->lowest): options, env, ~/.fromrc, default
+if test -f "$FROMRC"; then
+  . "$FROMRC"
 fi
 
 # Usage: eval "$getopt"; value=$optarg
@@ -222,7 +224,7 @@ while : ; do
       exit 1
      ;;
     -n | --numbered | --n* )
-      folderno=t
+      FROM_NUMBERED=t
       shift
      ;;
     -p | --no-parse | --n* )
@@ -231,7 +233,7 @@ while : ; do
      ;;
     -u | --user* | --u* )
       eval "$getopt"
-      USER=$optarg
+      FROM_USER=$optarg
      ;;
     -- )     # Stop option processing
       shift
@@ -264,27 +266,28 @@ case "$debug" in -d ) set -x ;; esac
 
 case $# in
   0 )
-    USER=${USER-${LOGNAME-`{ id | sed -ne 's/.*uid=[0-9]*(//
-                                           s/).*//
-                                           p'
-                           } \
-                           || { (whoami) 2> /dev/null; }`}}
+    if test ".$FROM_USER" != ".$USER" || test "${MAIL-unset}" = "unset"; then
+      USER=${USER-${LOGNAME-`{ id | sed -ne 's/.*uid=[0-9]*(//
+                                             s/).*//
+                                             p'
+                             } \
+                             || { (whoami) 2> /dev/null; }`}}
 
-    spoolfile=
-    for f in /var/mail /var/spool/mail /usr/spool/mail /usr/mail ; do
-      if test -f "$f/$USER" ; then
-        spoolfile="$f/$USER"
-        break
-      fi
-    done
+      MAIL=
+      for f in /var/mail /var/spool/mail /usr/spool/mail /usr/mail ; do
+        if test -f "$f/$USER" ; then
+          MAIL="$f/$USER"
+          break
+        fi
+      done
 
-    case "$spoolfile" in
-      '' ) exit 1 ;;
-      * )
-        set fnord "$spoolfile"
-        shift
-       ;;
-    esac
+      case "$MAIL" in
+        '' ) exit 1 ;;
+      esac
+    fi
+
+    set fnord "$MAIL"
+    shift
    ;;
 esac
 
@@ -297,9 +300,9 @@ esac
 case "${FROM_FORMAT+set}" in
   set ) : ;;
   * )
-    FROM_FORMAT='%-19.18From %-13.12Date %Subject'
+    FROM_FORMAT='%-19.18From %-13.12Date %Subject\n'
 
-    case $folderno in
+    case "$FROM_NUMBERED" in
       t )
         FROM_FORMAT="%-3{FLINES} $FROM_FORMAT"
        ;;
@@ -335,7 +338,7 @@ sub main
   close (9);
 
   &initialize_variables ();
-  &make_important_header_vector (&getenv ("FROM_FORMAT"));
+  &make_format_vector (&getenv ("FROM_FORMAT"));
 
   $i = 0;
   foreach $file (@ARGV)
@@ -382,9 +385,6 @@ sub initialize_variables
   $t = 1;
   $nil = 0;
 
-  # This enables multi-line pattern matching on a string in perl.
-  $* = 1;
-
   # This is perhaps a little too specific, but some MTAs do not
   # quote 'From ' at the beginning of a line in the body, especially
   # when writing to archive files.
@@ -394,6 +394,11 @@ sub initialize_variables
   # ASCII characters (i.e. characters that have decimal values between 33
   # and 126, except colon)", i.e. any chars except ctl chars, space, or colon.
   $re_header_name = '[][!"#$%&\'()*+,-./0-9;<=>?@A-Z\\^_`a-z{|}~]+';
+
+  # However, these are the characters allowed in FROM_FORMAT specifier
+  # header names; some restrictions exist for the sake of formatting.
+  $re_fmt_header_name = '[!"#$&\'*+,-./0-9;<=>?@A-Z\\^_`a-z{|}~]+';
+  #$re_fmt_header_name = '[][!"#$%&\'()*+,-./0-9;<=>?@A-Z\\^_`a-z{|}~]+';
 
   $re_blank_line = '(^' . $re_whitespace . '$)|(^$)';
   $re_format_modifier = '%[0-9.-]*';
@@ -414,9 +419,6 @@ sub initialize_variables
       $hack_data = $nil;
     }
 
-  undef (%important_header_vector);
-  undef (@important_header_order);
-
   $total_message_lines = 0;
   $in_message_body_p = $nil;
   $exit_status = 0;
@@ -424,24 +426,30 @@ sub initialize_variables
   $columns = &getenv ('COLUMNS');
 }
 
-sub make_important_header_vector
+sub make_format_vector
 {
   local ($format) = @_;
-  local ($fstring, $modifier, $tmp, $i, $tok);
+  local ($fstring, $tmp, $i, $modifier, $tok) = ($format, '', 0);
   local ($re_token) = "$re_format_modifier" . "[^%]*";
 
-  $fstring = $format;
-  $important_header_vector{'prefix'} = '';
-  $i = 0;
-  $tmp = '';
+  undef (%header_save_p);
+  undef (%vector_header_name);
+  undef (@format_vector);
 
-  while ($fstring =~ /(^[^%]+)|(^%%)/o)
+  # Here we temporarily disable multi-line scanning ($* = 0) and do not use
+  # /(re)|(re)/, but rather use two pattern matching comparisons.  This is
+  # because otherwise perl will use ^ to match the beginning of any line,
+  # not just the beginning of the string.  What a pain.
+  $* = 0;
+  while ($fstring =~ /^[^%]+/o || $fstring =~ /^%%/o)
     {
       $tmp = $tmp . $&;
       $fstring = $';
     }
-  $important_header_vector{'prefix'} = $tmp;
-  $important_header_order[0] = 'prefix';
+  $* = 1;
+
+  $vector_header_name[0] = 'prefix';
+  $format_vector[0] = $tmp;
 
   while ($fstring =~ /^$re_token/o)
     {
@@ -454,7 +462,7 @@ sub make_important_header_vector
         {
           $modifier = $&;
           $tmp = $';
-          if ($tmp =~ /$re_header_name/o)
+          if ($tmp =~ /$re_fmt_header_name/o)
             {
               $tmp = $&;
               $trailing_whitespace = $';
@@ -465,11 +473,13 @@ sub make_important_header_vector
             }
         }
 
-      while ($fstring =~ /(^[^%]+)|(^%%)/o)
+      $* = 0;
+      while ($fstring =~ /^[^%]+/o || $fstring =~ /^%%/o)
         {
           $trailing_whitespace = $trailing_whitespace . $&;
           $fstring = $';
         }
+      $* = 1;
 
       # Make header name all upper case to distinguish from extraneous data
       # like the `prefix' element.
@@ -484,8 +494,9 @@ sub make_important_header_vector
           $tok = 's';
         }
 
-      $important_header_vector{$tmp} = $modifier . $tok . $trailing_whitespace;
-      $important_header_order[$i] = $tmp;
+      $header_save_p{$tmp} = 1;
+      $vector_header_name[$i] = $tmp;
+      $format_vector[$i] = $modifier . $tok . $trailing_whitespace;
     }
 }
 
@@ -553,7 +564,7 @@ sub add_header
   # Get rid of trailing `: ';
   substr ($header, -2) = '';
 
-  if (defined ($important_header_vector{$header}))
+  if (defined ($header_save_p{$header}))
     {
       $data = $';
       if ($hack_data && defined ($hack_header_function{$header}))
@@ -631,13 +642,13 @@ sub hack_Date_data
 
 sub print_headers
 {
-  local (%header_vector) = @_;
-  local ($format, $header, $str);
+  local (%data) = @_;
+  local ($format, $header, $str, $num);
   local ($i) = 0;
 
   while (1)
     {
-      if (! (defined ($important_header_order[$i])))
+      if (! (defined ($format_vector[$i])))
         {
           # Truncate output string if appropriate.
           if ($columns > 0 && length ($str) > $columns)
@@ -661,18 +672,18 @@ sub print_headers
 
               $str = join ("\n", @lines);
             }
-          print "$str\n";
+          print "$str";
           return;
         }
-      $header = $important_header_order[$i];
 
-      $format = $important_header_vector{$header};
+      $header = $vector_header_name[$i];
+      $format = $format_vector[$i];
       if ($format =~ /\\/o)
         {
-          eval "\$format = \"$important_header_vector{$header}\"";
+          eval "\$format = \"$format\"";
         }
 
-      $str = $str . sprintf ($format, $header_vector{$header});
+      $str = $str . sprintf ($format, $data{$header});
       $i++;
     }
 }
