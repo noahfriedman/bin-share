@@ -1,18 +1,26 @@
-#!/usr/local/bin/perl
-# symlink-resolve, 07-Feb-93 Noah Friedman <friedman@prep.ai.mit.edu>
-#
+#! /bin/sh
+# symlink-resolve --- dereference symbolic links
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1993-02-07
+# Public domain
+
+# $Id$
+
+# Commentary:
+
 # Usage: symlink-resolve [path1] {path2} {...}
 #
 # Resolve pathnames until there are no more symbolic links.  Resulting
 # pathname be not be a file that actually exists (depending on whether
 # symlinks point to nonexistent files).
 #
-# If environment variable SYMLINK_RESOLVE is set to "canonicalize", then
-# pathnames are cleaned up of internal relative pathnames, i.e.
-# canonicalization to absolute pathname is done.
-#
+# If environment variable SYMLINK_RESOLVE is set to "nil", then
+# pathnames are not cleaned up of internal relative pathnames, i.e.
+# canonicalization to absolute pathname is not done.
 
-if ($ENV{'SYMLINK_RESOLVE'} eq 'canonicalize')
+exec perl - ${1+"$@"} <<'__EOF__'
+
+if ($ENV{'SYMLINK_RESOLVE'} ne 'nil')
   {
    chop ($pwd = `pwd`);
   }
@@ -34,7 +42,7 @@ for ($i = 0; $i < @ARGV; $i++)
          # adjustable, of course.  Most unix kernels allow a depth of 8.
          if ($link_count++ == 16)
            {
-            print STDERR "symlink-resolve: $ARGV[$i]: " . 
+            print STDERR "symlink-resolve: $ARGV[$i]: " .
                          "Too many levels of symbolic links\n";
             next next_path;
            }
@@ -49,7 +57,7 @@ for ($i = 0; $i < @ARGV; $i++)
          # path components.  Set $j to -1 so that next iteration of loop
          # will check array @p from start.
          splice (@p, 0, $j + 1, split (/\//, $k));
-         $j = -1; 
+         $j = -1;
         }
       else
         {
@@ -61,27 +69,29 @@ for ($i = 0; $i < @ARGV; $i++)
      }
    $_ = join ("/", @p);
 
-   # If pathname should not be canonicalized, exit here. 
+   # If pathname should not be canonicalized, exit here.
    if ($ENV{'SYMLINK_RESOLVE'} ne 'canonicalize')
      {
       print "$_\n";
       exit (0);
      }
 
-   # Canonicalize pathname. 
+   # Canonicalize pathname.
    s/^\.$/$pwd/o;                     # Replace single "." with pwd.
    s/^([^\/])/$pwd\/\1/o;             # Prepend pwd if relative.
    s/\/\.\//\//og;                    # Remove any occurence of "/./".
    s/^.*\/\//\//og;                   # Get rid of "//" occurences.
    # Must do this in a loop to handle overlapping `/' character in
    # instances of "/../../"
-   while (/\/[^\/][^\/]*\/\.\.\//o)  
+   while (/\/[^\/][^\/]*\/\.\.\//o)
      {
       s/\/[^\/][^\/]*\/\.\.\//\//og;  # Resolve most references to ".."
      }
    s/\/[^\/][^\/]*\/\.\.$//o;         # Resolving trailing ".."
    s/^\/..\//\//go;                   # Eliminate leading "/.."
-   print "$_\n";   
+   print "$_\n";
   }
 
-# eof
+__EOF__
+
+# symlink_resolve ends here
