@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.27 1998/08/21 00:32:54 friedman Exp $
+# $Id: from,v 1.28 1999/05/22 16:35:42 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -1346,7 +1346,7 @@ sub pop3_close
   # Should we send a quit in general, or just close the connection?
   # RFC1725 section 6 says doing the latter avoids entering the UPDATE
   # state, which should avoid changing any read/unread status headers.
-  &pop3_send_command ("QUIT");
+  #&pop3_send_command ("QUIT");
   shutdown (S, 2);  # 2 == SHUTDOWN_BOTH
 }
 

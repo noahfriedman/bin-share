@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1996-10-11
 
-# $Id: bash-login,v 1.9 1999/05/22 16:41:08 friedman Exp $
+# $Id: bash-login,v 1.10 1999/05/27 04:43:23 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -33,6 +33,14 @@
 #     case "${BASH_LOGIN_FAILED_P+set}:$LOGGED:$0" in
 #       set:*:* | *:t:* ) : ;;
 #       *:*:-sh | *:*:-*/sh )
+#         case "${SINIT_MACHTYPE-unset}" in
+#           unset )
+#             hosttype=$HOME/etc/init/bin/hosttype
+#             if test -f $hosttype; then
+#               SINIT_MACHTYPE=`$hosttype`
+#               export SINIT_MACHTYPE
+#             fi ;;
+#         esac
 #         p=$HOME/bin/share/bash-login
 #         if test -f "$p"; then
 #           exec=exec
@@ -191,7 +199,8 @@ case "$debug" in t ) set -x ;; esac
 
 # Directories where bash may exist.
 # These should be specified in reverse order of preference.
-pathdirs='
+pathdirs="
+  /usr/sww/bin
   /usr/local/bin
   /usr/local/gnubin
   /usr/local/gnu/bin
@@ -202,7 +211,8 @@ pathdirs='
   /opt/lude/bin
   /usr/bin
   /bin
-'
+  $HOME/etc/arch/${SINIT_MACHTYPE-unknown}/bin
+"
 
 for d in $pathdirs; do
   case "$PATH" in
