@@ -3,7 +3,7 @@
 
 # Copyright (C) 1996 Noah S. Friedman <friedman@prep.ai.mit.edu>
 
-# $Id$
+# $Id: pstoepson,v 2.1 1996/04/23 15:36:42 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -27,7 +27,7 @@
 # Code:
 
 # This string is expanded by RCS automatically when this file is checked out.
-rcs_revision='$Revision: 0.0 $'
+rcs_revision='$Revision: 2.1 $'
 revision=`set fnord $rcs_revision; echo $3`
 
 # Name by which this script was invoked.
@@ -293,8 +293,8 @@ for file in ${1+"$@"}; do
   esac
 
   case "$file" in
-    - ) { cat; echo quit } | $GS $gsflags -q -sOutputFile=- - ;;
-    * ) { echo quit }      | $GS $gsflags -sOutputFile="$outfile" "$file" - ;;
+    - ) { cat; echo quit; } | $GS $gsflags -q -sOutputFile=- - ;;
+    * ) { echo quit; }      | $GS $gsflags -sOutputFile="$outfile" "$file" - ;;
   esac
 done
 
