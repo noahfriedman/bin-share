@@ -1,0 +1,252 @@
+#! /bin/sh
+# fmtcols --- indent columns so they line up
+
+# Copyright (C) 1997 Noah S. Friedman
+
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1997-08-02
+
+# $Id$
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, you can either send email to this
+# program's maintainer or write to: The Free Software Foundation,
+# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
+
+# Commentary:
+# Code:
+
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options} [files {...}]
+
+Options are:
+-D, --debug                  Enable debugging.
+-h, --help                   You're looking at it.
+-s, --separator      SEP     Field separator between columns.
+                             This can be any regular expression.
+                             The default field separator is any number of
+                             tabs and spaces, i.e. $bq$bq[ \t]+$eq$eq.
+-m, --max-field-width MAX    Truncate fields on output that are larger than
+                             this limit.  By default, there is no limit.
+"
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+
+FMTCOLS_MAX=
+FMTCOLS_SEP='[ \t]+'
+export FMTCOLS_SEP
+
+
+# Usage: eval "$getopt"; value=$optarg
+# or     optarg_optional=t; eval "$getopt"; value=$optarg
+#
+# This function automatically shifts the positional args as appropriate.
+# The argument to an option is optional if the variable `optarg_optional'
+# is non-empty.  Otherwise, the argument is required and getopt will cause
+# the program to exit on an error.  optarg_optional is reset to be empty
+# after every call to getopt.  The argument (if any) is stored in the
+# variable `optarg'.
+#
+# Long option syntax is `--foo=bar' or `--foo bar'.
+# For optional args, you must use the `--foo=bar' long option syntax
+# if the argument starts with `-', otherwise the argument will be ignored
+# and treated as the next option.
+#
+# Note: because of broken bourne shells, using --foo=bar syntax can
+# actually screw the quoting of args that end with trailing newlines.
+# Specifically, most shells strip trailing newlines from substituted
+# output, regardless of quoting.
+getopt='
+  {
+    optarg=
+    case "$1" in
+      --*=* ) optarg=`echo "$1" | sed -e "1s/^[^=]*=//"` ; shift ;;
+      -* )
+        case "${2+set}:$optarg_optional" in
+          set: ) optarg="$2" ; shift ; shift ;;
+          set:?* )
+            case "$2" in
+              -* ) shift ;;
+              * )  optarg="$2"; shift; shift ;;
+            esac
+           ;;
+          : )
+            option="$1"
+            case "$option" in
+              --*=* ) option=`echo "$option" | sed -e "1s/=.*//;q"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$progname: use $bq--help$eq to list option syntax." 1>&2
+            exit 1
+           ;;
+          * ) shift ;;
+        esac
+       ;;
+    esac
+    optarg_optional=
+  }'
+
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
+    -D | --debug | --d* )
+      debug=-d
+      shift
+     ;;
+    -h | --help | --h* )
+      echo "$usage" 1>&2
+      exit 0
+     ;;
+    -m | --max-field-width* | --m* )
+      eval "$getopt"
+      FMTCOLS_MAX="$optarg"
+      export FMTCOLS_MAX
+     ;;
+    -s | --separator* | --s* )
+      eval "$getopt"
+      FMTCOLS_SEP="$optarg"
+      export FMTCOLS_SEP
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -? | --* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    -??* )
+      # Split grouped single options into separate args and try again
+      optarg="$1"
+      shift
+      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+      shift
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+#case "$debug" in -d ) set -x ;; esac
+
+
+exec ${PERL-perl} $debug - ${1+"$@"} 9<&0 <<'__EOF__'
+
+&main;
+
+sub main
+{
+  open (STDIN, "<&9");
+  #close (9);  # No way to close file descriptors.  You suck, larry.
+  &read_input (&getenv ('FMTCOLS_SEP'));
+  &print_output (&getenv ('FMTCOLS_SEP'), &getenv ('FMTCOLS_MAX'));
+}
+
+sub read_input
+{
+  local ($fieldsep) = @_;
+  local (@fields, $i);
+  local ($fmtstr) = "";
+
+  while (<>)
+    {
+      chop;
+      @fields = split (/$fieldsep/, $_, -1);
+      push (@line, $_);
+      for ($i = 0; $i <= $#fields; $i++)
+        {
+          local ($len) = length ($fields[$i]);
+          $maxwidth[$i] = &max ($len, $maxwidth[$i]);
+        }
+    }
+}
+
+sub print_output
+{
+  local ($fieldsep, $width_limit) = @_;
+  local ($i, $w) = (0, 0);
+  local ($fmtstr);
+
+  while (defined ($maxwidth[$i]))
+    {
+      $w = 1 + $maxwidth[$i];
+      $w = 1 + &min ($maxwidth[$i], $width_limit) if defined ($width_limit);
+      $fmtstr .= "%-" . $w;
+      $fmtstr .= "." . ($w-1) if (defined ($width_limit));
+      $fmtstr .= "s";
+      $i++;
+    }
+
+  $i = 0;
+  while (defined ($line[$i]))
+    {
+      local ($s) = sprintf ("$fmtstr", split (/$fieldsep/, $line[$i], -1));
+      $s =~ s/[ \t]+$//o;
+      print ("$s\n");
+      $i++;
+    }
+}
+
+sub getenv
+{
+  local ($v) = @_;
+  return $ENV{$v} if (defined ($ENV{$v}));
+  return undef;
+}
+
+sub min
+{
+  local ($min) = $_[0];
+  while ($#_)
+    {
+      local ($i) = pop @_;
+      $min = $i if ($i < $min);
+    }
+  return $min;
+}
+
+sub max
+{
+  local ($max) = $_[0];
+  while ($#_)
+    {
+      local ($i) = pop @_;
+      $max = $i if ($i > $max);
+    }
+  return $max;
+}
+
+__EOF__
+
+# fmtcols ends here
