@@ -1,0 +1,37 @@
+#!/bin/sh
+# $Id$
+
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+umask 077
+
+prog=/tmp/$progname$$
+stateinfo=${prog}.data
+
+echo 0 > $stateinfo
+
+cat > $prog <<__EOF__
+#!/bin/sh
+
+oldsize=\`cat $stateinfo\`
+newsize=\`from -C\`
+
+echo \$newsize > $stateinfo
+
+# exit status:
+#   0 = there is new mail
+#   1 = no change in size
+#   2 = mail has been cleared
+case \$newsize in
+  '' )        exit 1 ;;
+  0  )        exit 2 ;;
+  \$oldsize ) exit 1 ;;
+  *  )        exit 0 ;;
+esac
+__EOF__
+
+chmod +x $prog
+exec xbiff -xrm "xbiff*checkCommand: $prog" ${1+"$@"}
+
+# eof
