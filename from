@@ -1,12 +1,12 @@
 #! /bin/sh
 # from --- show you who your mail is from
 
-# Copyright (C) 1992, 1995, 1996, 1997 Noah S. Friedman
+# Copyright (C) 1992, 1995, 1996, 1997, 1998 Noah S. Friedman
 
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.23 1998/01/21 21:04:32 friedman Exp $
+# $Id: from,v 1.24 1998/02/06 04:45:09 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -25,7 +25,8 @@
 
 # Commentary:
 
-# The pop3 portions of this script strive to be compliant with RFC1725.
+# The pop3 portions of this program strive to be compliant with RFC1939.
+# Perl 5 is required.
 
 # Code:
 
@@ -51,6 +52,7 @@ usage="Usage: $progname {options} {folder {...}}
 Options are:
 -1, --first-header-line      Do not display header continuation lines; show
                              only the first line of each displayed header.
+-a, --all-headers            Show all headers.  Ignore $bq--format$eq.
 -C, --count-only             Only count the number of messages that would
                              be displayed, without displaying any other
                              information about them.  E.g. $bq-Cu$eq would
@@ -66,6 +68,7 @@ Options are:
 -e, --envelope               Show message envelope instead of headers.
                              This causes any formatting options (e.g.
                              $bq--columns$eq, $bq--numbered$eq) to be ignored.
+                             This option only makes sense for local folders.
 -f, --format        FMT      Use FMT as the output format.  The option
                              $bq--help-format$eq gives instructions for this.
 -h, --help                   You're looking at it.
@@ -81,7 +84,7 @@ Options are:
                              current folder.  See also $bq--help-format$eq.
 -s, --sender        ADDR     Show only messages sent from ADDR.
                              This is equivalent to specifying the options
-                             $bq--match=From --match-headers=ADDR$eq.
+                             $bq--match-headers=From --match=ADDR$eq.
 -P, --no-parse               Do not do fancy parsing of From and Date fields.
 -U, --user          USER     Show headers of USER's spooled messages.
 -u, --unread-only            Only show information about unread messages
@@ -128,8 +131,8 @@ surrounded by curly braces, are:
 
 For example, given a message with headers of the form
 
-      From: Noah Friedman <friedman@prep.ai.mit.edu>
-      To: nobody@gnu.ai.mit.edu
+      From: Noah Friedman <friedman@splode.com>
+      To: nobody@prep.ai.mit.edu
       Subject: example
       Date: Tue, 18 Oct 94 12:22:50 CDT
 
@@ -143,10 +146,10 @@ here are some valid format specifiers and the output that results from them.
       -| Noah Friedman       Oct 18 12:22  example
 
       ${dq}To %-19To %-13Date %20Subject$dq
-      -| To nobody@gnu.ai.mit.edu Oct 18 12:22                   example
+      -| To nobody@prep.ai.mit.edu Oct 18 12:22                   example
 
       ${dq}To %-19.18To %-13.12Date %-.45Subject$dq
-      -| To nobody@gnu.ai.mit.  Oct 18 12:22  example
+      -| To nobody@prep.ai.mit.  Oct 18 12:22  example
 
       ${dq}   From: %From${bs}nSubject: %Subject${bs}n   Date: %Date${bs}n$dq
       -|    From: Noah Friedman
@@ -163,6 +166,7 @@ truncation) of the From and Date lines.
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
 FROMRC=${FROMRC-$HOME/.fromrc}
+FROM_ALL_HEADERS_P=
 FROM_COUNTP=
 FROM_EXTRACTP=
 FROM_LINELIMIT=
@@ -252,7 +256,10 @@ while : ; do
       FROM_FIRSTLINEP=t
       shift
      ;;
-
+    -a | --all-headers | --a* )
+      FROM_ALL_HEADERS_P=t
+      shift
+     ;;
     -C | --count-only | --cou* )
       FROM_COUNTP=t
       shift
@@ -425,8 +432,8 @@ esac
 FROM_PROGNAME=$progname
 
 export FROM_PROGNAME COLUMNS
-export FROM_COUNTP FROM_EXTRACTP FROM_FIRSTLINEP FROM_PARSEP
-export FROM_UNREAD_ONLY_P FROM_LINELIMIT FROM_MATCH_HEADER
+export FROM_ALL_HEADERS_P FROM_COUNTP FROM_EXTRACTP FROM_FIRSTLINEP
+export FROM_PARSEP FROM_UNREAD_ONLY_P FROM_LINELIMIT FROM_MATCH_HEADER
 export FROM_MATCH_REGEXP FROM_FORMAT FROM_USER
 
 # By using a here-document to include the source of the perl script (to
@@ -464,7 +471,7 @@ sub main
 
   if ($from_match_header ne '')
     {
-      $from_match_header = "\U$from_match_header";
+      $from_match_header = "{MATCH_\U$from_match_header}";
       $header_save_p{$from_match_header} = 1;
     }
 
@@ -528,6 +535,8 @@ sub initialize_variables
   $t = 1;
   $nil = 0;
 
+  $ctime_now = &my_ctime ();
+
   @month_conv = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec');
 
@@ -558,6 +567,7 @@ sub initialize_variables
   $format_token{'{TLINES}'} = 'd';
   $format_token{'{FLINES}'} = 'd';
 
+  $all_headers_p            = &truep ('FROM_ALL_HEADERS_P');
   $hack_data_p              = &truep ('FROM_PARSEP');
   $extract_body_p           = &truep ('FROM_EXTRACTP');
   $unread_only_p            = &truep ('FROM_UNREAD_ONLY_P');
@@ -572,10 +582,17 @@ sub initialize_variables
   $from_match_header = &getenv ('FROM_MATCH_HEADER');
   $from_match_regexp = &getenv ('FROM_MATCH_REGEXP');
 
-  $body_line_limit = -1;
   if (&getenv ('FROM_LINELIMIT') ne '')
     {
       $body_line_limit = &getenv ('FROM_LINELIMIT') + 0;
+    }
+  elsif ($extract_body_p)
+    {
+      $body_line_limit = -1;
+    }
+  else
+    {
+      $body_line_limit = 0;
     }
 }
 
@@ -657,6 +674,8 @@ sub process_file
 {
   local ($file) = @_;
   local ($header_contents) = "";
+  local (@all_headers);
+  local ($all_headers_count) = 0;
 
   if (! open (F, "<$file"))
     {
@@ -675,6 +694,9 @@ sub process_file
       # getting info about the next message.
       if ($_ =~ /$re_message_delimiter/o)
         {
+          undef (@all_headers);
+          $all_headers_count = 0;
+
           undef (%current_headers);
           $header_contents = '';
           $in_message_body_p = $nil;
@@ -685,6 +707,8 @@ sub process_file
       # coming upon a new header name), finish processing this header.
       if ($_ =~ /^$re_header_name/o && $header_contents ne '')
         {
+          $all_headers[$all_headers_count++] = $header_contents
+            if ($all_headers_p);
           &add_header ($header_contents);
           $header_contents = $_;
           next;
@@ -695,6 +719,8 @@ sub process_file
       if ( $_ =~ /$re_blank_line/o && ! $in_message_body_p )
         {
           # Add last buffered header.
+          $all_headers[$all_headers_count++] = $header_contents
+            if ($all_headers_p);
           &add_header ($header_contents);
           $header_contents = '';
 
@@ -707,7 +733,14 @@ sub process_file
           $in_message_body_p = $t;
           $body_line_count = 0;
 
-          &maybe_print_headers;
+          if ($all_headers_p)
+            {
+              &maybe_print_headers ($all_headers_count, \@all_headers);
+            }
+          else
+            {
+              &maybe_print_headers ();
+            }
         }
 
       if ( $in_message_body_p )
@@ -724,8 +757,14 @@ sub process_file
         }
 
       # Otherwise, append current header info.
-      $header_contents .= "\n$_"
-        if ($header_contents eq '' || ! $first_header_line_only_p);
+      if ($header_contents eq '')
+        {
+          $header_contents = $_;
+        }
+      elsif (! $first_header_line_only_p)
+        {
+          $header_contents .= "\n$_";
+        }
     }
   if ($count_only_p)
     {
@@ -759,43 +798,44 @@ sub process_pop3_folder
 
   while ($msgnumber <= $total_message_count)
     {
+      local ($lines);
       local ($lineno) = 0;
-      local ($header_line_count, @lines)
-        = &pop3_retrieve_lines ($msgnumber, $body_line_limit);
-      local ($header_contents) = '';
 
-      undef (%current_headers);
-
-      while ($lineno < $header_line_count)
+      if ($extract_body_p
+          && $from_match_header ne ''
+          && $body_line_limit != 0)
         {
-          if ($lines[$lineno] =~ /^$re_header_name/o
-              && $header_contents ne '')
+          # If we're searching for a particular message for extraction, get
+          # just the headers first to see if this is a matching message.
+          # Then and only then should we try retrieving the body below.
+          &process_pop3_folder_get ($msgnumber, 0);
+          if (! &message_header_pattern_matched_p ())
             {
-              &add_header ($header_contents);
-              $header_contents = $lines[$lineno];
+              $msgnumber++;
+              next;
             }
-          else
-            {
-              $header_contents .= "\n$lines[$lineno]"
-                if ($header_contents eq '' || ! $first_header_line_only_p);
-            }
-          $lineno++;
         }
 
-      # Add last buffered header.
-      &add_header ($header_contents);
-
+      ($lineno, $lines)
+        = &process_pop3_folder_get ($msgnumber, $body_line_limit);
       $total_message_lines++;
       $current_headers{'{FLINES}'} = $msgnumber;
       $current_headers{'{TLINES}'} = $total_message_lines;
 
-      &maybe_print_headers;
+      if ($all_headers_p)
+        {
+          &maybe_print_headers ($lineno, $lines);
+        }
+      else
+        {
+          &maybe_print_headers ();
+        }
 
       if (! $ignore_this_message_p && $extract_body_p)
         {
-          while (defined ($lines[$lineno]))
+          while (defined (${$lines}[$lineno]))
             {
-              print "$lines[$lineno]\n";
+              print "${$lines}[$lineno]\n";
               $lineno++;
             }
         }
@@ -805,9 +845,43 @@ sub process_pop3_folder
   &pop3_close;
 }
 
+sub process_pop3_folder_get
+{
+  local ($msgnumber, $body_line_limit) = @_;
+  local ($lineno) = 0;
+  local ($header_line_count, $lines)
+    = &pop3_retrieve_lines ($msgnumber, $body_line_limit);
+  local ($header_contents) = '';
+
+  undef (%current_headers);
+
+  while ($lineno < $header_line_count)
+    {
+      if (${$lines}[$lineno] =~ /^$re_header_name/o
+          && $header_contents ne '')
+        {
+          &add_header ($header_contents);
+          $header_contents = ${$lines}[$lineno];
+        }
+      else
+        {
+          $header_contents .= "\n${$lines}[$lineno]"
+            if ($header_contents eq '' || ! $first_header_line_only_p);
+        }
+      $lineno++;
+    }
+
+  # Add last buffered header.
+  &add_header ($header_contents);
+  return ($lineno, $lines);
+}
+
 # This uses way, way too many free variables
 sub maybe_print_headers
 {
+  # $lines should be a reference to an array of lines.
+  local ($lines_header_end, $lines) = @_;
+
   $ignore_this_message_p = $t;
 
   if (! ($unread_only_p && $current_headers{'STATUS'} =~ /R/oi)
@@ -819,10 +893,20 @@ sub maybe_print_headers
         {
           if ($extract_body_p)
             {
-              printf ("\n---------- Message %d ----------\n",
-                      $total_message_lines);
+              printf ("From ----------Message-%.3d---------- %s\n",
+                      $total_message_lines, $ctime_now);
             }
-          &print_headers (%current_headers);
+
+          if (defined ($lines_header_end))
+            {
+              local ($l) = 0;
+              print "${$lines}[$l++]\n"
+                while ($l < $lines_header_end);
+            }
+          else
+            {
+              &print_headers ();
+            }
         }
     }
 }
@@ -844,6 +928,11 @@ sub add_header
   if (defined ($header_save_p{$header}))
     {
       $data = $';
+
+      # Store the unparsed header data in the match_header, if defined.
+      $current_headers{$from_match_header} = $data
+        if ("{MATCH_$header}" eq $from_match_header);
+
       if ($hack_data_p && defined ($hack_header_function{$header}))
         {
           local ($fn) = $hack_header_function{$header};
@@ -995,6 +1084,8 @@ sub hack_Date_data
   local ($data) = @_;
   local (@fields, $time, $maxfield, $n);
 
+  $data =~ s/^[ \t]+//;
+
   # Hack ISO-8601 date format: YYYY-MM-DD HH:MM:SS-hh:mm
   # (where hh:mm is the timezone offset from UTC)
   # This parsing doesn't attempt to convert the originating time zone to
@@ -1007,30 +1098,29 @@ sub hack_Date_data
                       $fields[3], $fields[4]);
     }
 
-  @fields = split(/$re_whitespace/o, $data);
-  $maxfield = $#fields;
-
-  # Some dates don't have the name of the day of the week at the
-  # beginning or the timezone at the end.
-  $n = 0;
-  if ($maxfield == 4 || $maxfield == 3)
+  # Handle dates of the form:
+  #    Mon, 14 Feb 1972 17:29:00 -0500
+  #    14 Feb 1972 17:29:00 -0500 (EST)
+  if ($data =~ /[0-9]+ ... [0-9]+ [0-9]+:[0-9]+:[0-9]/o)
     {
-      $n = -1;
-    }
-  @time = split (/:/, $fields[$n + 4]);
+      @fields = split (/[:\t ]+/o, $data);
+      shift @fields if ($data =~ /...,/o);
 
-  return sprintf("%s %-2.2d %2.2d:%-2.2d",
-                 $fields[$n + 2],
-                 $fields[$n + 1],
-                 $time[0],
-                 $time[1]);
+      return sprintf ("%s %-2.2d %-2.2d:%-2.2d",
+                      $fields[1], $fields[0], $fields[3], $fields[4]);
+    }
+
+  return $data;
 }
 
 sub print_headers
 {
-  local (%data) = @_;
+  local ($data) = @_;
   local ($format, $header, $str, $num);
   local ($i) = 0;
+
+  $data = \%current_headers
+    if (! defined ($data));
 
   while (1)
     {
@@ -1069,7 +1159,7 @@ sub print_headers
           eval "\$format = \"$format\"";
         }
 
-      $str = $str . sprintf ($format, $data{$header});
+      $str = $str . sprintf ($format, ${$data}{$header});
       $i++;
     }
 }
@@ -1103,7 +1193,7 @@ sub getenv
     {
       return $ENV{$v};
     }
-  return '';
+  return undef;
 }
 
 sub truep
@@ -1113,6 +1203,31 @@ sub truep
       return $t;
     }
   return $nil;
+}
+
+sub my_ctime
+{
+  local (@weekday, @month, $time, $TZ);
+  local ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst);
+
+  @weekday = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat");
+  @month = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec");
+
+  $time = ($#_ > -1)? $_[0] : time() ;
+  #$TZ = defined($ENV{'TZ'}) ? ( $ENV{'TZ'} ? $ENV{'TZ'} : 'UTC' ) : '';
+  ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) =
+      ($TZ eq 'UTC') ? gmtime($time) : localtime($time);
+  if ($TZ =~ /^([^:\d+\-,]{3,})([+-]?\d{1,2}(:\d{1,2}){0,2})([^\d+\-,]{3,})?/o)
+    {
+      $TZ = $isdst ? $4 : $1;
+    }
+
+  if ($TZ ne "") { $TZ .= " "; }
+  $year += ($year < 70) ? 2000 : 1900;
+  return sprintf ("%s %s %02d %02d:%02d:%02d %s%4d",
+                  $weekday[$wday], $month[$mon], $mday, $hour, $min, $sec,
+                  $TZ, $year);
 }
 
 
@@ -1170,7 +1285,7 @@ sub pop3_retrieve_lines
       # line by itself.
       if ($_ eq '.')
         {
-          return ($headers_end, @lines);
+          return ($headers_end, \@lines);
         }
       # Otherwise, any period at the beginning of a line is quoted with an
       # additional period.  Periods after the first aren't quoted, so at
@@ -1187,7 +1302,7 @@ sub pop3_retrieve_lines
       $i++;
     }
 
-  return ($headers_end, @lines);
+  return ($headers_end, \@lines);
 }
 
 sub pop3_send_command
