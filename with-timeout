@@ -1,15 +1,19 @@
-#!/usr/bin/perl
+#! /bin/sh
 # with-timeout --- run process but kill if it hangs
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1996-05-26
 # Public domain.
 
-# $Id$
+# $Id: with-timeout,v 1.1 1996/05/26 18:48:58 friedman Exp $
+
+exec ${PERL-perl} - ${1+"$@"} 9<&0 <<'__EOF__'
 
 &main;
 
 sub main
 {
+  open (STDIN, "<&9") || die;
+
   if ($#ARGV < 1)
     {
       local (@p) = split (/\//, $0);
@@ -45,5 +49,7 @@ sub spawn
     }
   return $pid;
 }
+
+__EOF__
 
 # with-timeout ends here
