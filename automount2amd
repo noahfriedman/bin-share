@@ -4,74 +4,63 @@
 # Created: 1996-11-06
 # Public domain
 
-# $Id: automount2amd,v 2.1 1997/02/01 07:59:24 friedman Exp $
+# $Id: automount2amd,v 2.2 1997/03/19 06:32:33 friedman Exp $
 
 # Commentary:
 # Code:
 
-exec ${PERL-perl} - ${1+"$@"} 9<&0 <<'__EOF__'
-
-&main;
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl
 
 sub main
 {
-  open (STDIN, "<&9") || die "stdin lossage" ;
-  # I think this may not work; perl wants a file handle, not a descriptor
-  # number.  Lose lose, larry.
-  close (9);
-
-  $DOMAIN = $ENV{'NIS_DOMAIN'};
-  $bsize = 8192;
-
-  $DEFAULTS = "type:=nfs;cache:=inc;"
-              . "opts:=rw,intr,spongy,tcp,nodevs,grpid,nosuid,"
-              . "rsize=$bsize,wsize=$bsize,utimeout=600";
-
-  $AUTO = "type:=auto;fs:=\${map};pref:=\${key}/";
+  my $DOMAIN = $ENV{'NIS_DOMAIN'};
+  my $bsize = 8192;
+  my $DEFAULTS = join ("",
+                       "type:=nfs;cache:=inc;",
+                       "opts:=rw,intr,spongy,tcp,nodevs,grpid,nosuid,",
+                       "rsize=$bsize,wsize=$bsize,utimeout=600");
+  my $AUTO = "type:=auto;fs:=\${map};pref:=\${key}/";
 
   printf ("/defaults %s\n\n", $DEFAULTS);
 
   while (<>)
     {
-      chop $_;
-      s/^\///;
-      if (m,^(\w\S*)(\s+\-\w\S*\s+|\s+)(\w[^:]*):(\/\S*)\s*(.*),)
+      chop;
+      s|^/||o;
+      if (m,^(\w\S*)(\s+\-\w\S*\s+|\s+)(\w[^:]*):(\/\S*)\s*(.*),o)
         {
-          ($dir, $options, $machine, $path, $rest) = ($1, $2, $3, $4, $5);
-          (@pathsubs) = split (m|/+|o, $dir);
-          (@machines) = split (/,/o, $machine);
+          my ($dir, $options, $machine, $path, $rest) = ($1, $2, $3, $4, $5);
+          my @pathsubs = split (m|/+|o, $dir);
+          my @machines = split (/,/, $machine);
 
-          $subdir = "";
-          foreach $component (@pathsubs)
+          my $subdir = "";
+          for my $component (@pathsubs)
             {
-              $subdir = "$subdir/$component";
+              $subdir .= "/" . $component;
               $subdir =~ s|^/||o;
 
-              if (! defined ($fs_entry{$subdir}))
-                {
-                  $fs_entry{$subdir} = "\t$AUTO";
-                }
+              $fs_entry{$subdir} = "\t$AUTO"
+                unless (defined $fs_entry{$subdir});
             }
 
-          $rhoststring = "";
-          foreach $machine (@machines)
+          my $rhoststring = "";
+          for my $machine (@machines)
             {
-              if ($machine !~ /\./o && defined ($DOMAIN))
-                {
-                  $machine .= ".$DOMAIN";
-                }
+              $machine .= ".$DOMAIN"
+                if (defined $DOMAIN && index ($machine, ".") != -1);
               $rhoststring .= " \\\n\trfs:=$path;rhost:=$machine";
             }
           $fs_entry{$dir} = "$rhoststring";
         }
     }
 
-  foreach $entry (sort (keys (%fs_entry)))
+  for my $entry (sort keys %fs_entry)
     {
       printf ("%s%s\n\n", $entry, $fs_entry{$entry});
     }
 }
 
-__EOF__
+main();
 
 # automount2amd ends here
