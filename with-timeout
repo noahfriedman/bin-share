@@ -4,7 +4,7 @@
 # Created: 1996-05-26
 # Public domain.
 
-# $Id: with-timeout,v 1.1 1996/05/26 18:48:58 friedman Exp $
+# $Id: with-timeout,v 1.2 1997/10/20 23:08:36 friedman Exp $
 
 exec ${PERL-perl} - ${1+"$@"} 9<&0 <<'__EOF__'
 
@@ -33,7 +33,7 @@ sub main
 
 sub sigalrm_handler
 {
-  printf (STDERR "$ARGV[0]: Timeout waiting for process to complete.\n");
+  printf (STDERR "with-timeout: @ARGV: Timeout waiting for process to complete.\n");
   kill (1, $proc);
   exit (1);
 }
