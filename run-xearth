@@ -4,7 +4,7 @@
 # Created: 1995-04-05
 # Public domain
 
-# $Id$
+# $Id: run-xearth,v 1.1 1995/04/05 23:27:56 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -175,10 +175,14 @@ case "$once" in
 
     xrdb_symbol_value='{
                          echo "$XRDB_SYMBOLS" \
-                          | sed -ne "s/[ 	][ 	]*/ /g
-                                     s/.* -D${sym}=//
-                                     s/ -D.*//
-                                     p;q;"
+                          | sed -ne "/-D${sym}=/!d
+                                     s/.*-D${sym}=//
+                                     s/-D.*//
+                                     s/[ 	][ 	]*/ /g
+                                     s/^[ 	][ 	]*//g
+                                     s/[ 	][ 	]*\$//g
+                                     p
+                                     q"
                        }'
 
     width=`sym=WIDTH; eval "$xrdb_symbol_value"`
