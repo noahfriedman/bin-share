@@ -1,0 +1,2 @@
+#! /bin/sh
+xauth extract - $DISPLAY | rsh $1 xauth merge -
