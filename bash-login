@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1996-10-11
 
-# $Id: bash-login,v 1.2 1996/10/12 01:58:32 friedman Exp $
+# $Id: bash-login,v 1.3 1996/10/16 04:45:26 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -59,11 +59,15 @@ if { bash -c : ; } 2> /dev/null ; then
     SHELL=`type -path bash`
     export SHELL no_exit_on_failed_exec
 
-    exec - bash
+    exec - bash ${1+"$@"}
 
     SHELL=/bin/sh
-    exec - sh
+    exec - sh ${1+"$@"}
   '
+else
+    SHELL=/bin/sh
+    export SHELL
+    exec sh ${1+"$@"}
 fi
 
 # bash-login ends here
