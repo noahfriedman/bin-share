@@ -1,10 +1,27 @@
 #! /bin/sh
 # xinit-auth --- start X with authorization cookies
+
+# Copyright (C) 1995 Noah S. Friedman
+
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-07-10
-# Public domain
 
-# $Id$
+# $Id: xinit-auth,v 1.1 1995/07/10 21:42:32 friedman Exp $
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, you can either send email to this
+# program's maintainer or write to: The Free Software Foundation,
+# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
 
 # Commentary:
 # Code:
@@ -169,7 +186,10 @@ set fnord ${1+"$@"} $server_option_separator -auth $XAUTHORITY
 case "$server_options_p" in
   t ) : ;;
   * ) set fnord ${1+"$@"}
-  
+# TODO: finish this
+ ;;
+esac
+
 
 randomkey=`perl -e '
   for (1..10)
