@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-08-02
 
-# $Id: fmtcols,v 2.1 1997/08/03 00:22:47 friedman Exp $
+# $Id: fmtcols,v 2.2 2000/01/17 18:31:08 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,6 +30,9 @@ exec ${PERL-perl} -Sx $0 ${1+"$@"}
 #!perl
 
 use Getopt::Long;
+use strict;
+
+use vars qw(@line @maxwidth %right_justify $fieldsep $width_limit);
 
 sub read_input
 {
@@ -56,15 +59,17 @@ sub print_output
   my $i = 0;
   while (defined $maxwidth[$i])
     {
-      my $w = 1 + (defined $width_limit
-                   ? min ($maxwidth[$i], $width_limit)
-                   : $maxwidth[$i]);
+      my $w = (defined $width_limit
+               ? min ($maxwidth[$i], $width_limit)
+               : $maxwidth[$i]);
       $fmtstr .= join ("",
-                       "%-", $w,
+                       (exists $right_justify{$i} ? "%" : "%-"),
+                       $w,
                        (defined $width_limit ? "." . ($w-1) : ""),
-                       "s");
+                       "s ");
       $i++;
     }
+  chop $fmtstr; # strip trailing whitespace
 
   $i = 0;
   while (defined $line[$i])
@@ -83,11 +88,19 @@ sub parse_options
 {
   $fieldsep = "[ \t]+";
   $width_limit = undef;
+  undef %right_justify;
+  my @rightcols;
 
   Getopt::Long::config ('bundling', 'autoabbrev');
   GetOptions ("s|separator=s", \$fieldsep,
               "m|max-field-width=i", \$width_limit,
+              "r|right-justify=s@", \@rightcols,
               "h|help", \&usage);
+
+  for my $col (split (/\s*,\s*/o, join (",", @rightcols)))
+    {
+      $right_justify{$col} = 1;
+    }
 }
 
 sub usage ()
@@ -95,13 +108,14 @@ sub usage ()
   $0 =~ s|.*/||;
   print "Usage: $0 {options} [files {...}]\n
 Options are:
--h, --help                   You're looking at it.
--s, --separator      SEP     Field separator between columns.
-                             This can be any regular expression.
-                             The default field separator is any number of
-                             tabs and spaces, i.e. \"[ \\t]+\".
--m, --max-field-width MAX    Truncate fields on output that are larger than
-                             this limit.  By default, there is no limit.\n";
+-h, --help                      You're looking at it.
+-r, --right-justify  F0,F1,...  Right-justify fields F0, F1, ...
+-s, --separator      SEP        Field separator between columns.
+                                This can be any regular expression.
+                                The default field separator is any number of
+                                tabs and spaces, i.e. \"[ \\t]+\".
+-m, --max-field-width MAX       Truncate fields on output that are larger than
+                                this limit.  By default, there is no limit.\n";
   exit (1);
 }
 
