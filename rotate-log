@@ -4,7 +4,7 @@
 # Created: 1992-02-10
 # Public domain
 
-# $Id: rotate-log,v 1.6 1995/04/30 20:01:43 friedman Exp friedman $
+# $Id: rotate-log,v 1.7 1995/09/23 22:09:34 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -34,13 +34,16 @@ Options are:
 -h, --help                    You're looking at it.
 -M, --compress-method METHOD  Method to use for compressing; one of
                               ${bq}compact$eq, ${bq}compress$eq, ${bq}gzip$eq.
-                              Default is ${bq}compress$eq.
+                              Default is ${bq}gzip$eq.
 -m, --mode, --chmod     MODE  Change permissions to MODE on rotated logs.
 -n, --number-of-logs       N  Keep up to N versions of log total (default 7).
                               Rotated logs are numbered zero-origin.
 -o, --owner, --chown   OWNER  Change owner of logs to OWNER (you should use
                               OWNER.GROUP and avoid using --group if the
                               ${bq}chown${eq} command supports this syntax).
+-s, --size-threshold    SIZE  Do not rotate unless working log file is SIZE
+                              bytes or larger.  By default no size checking
+                              is done.
 -v, --verbose                 Chatter away while working.
 "
 
@@ -104,10 +107,11 @@ chmod=:
 chown=:
 compressp=
 compress_activep=
-compress_method=compress
+compress_method=gzip
 debug=
 default_directory=.
 number_of_logs=7
+size_threshold=
 verbose=
 
 # Parse command line arguments.
@@ -154,6 +158,10 @@ while : ; do
     -o | --owner | --o* | --chown* | --cho* )
       eval "$getopt"
       chown="${CHOWN-chown} $optarg"
+     ;;
+    -s | --size-threshold* | --s* )
+      eval "$getopt"
+      size_threshold="$optarg"
      ;;
     -v | --verbose | --v* )
       verbose=t
@@ -247,6 +255,30 @@ for log in ${1+"$@"} ; do
     done
   else
     suffix=
+  fi
+
+  # Don't check size if log file doesn't exist.
+  if test -f "$basename"; then
+    case "$size_threshold" in
+      '' ) : ;;
+      * )
+        # Using wc should be relatively inexpensive since most (if not all)
+        # implementations simply stat the file and use st_size to obtain the
+        # number of characters.
+        # This is more reliable than using `ls' and parsing out irrelevant
+        # fields since not all versions of `ls' print the same number of
+        # fields given identical options, and choosing fields based on the
+        # presence of numerals only is risky since a file might have a uid or
+        # gid with no corresponding name.
+        logsize=`wc -c $basename | sed -e 's/^ *//;s/ .*//'`
+        if test "$logsize" -lt "$size_threshold"; then
+          if test ".$verbose" = '.t'; then
+            echo "$progname: $basename: size=$logsize less than threshold=$size_threshold; not rotating."
+          fi
+          continue
+        fi
+       ;;
+    esac
   fi
 
   num=$max_log_number
