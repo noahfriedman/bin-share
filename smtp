@@ -4,12 +4,13 @@
 # Created: 1995-04-15
 # Public domain
 
-# $Id: smtp,v 1.8 1998/07/21 02:21:47 friedman Exp $
+# $Id: smtp,v 1.9 1999/07/24 10:21:49 friedman Exp $
 
 # Recognize some abbreviations for frequently-referenced hosts
 case "$1" in
   aeneas )             h=aeneas.mit.edu            ;;
   ai | life )          h=life.ai.mit.edu           ;;
+  ai-swiss | zurich )  h=zurich.ai.mit.edu         ;;
   athena )             h=athena.mit.edu            ;;
   ccwf )               h=ccwf.cc.utexas.edu        ;;
   cyclic          )    h=cyclic.com                ;;
