@@ -8,7 +8,7 @@ exec ${PERL-perl} -Swx $0 ${1+"$@"}
 # Created: 1995-09-07
 # Public domain
 
-# $Id: run-next,v 1.8 2000/08/24 09:49:49 friedman Exp $
+# $Id: run-next,v 1.9 2001/09/09 07:30:42 friedman Exp $
 
 # Commentary:
 
@@ -82,6 +82,7 @@ sub main
   my $dir;
   foreach $dir (split (/:/, $ENV{PATH}))
     {
+      $dir =~ s/\/$//g; # strip any trailing slashes (xemacs subprocesses)
       $dir = "." if ($dir eq "");
       $found_progdir = 1 if (!$found_progdir && $dir eq $progdir);
       next unless ($found_progdir);
