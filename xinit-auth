@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-07-10
 
-# $Id: xinit-auth,v 1.1 1995/07/10 21:42:32 friedman Exp $
+# $Id: xinit-auth,v 1.2 1996/03/03 23:04:55 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -172,7 +172,7 @@ case "$debug" in t ) set -x ;; esac
 # line.  If not, add -- before the -auth option.
 server_option_separator='--'
 for f in ${1+"$@"} ; do
-  case "$f in
+  case "$f" in
     -- )
       server_option_separator=
       break
