@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1994-10-17
 
-# $Id$
+# $Id: pstoany,v 1.7 1998/05/19 15:51:23 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -35,7 +35,7 @@
 # Code:
 
 # This string is expanded by RCS automatically when this file is checked out.
-rcs_revision='$Revision: 1.6 $'
+rcs_revision='$Revision: 1.7 $'
 
 # Name by which this script was invoked.
 progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
@@ -505,7 +505,7 @@ __EOF__
 
   case "$ppmtogifp" in
     t )
-      for f in "$basename"*".$format" ; do
+      for f in `ls -1d "$basename"*".$format" 2>/dev/null` ; do
         g=`echo "$f" | sed -e "s/\.$format\$/.gif/"`
         echo "$progname: running ppmtogif on $bq$f$eq"
         ppmtogif "$f" > "$g" \
