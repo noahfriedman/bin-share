@@ -4,7 +4,7 @@
 # Created: 1994-10-10
 # Public domain
 
-# $Id: domrev,v 1.4 1997/08/07 04:26:57 friedman Exp $
+# $Id: domrev,v 1.5 1997/08/07 04:57:41 friedman Exp $
 
 # Commentary:
 
@@ -162,6 +162,7 @@ sedstr='
    s/\.$//
    G
    s/\n/ /
+   s/[ 	]*$//
    p
    s/.*//
    h
