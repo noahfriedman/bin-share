@@ -4,7 +4,7 @@
 # Created: 1992-01-19
 # Public domain
 
-# $Id: from,v 1.8 1995/10/16 23:35:15 friedman Exp friedman $
+# $Id: from,v 1.9 1995/10/17 21:38:44 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -26,16 +26,24 @@ if test "$x" = "$y"; then
   bs='\\'
 fi
 
-usage="Usage: $progname {options} {mail-file {...}}
+usage="Usage: $progname {options} {folder {...}}
 
 Options are:
+-c, --columns    COLS        Truncate lines exceeding COLS length on output.
+                             If COLS=0 or output is not to a terminal, no
+                             truncation is done.  The default is
+                             the current width of the terminal.
 -D, --debug                  Enable interactive debugging.
 -e, --envelope               Show message envelope instead of headers.
--f, --format     FMT         Use FMT as the output format. The option
+                             This causes any formatting options (e.g.
+                             $bq--columns$eq, $bq--numbered$eq) to be ignored.
+-f, --format     FMT         Use FMT as the output format.  The option
                              $bq--help-format$eq gives instructions for this.
 -h, --help                   You're looking at it.
 -H, --help-format            Get documentation about the format of the FMT
                              argument to $bq--format$eq.
+-n, --numbered               Show number of message with respect to the
+                             current folder.  See also $bq--help-format$eq.
 -p, --no-parse               Do not do fancy parsing of From and Date fields.
 -u, --user       USER        Show headers of USER's spooled messages.
 "
@@ -55,6 +63,23 @@ where
   * $bq.m$eq is the maximum allowed length of the field; if the header
     string is longer than this, it is truncated.
   * ${bq}Header$eq is the name of the header, e.g. ${bq}Subject$eq.
+
+Some special ${dq}header names$dq are defined for useful information that
+cannot generally be obtained from message headers.  As usual, you can use
+general format specifiers, e.g ${dq}%-4.3{TLINES}$dq.  These special names,
+surrounded by curly braces, are:
+
+  * $bq{TLINES}$eq
+    The number of this message line irrespective of any folder it
+    may have come from (if more than one folder was specified on the
+    command line).
+  * $bq{FLINES}$eq
+    The number of this message in the current folder.  This number is reset
+    whenever this program begins reading a new folder specified on the
+    command line.
+  * $bq{FOLDER}$eq
+    The name of this folder, as specified on the command line.
+
 
 For example, given a message with headers of the form
 
@@ -95,6 +120,22 @@ truncation) of the From and Date lines.
 FROM_PARSEP=t
 debug=
 envelopep=
+folderno=
+
+# if stdout is not a tty, then disable truncation (user may explicitly
+# enables it later by use of the --columns option).
+if test -t 1; then
+  COLUMNS=${COLUMNS-80}
+  case "$TERM" in
+    emacs )
+      # Decrement number of columns by 1 since last column in emacs buffers
+      # causes wraparound.
+      COLUMNS=`expr $COLUMNS - 1`
+   ;;
+  esac
+else
+  COLUMNS=0
+fi
 
 # Usage: eval "$getopt"; value=$optarg
 # or     optarg_optional=t; eval "$getopt"; value=$optarg
@@ -156,6 +197,10 @@ getopt='
 while : ; do
   case $# in 0) break ;; esac
   case "$1" in
+    -c | --columns* | --c* )
+      eval "$getopt"
+      COLUMNS=$optarg
+     ;;
     -D | --debug | --d* )
       debug=-d
       shift
@@ -175,6 +220,10 @@ while : ; do
     -h | --help | --h* )
       echo "$usage" 1>&2
       exit 1
+     ;;
+    -n | --numbered | --n* )
+      folderno=t
+      shift
      ;;
     -p | --no-parse | --n* )
       FROM_PARSEP=
@@ -248,13 +297,19 @@ esac
 case "${FROM_FORMAT+set}" in
   set ) : ;;
   * )
-    FROM_FORMAT="%-19.18From %-13.12Date %-.`expr ${COLUMNS-80} - 35`Subject"
+    FROM_FORMAT='%-19.18From %-13.12Date %Subject'
+
+    case $folderno in
+      t )
+        FROM_FORMAT="%-3{FLINES} $FROM_FORMAT"
+       ;;
+    esac
    ;;
 esac
 
 FROM_PROGNAME=$progname
 
-export FROM_FORMAT FROM_PARSEP FROM_PROGNAME
+export COLUMNS FROM_FORMAT FROM_PARSEP FROM_PROGNAME
 
 # By using a here-document to include the source of the perl script (to
 # avoid command line length limits), we usurp the normal stdin the inferior
@@ -334,18 +389,21 @@ sub initialize_variables
   # quote 'From ' at the beginning of a line in the body, especially
   # when writing to archive files.
   $re_message_delimiter = '^From [^ ]+ ... ... .. ..:..';
-  $re_whitespace = '[ \a\b\f\n\r\t\v]+';
+
   # According to RFC822, "The field-name must be composed of printable
   # ASCII characters (i.e. characters that have decimal values between 33
   # and 126, except colon)", i.e. any chars except ctl chars, space, or colon.
   $re_header_name = '[][!"#$%&\'()*+,-./0-9;<=>?@A-Z\\^_`a-z{|}~]+';
+
   $re_blank_line = '(^' . $re_whitespace . '$)|(^$)';
   $re_format_modifier = '%[0-9.-]*';
-
-  $in_message_body_p = $nil;
+  $re_whitespace = "[ \f\n\r\t]+";
 
   $hack_header_function{'FROM'} = 'hack_From_data';
   $hack_header_function{'DATE'} = 'hack_Date_data';
+
+  $format_token{'{TLINES}'} = 'd';
+  $format_token{'{FLINES}'} = 'd';
 
   if (&getenv ("FROM_PARSEP") eq "t")
     {
@@ -359,13 +417,17 @@ sub initialize_variables
   undef (%important_header_vector);
   undef (@important_header_order);
 
+  $total_message_lines = 0;
+  $in_message_body_p = $nil;
   $exit_status = 0;
+
+  $columns = &getenv ('COLUMNS');
 }
 
 sub make_important_header_vector
 {
   local ($format) = @_;
-  local ($fstring, $modifier, $tmp, $i);
+  local ($fstring, $modifier, $tmp, $i, $tok);
   local ($re_token) = "$re_format_modifier" . "[^%]*";
 
   $fstring = $format;
@@ -379,6 +441,7 @@ sub make_important_header_vector
       $fstring = $';
     }
   $important_header_vector{'prefix'} = $tmp;
+  $important_header_order[0] = 'prefix';
 
   while ($fstring =~ /^$re_token/o)
     {
@@ -411,7 +474,17 @@ sub make_important_header_vector
       # Make header name all upper case to distinguish from extraneous data
       # like the `prefix' element.
       $tmp = "\U$tmp";
-      $important_header_vector{$tmp} = $modifier . "s" . $trailing_whitespace;
+
+      if (defined ($format_token{$tmp}))
+        {
+          $tok = $format_token{$tmp};
+        }
+      else
+        {
+          $tok = 's';
+        }
+
+      $important_header_vector{$tmp} = $modifier . $tok . $trailing_whitespace;
       $important_header_order[$i] = $tmp;
     }
 }
@@ -419,13 +492,14 @@ sub make_important_header_vector
 sub process_file
 {
   local ($file) = @_;
-  local (%headers);
 
   if (! open (F, "<$file"))
     {
       &err ("open", $file, "$!");
       return;
     }
+
+  $folder_message_lines = 0;
 
   while (<F>)
     {
@@ -435,7 +509,7 @@ sub process_file
       # getting info about the next message.
       if ($_ =~ /$re_message_delimiter/o)
         {
-          undef (%headers);
+          undef (%current_headers);
           $in_message_body_p = $nil;
           next;
         }
@@ -444,7 +518,13 @@ sub process_file
       # we're at the end of the headers for this message.
       if ( $_ =~ /$re_blank_line/o && ! $in_message_body_p )
         {
-          &print_headers (%headers);
+          $total_message_lines++;
+          $folder_message_lines++;
+          $current_headers{'{TLINES}'} = $total_message_lines;
+          $current_headers{'{FLINES}'} = $folder_message_lines;
+          $current_headers{'{FOLDER}'} = $file;
+
+          &print_headers (%current_headers);
           $in_message_body_p = $t;
           next;
         }
@@ -454,14 +534,14 @@ sub process_file
           next;
         }
 
-      &add_header ($_, 'headers');
+      &add_header ($_);
     }
   close (F);
 }
 
 sub add_header
 {
-  local ($line, $header_vector_name) = @_;
+  local ($line) = @_;
   local ($header, $data);
 
   if (! ($line =~ /^[^ :]*: /o))
@@ -482,7 +562,7 @@ sub add_header
           $data = &$fn ($data);
         }
 
-      eval "\$$header_vector_name" . "{\$header} = \$data";
+      $current_headers{$header} = $data;
     }
 }
 
@@ -503,9 +583,9 @@ sub hack_From_data
     }
 
   # From: "" <foobar@host>
-  if ($data =~ /\"\"[^<]*<[^>]*>/o)
+  if ($data =~ /\"\"[^<]*<[^>]+>/o)
     {
-      $data =~ /"<[^>]*>"/;
+      $data =~ /"<[^>]+>"/;
       $data = $&;
       substr($data, 0, 1) = '';
       substr($data, -1) = '';
@@ -513,13 +593,14 @@ sub hack_From_data
     }
 
   # From: real name <foobar@host>
-  if ($data =~ /^[^<]+/o)
+  if ($data =~ /^[^<]+</o)
     {
       $data = $&;
       chop $data;
       return $data;
     }
 
+  # From: foobar@host
   return $data;
 }
 
@@ -551,22 +632,36 @@ sub hack_Date_data
 sub print_headers
 {
   local (%header_vector) = @_;
-  local ($format, $header, $i);
-
-  $i = 1;
-
-  # Let the prefix string be its own format, for consistency with the
-  # treatment of the rest of the format strings.
-  # The prefix string shouldn't contain any formatting constructs except
-  # possibly for "%%" sequences, which will appear as a single % character.
-  #printf ("%s", $important_header_vector{'prefix'});
-  printf ($important_header_vector{'prefix'});
+  local ($format, $header, $str);
+  local ($i) = 0;
 
   while (1)
     {
       if (! (defined ($important_header_order[$i])))
         {
-          print "\n";
+          # Truncate output string if appropriate.
+          if ($columns > 0 && length ($str) > $columns)
+            {
+              # Specifying a limit field here (length($str)) prevents the
+              # split function from throwing away null fields, which could
+              # happen if there are sequential newlines.
+              # We certainly cannot have more than length($str) fields.
+              local (@lines) = split (/\n/, $str, length ($str));
+              local ($len) = $#lines;
+              local ($i) = 0;
+
+              while ($i <= $len)
+                {
+                  if (length ($lines[$i]) > $columns)
+                    {
+                      $lines[$i] = substr ($lines[$i], 0, $columns);
+                    }
+                  $i++;
+                }
+
+              $str = join ("\n", @lines);
+            }
+          print "$str\n";
           return;
         }
       $header = $important_header_order[$i];
@@ -577,7 +672,7 @@ sub print_headers
           eval "\$format = \"$important_header_vector{$header}\"";
         }
 
-      printf ($format, $header_vector{$header});
+      $str = $str . sprintf ($format, $header_vector{$header});
       $i++;
     }
 }
