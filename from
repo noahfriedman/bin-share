@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.24 1998/02/06 04:45:09 friedman Exp $
+# $Id: from,v 1.25 1998/04/08 10:43:00 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -414,7 +414,9 @@ case "${FROM_FORMAT+set}" in
     case "$FROM_EXTRACTP" in
       t )
         FROM_PARSEP=
-        FROM_FORMAT='From: %From\nTo: %To\nCc: %Cc\nSubject: %Subject\nDate: %Date\n'
+        for h in From To Cc Subject Date ; do
+          FROM_FORMAT="${FROM_FORMAT}$h: %$h\n"
+        done
        ;;
       * )
         FROM_FORMAT='%-19.18From %-13.12Date %Subject\n'
@@ -457,17 +459,14 @@ sub main
       exit (1);
     }
 
-  # I think this may not work; perl wants a file handle, not a descriptor
-  # number.  Lose lose, larry.
-  close (9);
+  # There's no clean way to close this file descriptor.  Way to go, Larry.
+  #close (9);
 
   &initialize_variables ();
   &make_format_vector (&getenv ("FROM_FORMAT"));
 
-  if ($unread_only_p)
-    {
-      $header_save_p{'STATUS'} = 1;
-    }
+  $header_save_p{'STATUS'} = 1
+    if ($unread_only_p);
 
   if ($from_match_header ne '')
     {
@@ -495,7 +494,7 @@ sub main
 
   foreach $file (@ARGV)
     {
-      if ($file =~ /^:(pop3|pop-3|pop):/)
+      if ($file =~ /^:(pop3|pop-3|pop):/oi)
         {
           local ($ignore, $port, $host, $user, $pass) = split (/:/, $file);
 
@@ -513,11 +512,9 @@ sub main
 
           if (! defined ($pass) || $pass eq '')
             {
-              $pass = 'none';
-              if (defined ($ENV{'POPPASS'}))
-                {
-                  $pass = $ENV{'POPPASS'};
-                }
+              $pass = &getenv ('POPPASS');
+              $pass = 'none'
+                if (! defined ($pass));
             }
 
           &process_pop3_folder ($host, $port, $user, $pass);
@@ -555,7 +552,6 @@ sub initialize_variables
   # However, these are the characters allowed in FROM_FORMAT specifier
   # header names; some restrictions exist for the sake of formatting.
   $re_fmt_header_name = '[!"#$&\'*+,-./0-9;<=>?@A-Z\\^_`a-z{|}~]+';
-  #$re_fmt_header_name = '[][!"#$%&\'()*+,-./0-9;<=>?@A-Z\\^_`a-z{|}~]+';
 
   $re_whitespace = "[ \f\n\r\t]+";
   $re_blank_line = '(^' . $re_whitespace . '$)|(^$)';
@@ -578,10 +574,11 @@ sub initialize_variables
   $in_message_body_p = $nil;
   $exit_status = 0;
 
-  $columns = &getenv ('COLUMNS');
+  $columns           = &getenv ('COLUMNS');
   $from_match_header = &getenv ('FROM_MATCH_HEADER');
   $from_match_regexp = &getenv ('FROM_MATCH_REGEXP');
 
+  $body_line_limit = 0;
   if (&getenv ('FROM_LINELIMIT') ne '')
     {
       $body_line_limit = &getenv ('FROM_LINELIMIT') + 0;
@@ -589,10 +586,6 @@ sub initialize_variables
   elsif ($extract_body_p)
     {
       $body_line_limit = -1;
-    }
-  else
-    {
-      $body_line_limit = 0;
     }
 }
 
@@ -685,6 +678,7 @@ sub process_file
 
   $folder_message_lines = 0;
   $counted_messages = 0;
+  $in_message_body_p = $t;
 
   while (<F>)
     {
@@ -692,20 +686,20 @@ sub process_file
 
       # If we hit an RFC822 message delimiter, clean up in preparation for
       # getting info about the next message.
-      if ($_ =~ /$re_message_delimiter/o)
+      if ($in_message_body_p && $_ =~ /$re_message_delimiter/o)
         {
           undef (@all_headers);
           $all_headers_count = 0;
 
           undef (%current_headers);
-          $header_contents = '';
+          undef ($header_contents);
           $in_message_body_p = $nil;
           next;
         }
 
       # If we're finished reading header continuation line (evidenced by
       # coming upon a new header name), finish processing this header.
-      if ($_ =~ /^$re_header_name/o && $header_contents ne '')
+      if (defined ($header_contents) && $_ =~ /^$re_header_name/o)
         {
           $all_headers[$all_headers_count++] = $header_contents
             if ($all_headers_p);
@@ -716,13 +710,13 @@ sub process_file
 
       # If we're not in the message body, and we come upon a blank line,
       # we're at the end of the headers for this message.
-      if ( $_ =~ /$re_blank_line/o && ! $in_message_body_p )
+      if (! $in_message_body_p && $_ =~ /$re_blank_line/o)
         {
           # Add last buffered header.
           $all_headers[$all_headers_count++] = $header_contents
             if ($all_headers_p);
           &add_header ($header_contents);
-          $header_contents = '';
+          undef ($header_contents);
 
           $total_message_lines++;
           $folder_message_lines++;
@@ -743,7 +737,7 @@ sub process_file
             }
         }
 
-      if ( $in_message_body_p )
+      if ($in_message_body_p)
         {
           if ($extract_body_p
               && ! $ignore_this_message_p
@@ -757,7 +751,7 @@ sub process_file
         }
 
       # Otherwise, append current header info.
-      if ($header_contents eq '')
+      if (! defined ($header_contents))
         {
           $header_contents = $_;
         }
@@ -766,10 +760,9 @@ sub process_file
           $header_contents .= "\n$_";
         }
     }
-  if ($count_only_p)
-    {
-      print "$counted_messages\n";
-    }
+
+  print "$counted_messages\n"
+    if ($count_only_p);
   close (F);
 }
 
@@ -812,6 +805,7 @@ sub process_pop3_folder
           if (! &message_header_pattern_matched_p ())
             {
               $msgnumber++;
+              $total_message_lines++;
               next;
             }
         }
@@ -838,6 +832,7 @@ sub process_pop3_folder
               print "${$lines}[$lineno]\n";
               $lineno++;
             }
+          print "\n" if ($body_line_limit != 0);
         }
 
       $msgnumber++;
@@ -857,8 +852,8 @@ sub process_pop3_folder_get
 
   while ($lineno < $header_line_count)
     {
-      if (${$lines}[$lineno] =~ /^$re_header_name/o
-          && $header_contents ne '')
+      if ($header_contents ne ''
+          && ${$lines}[$lineno] =~ /^$re_header_name/o)
         {
           &add_header ($header_contents);
           $header_contents = ${$lines}[$lineno];
@@ -884,7 +879,8 @@ sub maybe_print_headers
 
   $ignore_this_message_p = $t;
 
-  if (! ($unread_only_p && $current_headers{'STATUS'} =~ /R/oi)
+  if (! ($unread_only_p
+         && $current_headers{'STATUS'} =~ /[Rr]/o)
       && &message_header_pattern_matched_p () )
     {
       $counted_messages++;
@@ -910,6 +906,7 @@ sub maybe_print_headers
         }
     }
 }
+
 
 sub add_header
 {
@@ -1166,16 +1163,12 @@ sub print_headers
 
 sub message_header_pattern_matched_p
 {
-  if ($from_match_header eq '')
-    {
-      return $t;
-    }
+  return $t
+    if ($from_match_header eq '');
 
-  if (defined ($current_headers{$from_match_header})
-      && ($current_headers{$from_match_header} =~ /$from_match_regexp/oi))
-    {
-      return $t;
-    }
+  return $t
+    if (defined ($current_headers{$from_match_header})
+        && ($current_headers{$from_match_header} =~ /$from_match_regexp/oi));
 
   return $nil;
 }
@@ -1187,21 +1180,15 @@ sub err
 
 sub getenv
 {
-  local ($v) = @_;
-
-  if (defined ($ENV{$v}))
-    {
-      return $ENV{$v};
-    }
+  return "$ENV{$_[0]}"
+    if (defined ($ENV{$_[0]}));
   return undef;
 }
 
 sub truep
 {
-  if (&getenv ($_[0]) eq 't')
-    {
-      return $t;
-    }
+  return $t
+    if (&getenv ($_[0]) eq 't');
   return $nil;
 }
 
@@ -1223,7 +1210,7 @@ sub my_ctime
       $TZ = $isdst ? $4 : $1;
     }
 
-  if ($TZ ne "") { $TZ .= " "; }
+  $TZ .= ' ' if ($TZ ne '');
   $year += ($year < 70) ? 2000 : 1900;
   return sprintf ("%s %s %02d %02d:%02d:%02d %s%4d",
                   $weekday[$wday], $month[$mon], $mday, $hour, $min, $sec,
@@ -1433,11 +1420,7 @@ sub tcpconnect
         }
     }
 
-  {
-    local ($current_handle) = select (S);
-    $| = 1;  # disable buffering on S
-    select ($current_handle);
-  }
+  &disable_stdio_buffering (S);
   return 1;
 }
 
@@ -1473,21 +1456,6 @@ sub initialize_sockvars
     }
 }
 
-sub require_soft
-{
-  local ($f) = @_;
-
-  foreach $dir (@INC)
-    {
-      if (-f "$dir/$f")
-        {
-          require "$f";
-          return "$dir";
-        }
-    }
-  return 0;
-}
-
 sub my_gethostbyaddr
 {
   local ($addrstring, $type) = @_;
@@ -1498,11 +1466,8 @@ sub my_gethostbyaddr
   $addrstring = sprintf ("%d.%d.%d.%d", unpack ("C4", $addr));
   $name = gethostbyaddr($addr, $type);
 
-  if ($name eq "")
-    {
-      return $addrstring;
-    }
-
+  return $addrstring
+    if ($name eq "");
   return $name;
 }
 
@@ -1563,6 +1528,31 @@ sub htonl
   @o = unpack ('C4', $h);
   $h = pack ('C4', $o[3], $o[2], $o[1], $o[0]);
   return $h;
+}
+
+sub disable_stdio_buffering
+{
+  foreach $handle (@_)
+    {
+      local ($orig_handle) = select ($handle);
+      $| = 1;
+      select ($orig_handle);
+    }
+}
+
+sub require_soft
+{
+  local ($f) = @_;
+
+  foreach $dir (@INC)
+    {
+      if (-f "$dir/$f")
+        {
+          require "$f";
+          return "$dir";
+        }
+    }
+  return 0;
 }
 
 __EOF__
