@@ -1,0 +1,61 @@
+#!/bin/sh
+# 
+# A horrible attempt to match some of the functionality of ypmatch
+# since the FSF machines don't use yp.
+#
+# Public domain.
+#
+
+if [ $# -lt 2 ]; then
+   echo "Usage: match [name] [database]"
+   exit 1
+fi
+
+name=$1
+dbase=$2
+
+# First determine regexp to use
+case ${dbase} in 
+   passwd.byuid | uid )    regexp="^[^:]*:[^:]*:${name}:" ;;
+   passwd*|group*|aliases) regexp="^${name}:" 	;; 
+   *)			   regexp="${name}" 	;; # e.g. hosts
+esac
+   
+# Now determine filename
+case ${dbase} in 
+   aliases) 		filename="/com/mailer/${dbase}" ;;
+   passwd.gate)		filename="/usr/local/adm/${dbase}" ;;
+   uid | passwd.byuid ) filename="/etc/passwd" ;;
+   *)       		filename="/etc/${dbase}" ;;
+esac
+
+if [ ${dbase} != "aliases" ]; then
+   exec egrep "${regexp}" "${filename}"
+else
+   egrep "${regexp}" "${filename}"
+   if [ $? -eq 0 ]; then
+      exit 0
+   fi
+
+   # If alias wasn't in aliases database, try looking up alias as a
+   # username and search for a .forward file. 
+   passwd_entry="`grep \"^${name}:\" /etc/passwd`"
+   if [ $? -eq 0 ]; then
+      oIFS="${IFS}"
+      IFS=":"
+      set - ${passwd_entry}
+      IFS="${oIFS}"
+      if [ "z$6" != "z" ]; then
+         if [ -r "${6}/.forward" ]; then
+            echo "${name}: `cat ${6}/.forward`"
+            exit 0
+         fi
+      fi
+   fi
+fi
+
+exit 1
+
+#
+# eof
+#
