@@ -4,13 +4,13 @@
 # Created: 1995-04-15
 # Public domain
 
-# $Id: smtp,v 1.1 1995/04/15 23:37:45 friedman Exp friedman $
+# $Id: smtp,v 1.2 1995/04/15 23:49:29 friedman Exp friedman $
 
 case "$1" in
   aeneas )             h=aeneas.mit.edu            ;;
   athena )             h=athena.mit.edu            ;;
   ccwf )               h=ccwf.cc.utexas.edu        ;;
-  cli )                h=cli.cli.com               ;;
+  cli )                h=cli.com                   ;;
   cyclic | totoro )    h=cyclic.com                ;;
   es | rc )            h=hawkwind.utcs.toronto.edu ;;
   floss )              h=floss.cyclic.com          ;;
@@ -26,6 +26,6 @@ case "$1" in
   * )                  h="$1"                      ;;
 esac
 
-exec tcpconnect $h smtp
+exec tcpconnect -Hv $h smtp
 
 # smtp ends here
