@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1996-10-11
 
-# $Id$
+# $Id: bash-login,v 1.1 1996/10/12 01:52:44 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -45,41 +45,24 @@ pathdirs='
   /usr/local/bin
 '
 
-find_bash_p=
+for d in $pathdirs; do
+  case "$PATH" in
+     "$d" | *":$d:"* | "$d:"* | *":$d" ) : ;;
+     * ) PATH="$d:$PATH"; export PATH ;;
+  esac
+done
 
-# If we are sh, maybe look for bash
-case "$0" in
-  '-sh' | '-bin/sh' | '-usr/bin/sh' ) find_bash_p=t ;;
-esac
+if { bash -c : ; } 2> /dev/null ; then
+  exec bash -norc -c '
+    no_exit_on_failed_exec=t
+    SHELL=`type -path bash`
+    export SHELL no_exit_on_failed_exec
 
-# If we are already running bash, don't do anything.
-case "${BASH_VERSION+set}" in set ) find_bash_p= ;; esac
+    exec - bash
 
-# If my environment is defined already, don't do anything.
-case "$LOGGED" in t ) find_bash_p= ;; esac
-
-case "$find_bash_p" in
-  t )
-    for d in $pathdirs; do
-      case "$PATH" in
-         "$d" | *":$d:"* | "$d:"* | *":$d" ) : ;;
-         * ) PATH="$d:$PATH"; export PATH ;;
-      esac
-    done
-
-    if { bash -c : ; } 2> /dev/null ; then
-      exec bash -norc -c '
-        no_exit_on_failed_exec=t
-        SHELL=`type -path bash`
-        export SHELL no_exit_on_failed_exec
-
-        exec - bash
-
-        SHELL=/bin/sh
-        exec - sh
-      '
-    fi
-   ;;
-esac
+    SHELL=/bin/sh
+    exec - sh
+  '
+fi
 
 # bash-login ends here
