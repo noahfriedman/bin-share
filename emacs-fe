@@ -4,7 +4,7 @@
 # Created: 1995-09-11
 # Public domain.
 
-# $Id$
+# $Id: emacs-fe,v 1.1 1995/10/25 22:29:42 friedman Exp friedman $
 
 # Commentary:
 
@@ -96,7 +96,7 @@ availversions=`ls -1d $prefix/${eprefix}*/bin/$progname* 2> /dev/null \
                  | sed -e 's/.* //'`
 
 if [ "$availversions" = "" ] ; then
-	echo "No version of $progname found in $prefix."
+	echo "No version of $progname found in $prefix/$eprefix*."
 	exit 1
 fi
 
@@ -112,9 +112,29 @@ eval `echo "$availversions" \
 # The environment variable [progname]VERSION can have a value which specifies
 # a version number, OR it can contain the values "NEWEST" or "OLDEST" to
 # specify the newest or oldest version which was found.
-PROGNAME=`echo "$progname" \
-           | sed -e 'y/abcdefghijklmnopqrstuvwxyz/ABCDEFGHIJKLMNOPQRSTUVWXYZ/'`
+sed_upcase='y/abcdefghijklmnopqrstuvwxyz/ABCDEFGHIJKLMNOPQRSTUVWXYZ/'
+
+PROGNAME=`echo "$progname" | sed -e "$sed_upcase"`
 eval version=\"\$${PROGNAME}VERSION\"
+
+# If there is no ETAGSVERSION, EMACSCLIENTVERSION, etc, then look for
+# EMACSVERSION, XEMACSVERSION, or whatever the current variant is.
+case "$version" in
+  '' )
+    case "$progname" in
+      ispell )
+        # If this is ispell and ISPELLVERSION isn't set, just use 3.1.
+        # We could run this script recursively with a flag indicating to
+        # find the current emacs variant and version and just print it out,
+        # but that is a very pathological case and is a lot of work.
+        version=3.1 ;;
+      * )
+        VARIANT=`echo "${EMACSVARIANT-emacs}" | sed -e "$sed_upcase"`
+        eval version=\"\$${VARIANT}VERSION\"
+       ;;
+    esac
+esac
+
 case "$version" in
   [Oo][Ll][Dd][Ee][Ss][Tt]) version="$oldest" ;;
   [Nn][Ee][Ww][Ee][Ss][Tt]) version="$newest" ;;
@@ -148,12 +168,10 @@ fi
 case "$progname" in
   emacs | lemacs | xemacs | mule )
     EMACSVARIANT=$progname
-    ETAGSVERSION=$version
-    EMACSCLIENTVERSION=$version
-    CTAGSVERSION=$version
-    export EMACSVARIANT ETAGSVERSION EMACSCLIENTVERSION CTAGSVERSION
+    eval ${PROGNAME}VERSION=$version
+    eval export EMACSVARIANT ${PROGNAME}VERSION
 
-    case "$progname-$version" in
+    case "$EMACSVARIANT-$version" in
       emacs-18* )       ISPELLVERSION=4.0    ;;
       emacs-19.[0-9] )  ISPELLVERSION=4.0    ;;
       emacs-19.1[0-9] ) ISPELLVERSION=4.0    ;;
@@ -172,7 +190,6 @@ case "$progname" in
    ;;
 esac
 
-# More special-case tweaks for certain programs
 case "$progname" in
   xemacs )
     # xemacs expects to use the keysym database in /usr/openwin, but that
