@@ -2,7 +2,7 @@
 exec ${PERL-perl} -wSx $0 ${1+"$@"}
 #!perl
 
-# $Id: imapcount,v 1.2 2002/01/14 20:10:08 friedman Exp $
+# $Id: imapcount,v 1.3 2003/05/02 03:46:33 friedman Exp $
 
 package IMAP;
 
@@ -272,6 +272,7 @@ sub process_options
   GetOptions ("d|daemon",         \$option{daemon},
               "h|host=s",         \$option{host},
               "p|port=s",         \$option{port},
+              "u|user=s",         \$option{user},
               "f|imap-folder=s",  \$option{folder},
               "c|counter-file=s", \$option{countfile},
               "s|sleep=i",        \$option{sleep},
