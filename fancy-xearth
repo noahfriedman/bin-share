@@ -5,7 +5,7 @@
 # Created: 1996-03-05
 # Public domain
 
-# $Id: fancy-xearth,v 1.5 1998/03/11 01:52:50 friedman Exp $
+# $Id: fancy-xearth,v 1.6 1998/03/11 02:48:43 friedman Exp $
 
 # Commentary:
 # Code:
@@ -98,7 +98,7 @@ __EOF_MASKFILE__
          -mag 0.25 \
          -shift -$xshift,-$yshift \
          -pos sunrel,24.64,41.3 \
-         -gamma 2.3 \
+         -gamma 1.0 \
          -rot 21 \
          -proj orthographic \
          -bigstars 20 \
