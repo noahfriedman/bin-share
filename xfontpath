@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# $Id$
+
+xset q | sed -ne '
+  /^Font Path:/!d
+  n
+  s/^ *//
+  H
+  g
+  :l
+  s/\(\n\)\([^,]*\),/\1\2\1/
+  t l
+  s/^\n//
+  p
+  q'
