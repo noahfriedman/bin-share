@@ -1,0 +1,14 @@
+#!/bin/sh
+# A shell script to sort passwd(5)-format files by uid. 
+
+if [ "z$1" = "z-help" ]; then
+   prog="`basename $0`"
+   echo "Usage: ${prog} {passwd-file} {-o ouput_file}"
+   echo "       (stdin/stdout by default)"
+   echo ""
+   exit 1
+fi
+
+exec sort -s -t: +2n -3 "$@"
+
+# eof
