@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.25 1998/04/08 10:43:00 friedman Exp $
+# $Id: from,v 1.26 1998/04/09 10:30:47 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -470,6 +470,9 @@ sub main
 
   if ($from_match_header ne '')
     {
+      # Must store actual header name as well as MATCH header name, so that
+      # contents will be stored.
+      $header_save_p{"\U$from_match_header"} = 1;
       $from_match_header = "{MATCH_\U$from_match_header}";
       $header_save_p{$from_match_header} = 1;
     }
