@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1993-02-07
 
-# $Id: symlink-resolve,v 1.6 1995/09/23 22:11:12 friedman Exp $
+# $Id: symlink-resolve,v 1.7 1996/03/03 23:00:48 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -181,7 +181,7 @@ for ($i = 0; $i < @ARGV; $i++)
       s/\/[^\/][^\/]*\/\.\.\//\//og;  # Resolve most references to ".."
      }
    s/\/[^\/][^\/]*\/\.\.$//o;         # Resolving trailing ".."
-   s/^\/..\//\//go;                   # Eliminate leading "/.."
+   s/^\/\.\.\//\//go;                 # Eliminate leading "/.."
    if ($#ARGV > 0)
      {
        print "$ARGV[$i] -> ";
