@@ -1,6 +1,6 @@
 #! /bin/sh
 
-# $Id$
+# $Id: fancy-xearth,v 1.1 1996/03/05 22:03:26 friedman Exp friedman $
 
 exec with --display ${DISPLAY-:0.0} \
           --no-tty \
@@ -10,10 +10,10 @@ exec with --display ${DISPLAY-:0.0} \
                  -onepix \
                  -nomarkers \
                  -night 15 \
-                 -wait 300 \
+                 -wait 3600 \
                  -nice 19 \
                  -mag 0.25 \
-                 -shift -200,-150 \
+                 -shift -250,-150 \
                  -pos sunrel,24.64,41.3 \
                  -gamma 2.6 \
                  -rot 21 \
