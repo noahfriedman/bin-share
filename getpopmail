@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1996-02-27
 
-# $Id$
+# $Id: getpopmail,v 2.1 1996/04/22 01:57:25 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,8 +26,13 @@
 # Commentary:
 
 # This program has two external program dependencies.
-# 1) You must have the `popclient' program (available from the Linux
-#    Slackware source distribution and other locations)
+# 1) You must have my modified `popclient' program (unmodified source is
+#    available from the Linux Slackware source distribution and other
+#    locations).  My copy is available via the URL
+#    ftp://alpha.gnu.ai.mit.edu/friedman/packages/popclient.tar.gz
+#    In particular, my version accepts a -P option which reads the remote
+#    password from standard input instead of the tty.
+#
 # 2) An external script called `network-up-p' which tests to see if the pop
 #    servers or network in general are reachable.
 
@@ -273,11 +278,39 @@ sub network_up_p
   return 0;
 }
 
+# This function doesn't use spawn since it must set up some pipes to feed
+# passwords to the popclient.
 sub popclient
 {
   local ($server, $user, $pw, $protocol, $flags) = @_;
+  local ($pid);
 
-  &spawn ('popclient', '-u', $user, '-p', $pw, "-v$protocol$flags", $server);
+  pipe (POPREAD, POPWRITE);
+  $pid = fork;
+
+  if (! defined $pid)
+    {
+      die "Can't fork: $!\n";
+    }
+
+  if ($pid == 0)
+    {
+      # child
+      open (STDIN, "<&POPREAD");
+      close (POPWRITE);
+      close (POPREAD);
+      exec ('popclient', '-u', $user, '-P', "-v$protocol$flags", $server);
+    }
+  else
+    {
+      # parent
+      print POPWRITE $pw . "\n";
+      close (POPWRITE);
+      close (POPREAD);
+      wait;
+      return $?
+    }
+
 }
 
 sub spawn
