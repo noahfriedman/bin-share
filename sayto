@@ -4,7 +4,7 @@
 # Created: 1993-10-05
 # Public domain
 
-# $Id: sayto,v 1.3 1995/09/23 22:10:53 friedman Exp friedman $
+# $Id: sayto,v 1.4 1995/11/06 00:35:59 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -23,7 +23,7 @@ Options are:
 -D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
 -e, --edit                   Invoke editor to edit message before sending.
                              The editor is specified by the environment
-                             variable ${bq}$EDITOR$eq, otherwise the
+                             variable ${bq}EDITOR$eq, otherwise the
                              program ${bq}$stdeditor$eq is used.
 -E, --empty-ok               Send message even if empty.
 -f, --file        FILE       Read message text from file FILE.
