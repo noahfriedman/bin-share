@@ -4,7 +4,7 @@
 # Created: 1995-04-15
 # Public domain
 
-# $Id: tcpconnect,v 1.4 1995/09/01 22:01:21 friedman Exp friedman $
+# $Id: tcpconnect,v 1.5 1995/09/23 22:11:33 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -25,10 +25,15 @@ Options are:
 -I, --include   DIR   Include DIR in @INC path for perl.
                       This option may be specified multiple times to append
                       search paths to perl.
+-i, --no-intr         Ignore interrupts (SIGINT).
 -d, --no-dynload      Do not attempt to use perl5 dynamic loaded libraries.
                       This option is automatic if you are using perl4 or older.
 -R, --no-resolve      Do not attempt to reverse-resolve numeric IP
                       addresses if specified on the command line.
+-s, --stty     FLAGS  Run with arbitrary terminal settings,
+                      e.g. ${bq}raw$eq, $bq-echo$eq, etc.  All flags will
+                      be restored on exit.
+-v, --verbose         Report on status of connection.
 "
 
 # Initialize variables.
@@ -40,6 +45,9 @@ perl=${TCPCONNECT_PERL-${PERL-perl}}
 TCPCONNECT_DYNLOAD=
 TCPCONNECT_RESREV=
 TCPCONNECT_SIGHUP=
+TCPCONNECT_SIGINT=
+TCPCONNECT_STTY=
+TCPCONNECT_VERBOSE=
 
 # Usage: eval "$getopt"; value=$optarg
 # or     optarg_optional=t; eval "$getopt"; value=$optarg
@@ -124,9 +132,27 @@ while : ; do
       eval "$getopt"
       includes="$includes -I$optarg"
      ;;
+    -i | --no-intr | --no-in* )
+      TCPCONNECT_SIGINT=nil
+      export TCPCONNECT_SIGINT
+      shift
+     ;;
     -R | --no-resolve | --no-reverse-resolve | --no-r* )
       TCPCONNECT_REVRES=nil
       export TCPCONNECT_REVRES
+      shift
+     ;;
+    -s | --stty* | -s* )
+      eval "$getopt"
+      case "$optarg" in
+        *,* ) optarg=`echo "$optarg" | sed 's/,/ /g'` ;;
+      esac
+      TCPCONNECT_STTY="$optarg"
+      export TCPCONNECT_STTY
+     ;;
+    -v | --verbose | --v* )
+      TCPCONNECT_VERBOSE=t
+      export TCPCONNECT_VERBOSE
       shift
      ;;
     -- )     # Stop option processing
@@ -163,13 +189,6 @@ case $# in
    ;;
 esac
 
-case $# in
-  0 )
-    echo "$usage" 1>&2
-    exit 1
-   ;;
-esac
-
 TCPCONNECT_PROGNAME="$progname"
 export TCPCONNECT_PROGNAME
 
@@ -189,10 +208,22 @@ sub main
   # See comments preceding perl invocation for an explanation.
   if (! open (STDIN, "<&9"))
     {
-      printf (STDERR "$0: cannot recover stdin from fd 9: $!\n");
+      &errmsg ("cannot recover stdin from fd 9", "$!");
       exit (1);
     }
   close (9);
+
+  $saved_stty_settings = '';
+  if ($ENV{'TCPCONNECT_STTY'} ne "")
+    {
+      $saved_stty_settings = `stty -g`;
+      `stty $ENV{'TCPCONNECT_STTY'}`;
+
+      $SIG{'HUP'}  = 'restore_stty';
+      $SIG{'INT'}  = $SIG{'HUP'};
+      $SIG{'QUIT'} = $SIG{'HUP'};
+      $SIG{'TERM'} = $SIG{'HUP'};
+    }
 
   &initialize_sockvars;
   &tcpconnect (@ARGV);
@@ -258,17 +289,26 @@ sub tcpconnect
       bind (S, $thishost)
         || die ("$progname: bind: $!");
 
+      if ("$canon_rhostname" =~ /^[0-9.]+$/)
+        {
+          $hinfo = "$canon_rhostname port $port";
+        }
+      else
+        {
+          $hinfo = "$canon_rhostname ["
+                     . &ipaddr2string ($rhostaddr[0])
+                     . "] port $port";
+        }
+
       # Connect to server.
+      &verbose ("trying $hinfo...");
       if (! connect (S, $rhost))
         {
-          &errmsg ("connect",
-                   "$canon_rhostname [" . &ipaddr2string ($rhostaddr[0]) . "]",
-                   "$!");
+          &errmsg ("connect", $hinfo, "$!");
 
           shift (@rhostaddr);
           if ($#rhostaddr >= 0)
             {
-              &errmsg ("trying " . &ipaddr2string ($rhostaddr[0]) . "...");
               next;
             }
           else
@@ -278,12 +318,17 @@ sub tcpconnect
         }
       else
         {
+          &verbose ($hinfo, "connection established.");
           $ok = 1;
         }
     }
 
-  # Avoid deadlock by forking.
-  $child = fork ();
+  # This is not done until now so that the program is interruptible until
+  # the conection is established.
+  if ("$ENV{TCPCONNECT_SIGINT}" eq 'nil')
+    {
+      $SIG{'INT'} = 'IGNORE';
+    }
 
   # Set file handles to be command buffered.
   # Since we do unbuffered sysreads and syswrites this may actually be
@@ -292,10 +337,13 @@ sub tcpconnect
   select (STDIN);  $| = 1;
   select (STDOUT); $| = 1;
 
+  # Avoid deadlock by forking.
+  $child = fork ();
+
   if ($child == 0)
     {
-      $0 = "$0 [PPID=" . getppid() . "]";
       $SIG{'HUP'} = 'shutdown_child';
+      $0 = "$0 [PPID=" . getppid() . "]";
       ($in, $out) = (STDIN, S);
     }
   else
@@ -303,6 +351,14 @@ sub tcpconnect
       $SIG{'HUP'} = 'shutdown_parent';
       $SIG{'CHLD'} = 'parent_SIGCHLD_handler';
       ($in, $out) = (S, STDOUT);
+    }
+
+  # If sighup may be sent, give time for both processes to finish setting
+  # up sig handlers.  This is usually only bcritical if sending input from a
+  # pipeline.  Users are slow as paste.
+  if ("$ENV{TCPCONNECT_SIGHUP}" ne "nil")
+    {
+      sleep (1);
     }
 
   local ($fn) = $SIG{'HUP'};
@@ -318,20 +374,19 @@ sub tcpconnect
 # Called by child
 sub shutdown_child
 {
+  # Disable further hup signals
+  $SIG{'HUP'} = 'IGNORE';
+
   local ($ppid) = getppid ();
 
   if ($ppid != 1 && $ENV{'TCPCONNECT_SIGHUP'} eq "nil")
     {
-      # Sleep for a second to allow time for parent to set up handlers.
-      # This is usually only critical if sending input from a pipeline.
-      # Users are slow as paste.
-      sleep (1);
       shutdown (S, $SHUTDOWN_SEND);
     }
   else
     {
       shutdown (S, $SHUTDOWN_SEND);
-      kill ('SIGHUP', $ppid);
+      kill ('HUP', $ppid);
     }
 
   exit (0);
@@ -340,11 +395,16 @@ sub shutdown_child
 # Called by parent
 sub shutdown_parent
 {
+  # Disable further hup signals
+  $SIG{'HUP'} = 'IGNORE';
+
   shutdown (S, $SHUTDOWN_RECEIVE);
   close (S);
+  &verbose ($hinfo, "connection closed.");
+  &restore_stty;
   if ($ENV{'TCPCONNECT_SIGHUP'} ne "nil")
     {
-      kill ('SIGHUP', $child);
+      kill ('HUP', $child);
     }
   exit (0);
 }
@@ -353,6 +413,14 @@ sub shutdown_parent
 sub parent_SIGCHLD_handler
 {
   wait;
+}
+
+sub restore_stty
+{
+  if ("$saved_stty_settings" ne '')
+    {
+      `stty "$saved_stty_settings"`;
+    }
 }
 
 sub initialize_sockvars
@@ -427,6 +495,14 @@ sub ipaddr2string
 sub errmsg
 {
   printf (STDERR join(": ", $progname, @_) . "\n");
+}
+
+sub verbose
+{
+  if ("$ENV{TCPCONNECT_VERBOSE}" eq "t")
+    {
+      printf (STDERR join(": ", $progname, @_) . "\n");
+    }
 }
 
 __EOF__
