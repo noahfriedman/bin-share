@@ -1,0 +1,345 @@
+#!/bin/sh
+# ludeconf --- configure autoconfiscated packages for installation in lude
+
+# Copyright (C) 1997 Noah S. Friedman
+
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 1997-06-03
+
+# $Id$
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, you can either send email to this
+# program's maintainer or write to: The Free Software Foundation,
+# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
+
+# Commentary:
+# Code:
+
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {$progname-options} {-- {configure-options}}
+
+$progname options:
+--cc, --with-cc      {CC}    Force use of CC for C compiler.
+                             If optional arg CC not specified, use ${bq}gcc$eq.
+--configure          CONFSH  Run the CONFSH configure script.
+                             If not specified, guess location.
+
+-x, --x, --with-x    {XDIR}  Use X Window System; look for libraries in
+                             XDIR/lib and header files in XDIR/include.
+                             If optional arg XDIR not specified, guess
+                             location.
+-X, --no-x, --without-x      Do not configure to use X Window System.
+                             This is the default for most programs.
+
+-C, --class          CLASS   Use CLASS as the lude system architecture.
+                             If not specified, guess using ${bq}ludeclass$eq.
+-D, --depot          DEPOT   Use DEPOT as the lude system depot.
+                             If not specified, guess.
+-S, --soft           SOFT    Use SOFT as the lude software package.
+                             If not specified, guess.
+
+-h, --help                   You're looking at it.
+-v, --verbose                Verbose output.
+--debug                      Turn on shell debugging ($bq${bq}set -x$eq$eq).
+"
+
+##########
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+verbose=
+
+configure_options=
+configure_program=
+configure_x=no
+
+lude_class=${LUDE2_CLASS}
+lude_depot=${LUDE2_DEPOT}
+lude_soft=${LUDE2_SOFTWARE}
+
+##########
+
+# Usage: eval "$getopt"; value=$optarg
+# or     optarg_optional=t; eval "$getopt"; value=$optarg
+#
+# This function automatically shifts the positional args as appropriate.
+# The argument to an option is optional if the variable `optarg_optional'
+# is non-empty.  Otherwise, the argument is required and getopt will cause
+# the program to exit on an error.  optarg_optional is reset to be empty
+# after every call to getopt.  The argument (if any) is stored in the
+# variable `optarg'.
+#
+# Long option syntax is `--foo=bar' or `--foo bar'.
+# For optional args, you must use the `--foo=bar' long option syntax
+# if the argument starts with `-', otherwise the argument will be ignored
+# and treated as the next option.
+#
+# Note: because of broken bourne shells, using --foo=bar syntax can
+# actually screw the quoting of args that end with trailing newlines.
+# Specifically, most shells strip trailing newlines from substituted
+# output, regardless of quoting.
+getopt='
+  {
+    optarg=
+    case "$1" in
+      --*=* ) optarg=`echo "$1" | sed -e "1s/^[^=]*=//"` ; shift ;;
+      -* )
+        case "${2+set}:$optarg_optional" in
+          set: ) optarg="$2" ; shift ; shift ;;
+          set:?* )
+            case "$2" in
+              -* ) shift ;;
+              * )  optarg="$2"; shift; shift ;;
+            esac
+           ;;
+          : )
+            option="$1"
+            case "$option" in
+              --*=* ) option=`echo "$option" | sed -e "1s/=.*//;q"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$progname: use $bq--help$eq to list option syntax." 1>&2
+            exit 1
+           ;;
+          * ) shift ;;
+        esac
+       ;;
+    esac
+    optarg_optional=
+  }'
+
+##########
+
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
+    -C | --class* | --lude-class* )
+       eval "$getopt"
+       lude_class="$optarg"
+     ;;
+    -D | --depot* | --lude-depot* )
+       eval "$getopt"
+       lude_depot="$optarg"
+     ;;
+    -S | --soft* | --lude-soft* )
+       eval "$getopt"
+       lude_soft="$optarg"
+     ;;
+
+    --cc* | --with-cc* )
+       optarg_optional=t
+       eval "$getopt"
+       case "$optarg" in
+         -* )
+           set fnord "$optarg" ${1+"$@"}
+           shift
+           CC=gcc
+          ;;
+         * ) CC="$optarg" ;;
+       esac
+       export CC
+     ;;
+
+    --configure* )
+       eval "$getopt"
+       configure_program="$optarg"
+     ;;
+
+    --debug | --d* )
+      debug=t
+      shift
+     ;;
+    -h | --help | --h* | -\? )
+      echo "$usage" 1>&2
+      exit 0
+     ;;
+    -v | --verbose | --v* )
+      configure_options="$configure_options --verbose"
+      verbose=t
+      shift
+     ;;
+    -x | --x* | --with-x* )
+      optarg_optional=t
+      eval "$getopt"
+      x11dirs="$optarg"
+      configure_x=yes
+     ;;
+    -X | --no-x* | --without-x* )
+      configure_x=no
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -? | --* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    -??* )
+      # Split grouped single options into separate args and try again
+      optarg="$1"
+      shift
+      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+      shift
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+case "$debug" in t ) set -x ;; esac
+
+##########
+
+case "$lude_depot" in
+  '' )
+    depots='
+      /tools/ns
+      /usr/local
+    '
+    for dir in $depots ; do
+      if test -d "$dir/soft" ; then
+        lude_depot="$dir/soft"
+        break
+      fi
+    done
+
+    case "$lude_depot" in
+      '' )
+        echo "$progname: Cannot determine LUDE depot." 1>&2
+        exit 1
+       ;;
+    esac
+   ;;
+esac
+
+case "$lude_soft" in
+  '' )
+    sed_re_quote='s/\([][*.\\\/?+|^$]\)/\\\1/g'
+    depot_re=`{ cd "$lude_depot" && pwd; } | sed -e "$sed_re_quote"`
+    lude_soft=`pwd | sed -e "s/^$depot_re\///" -e 's/\/.*//'`
+
+    case "$lude_soft" in
+      '' | */* )
+        echo "$progname: Cannot determine LUDE software package name." 1>&2
+        exit 1
+       ;;
+    esac
+   ;;
+esac
+
+case "$lude_class" in
+  '' ) lude_class=`ludeclass` ;;
+esac
+
+##########
+
+case "$configure_program" in
+  '' )
+    configure_program=./configure
+    for dir in . ../../orig "$lude_depot/$lude_soft/src/orig" ; do
+      if test -f "$dir/configure" ; then
+        configure_program="$dir/configure"
+        break
+      fi
+    done
+   ;;
+esac
+
+case "$configure_x:$x11dir" in
+  no:* )
+    configure_options="$configure_options --with-x-toolkit=no --without-x"
+    x11dir=
+   ;;
+  yes: )
+    x11dirs='
+      /usr/X11R6
+      /usr/local/X11
+      /usr/openwin
+      /usr
+    '
+    libexts='a so'
+    x11dir=
+    for dir in $x11dirs; do
+      for ext in $libexts ; do
+        if test -f $dir/lib/libX11.$ext ; then
+          x11dir=$dir
+          break
+        fi
+      done
+    done
+
+    case "$x11dir" in
+      '' )
+        echo "$progname: warning: Can't find X headers and libraries" 1>&2
+       ;;
+    esac
+   ;;
+esac
+
+case "$x11dir" in
+  '' ) : ;;
+   * ) configure_options="$configure_options
+                          --with-x-toolkit-yes
+                          --with-x11
+                          --x-includes=$x11dir/include
+                          --x-libraries=$x11dir/lib"
+      ;;
+esac
+
+##########
+
+install_prefix=$lude_depot/$lude_soft/run/default
+
+set fnord \
+    "$configure_program" \
+    --prefix="$install_prefix/share" \
+    --exec-prefix="$install_prefix/$lude_class" \
+    $configure_options ${1+"$@"}
+shift
+
+case "$verbose" in
+  t )
+    echo "$progname:" \
+         "depot=$lude_depot," \
+         "soft=$lude_soft," \
+         "class=$lude_class"
+    echo ${1+"$@"}
+   ;;
+esac
+
+exec ${1+"$@"}
+
+# ludeconf ends here
