@@ -1,12 +1,12 @@
-#! /bin/sh
+#!/bin/sh
 # symlink-resolve --- dereference symbolic links
 
-# Copyright (C) 1993, 1995, 1998 Noah S. Friedman
+# Copyright (C) 1993, 1995, 1998, 2000 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1993-02-07
 
-# $Id: symlink-resolve,v 1.8 1996/08/09 05:16:42 friedman Exp $
+# $Id: symlink-resolve,v 1.9 1998/09/28 23:29:45 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,169 +26,140 @@
 # Commentary:
 
 # Resolve pathnames until there are no more symbolic links.  Resulting
-# pathname be not be a file that actually exists (depending on whether
+# pathname may not be a file that actually exists (depending on whether
 # symlinks point to nonexistent files).
 
 # Code:
 
-# Name by which this script was invoked.
-progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl		  [perl will skip all lines in this file before this line]
 
-# To prevent hairy quoting and escaping later.
-bq='`'
-eq="'"
+use Getopt::Long;
+use Cwd;
 
-usage="Usage: $progname {options} [path1] {path2} {...}
+my $cwd;
 
-Options are:
--D, --debug                  Enable shell/perl debugging.
--h, --help                   You're looking at it.
--n, --no-canonicalize        Do not canonicalize pathnames by resolving
-                             references to $bq..$eq, etc.
-"
+# Args: basename, default-directory
+#
+# Convert basename to absolute, and canonicalize it.  Second arg
+# default-directory is directory to start with if basename is relative
+# (does not start with slash); if default-directory is undefined, the
+# current working directory is used.  File name components that are `.' are
+# removed, and so are file name components followed by `..', along with the
+# `..' itself; note that these simplifications are done without checking
+# that the file name actually exists in the file system.
+sub expand_file_name ($;$)
+{
+  local $_ = shift;
 
-# Initialize variables.
-# Don't use `unset' since old bourne shells don't have this command.
-# Instead, assign them an empty value.
-debug=
-SYMLINK_CANONICALIZE=
+  if ($_ !~ m|^/|o)
+    {
+      $cwd = getcwd() unless (defined $cwd);
+      $_ = join ('/', (shift || $cwd), $_);
+    }
 
-# Parse command line arguments.
-# Make sure that all wildcarded options are long enough to be unambiguous.
-# It's a good idea to document the full long option name in each case.
-# Long options which take arguments will need a `*' appended to the
-# canonical name to match the value appended after the `=' character.
-while : ; do
-  case $# in 0) break ;; esac
-  case "$1" in
-    -D | --debug | --d* )
-      # This option is passed to perl for interactive debugging
-      debug=-d
-      shift
-     ;;
-    -h | --help | --h )
-      echo "$usage" 1>&2
-      exit 0
-     ;;
-    -n | --no-canonicalize | --n* )
-      SYMLINK_CANONICALIZE=nil
-      export SYMLINK_CANONICALIZE
-      shift
-     ;;
-    -- )     # Stop option processing
-      shift
-      break
-     ;;
-    -? | --* )
-      case "$1" in
-        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
-        * )     arg="$1" ;;
-      esac
-      exec 1>&2
-      echo "$progname: unknown or ambiguous option $bq$arg$eq"
-      echo "$progname: Use $bq--help$eq for a list of options."
-      exit 1
-     ;;
-    -??* )
-      # Split grouped single options into separate args and try again
-      optarg="$1"
-      shift
-      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
-      shift
-     ;;
-    * )
-      break
-     ;;
-  esac
-done
+  # These substitutions must be done in loops to handle overlapping `/'
+  # characters in adjacent patterns.
+  s|/\./|/|o         while (m|/\./|o);
+  s|//|/|o           while (m|//|o);
+  s|/[^/]+/\.\./|/|o while (m|/[^/]+/\.\./|o);
+  s|/[^/]+/\.\.$||o;
+  s|/.$||go;
+  # Eliminate leading `..'.
+  # It may be harmful to do it if the filesystem interprets `/..' as
+  # something not equivalent to `/'.
+  #s|^/\.\./|/|o     while (m|^/\.\./|o);
+  return $_;
+}
 
-case "$debug" in -d ) set -x ;; esac
-
-case $# in
-  0 )
-   echo "$usage" 1>&2
-   exit 1
-  ;;
-esac
-
-exec perl $debug - ${1+"$@"} <<'__EOF__'
-
-if ($ENV{'SYMLINK_CANONICALIZE'} ne 'nil')
-  {
-   chop ($pwd = `pwd`);
-  }
-
-next_path:
-for ($i = 0; $i < @ARGV; $i++)
-  {
-   @p = split (/\//, "$ARGV[$i]");
-   $link_count = 0;
-   for ($j = 0; $j < @p; $j++)
-     {
-      $orig_component = $k = join ("/", @p[0 .. $j]);
-      while ($l = readlink($k))
+sub dereference_links ($)
+{
+  my $file = shift;
+  my @p = split (m|/|, $file);
+  my $link_count = 0;
+  for (my $j = 0; $j <= $#p; $j++)
+    {
+      my $k = join ("/", @p[0 .. $j]);
+      my $orig_component = $k;
+      while (my $l = readlink ($k))
         {
-         $k = $l;
-         # Simple way of detecting symlink loops (it unfortunately causes
-         # the system to give up when there are simply too many levels,
-         # even if resolution would eventually occur).  This parameter is
-         # adjustable, of course.  Most unix kernels allow a depth of 8.
-         if ($link_count++ == 32)
-           {
-            print STDERR "symlink-resolve: $ARGV[$i]: " .
-                         "Too many levels of symbolic links\n";
-            next next_path;
-           }
+          $k = $l;
+          # Simple way of detecting symlink loops (it unfortunately causes
+          # the system to give up when there are simply too many levels,
+          # even if resolution would eventually occur).  This parameter is
+          # adjustable, of course.  Most unix kernels allow a depth of 8.
+          if ($link_count++ == 64)
+            {
+              print STDERR "$0: $file: Too many levels of symbolic links\n";
+              return undef;
+            }
         }
-      if ($k eq $orig_component)
-        {
-         next;
-        }
+      next if ($k eq $orig_component);
       if (substr ($k, 0, 1) eq "/")
         {
-         # Absolute link.  Trash $p[0]-$p[$j+1] and replace with readlinked
-         # path components.  Set $j to -1 so that next iteration of loop
-         # will check array @p from start.
-         splice (@p, 0, $j + 1, split (/\//, $k));
-         $j = -1;
+          # Absolute link.  Trash $p[0]-$p[$j+1] and replace with readlinked
+          # path components.  Set $j to -1 so that next iteration of loop
+          # will check array @p from start.
+          splice (@p, 0, $j + 1, split (m|/|, $k));
+          $j = -1;
         }
       else
         {
-         # Insert partial (relative) path component into array in place of
-         # current element $p[$j]
-         splice (@p, $j, 1, split (/\//, $k));
-         $j--;
+          # Insert partial (relative) path component into array in place of
+          # current element $p[$j]
+          splice (@p, $j, 1, split (m|/|, $k));
+          $j--;
         }
-     }
-   $_ = join ("/", @p);
+    }
+  join ("/", @p);
+}
 
-   # If pathname should not be canonicalized, exit here.
-   if ($ENV{'SYMLINK_CANONICALIZE'} eq 'nil')
-     {
-      print "$_\n";
-      exit (0);
-     }
+sub show_links ($)
+{
+  my $filelist = shift;
+  my $multip = ($#$filelist > 0);
+  for my $file (@$filelist)
+    {
+      my $linkto = dereference_links ($file);
+      if ($file eq $linkto)
+        {
+          print "$file\n";
+        }
+      else
+        {
+          $linkto = expand_file_name ($linkto) unless ($nocanonicalizep);
+          print ($multip? "$file -> $linkto\n" : "$linkto\n");
+        }
+    }
+}
 
-   # Canonicalize pathname.
-   s/^\.$/$pwd/o;                     # Replace single "." with pwd.
-   s/^([^\/])/$pwd\/\1/o;             # Prepend pwd if relative.
-   s/\/\.\//\//og;                    # Remove any occurence of "/./".
-   s/^.*\/\//\//og;                   # Get rid of "//" occurences.
-   # Must do this in a loop to handle overlapping `/' character in
-   # instances of "/../../"
-   while (/\/[^\/][^\/]*\/\.\.\//o)
-     {
-      s/\/[^\/][^\/]*\/\.\.\//\//o;   # Resolve most references to ".."
-     }
-   s/\/[^\/][^\/]*\/\.\.$//o;         # Resolving trailing ".."
-   s/^\/\.\.\//\//go;                 # Eliminate leading "/.."
-   if ($#ARGV > 0)
-     {
-       print "$ARGV[$i] -> ";
-     }
-   print "$_\n";
-  }
+sub usage ()
+{
+  print "Usage: $0 {options} [path1] {path2} {...}
 
-__EOF__
+Options are:
+-h, --help                   You're looking at it.
+-n, --no-canonicalize        Do not canonicalize pathnames by resolving
+                             references to \`..', etc.\n";
+  exit (1);
+}
 
-# symlink_resolve ends here
+sub main ()
+{
+  $0 =~ s|.*/||;
+
+  $nocanonicalizep = 0;
+  Getopt::Long::config ('bundling', 'autoabbrev');
+  GetOptions ("n|no-canonicalize", \$nocanonicalizep,
+              "h|help", \&usage);
+  show_links (\@ARGV);
+}
+
+main();
+
+# local variables:
+# mode: perl
+# eval: (auto-fill-mode 1)
+# end:
+
+# symlink-resolve ends here

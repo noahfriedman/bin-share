@@ -1,2 +1,14 @@
 #! /bin/sh
-xauth extract - $DISPLAY | rsh $1 xauth merge -
+# $Id$
+
+rhost=$1
+shift
+
+case $# in
+  0 )
+    set fnord $DISPLAY
+    shift
+   ;;
+esac
+
+xauth extract - ${1+"$@"} | ${RSH-rsh} $rhost ${RXAUTH-xauth} merge -

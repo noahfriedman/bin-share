@@ -1,18 +1,63 @@
 #! /bin/sh
+# apropos-command --- display list of commands in path matching pattern
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 1997-05-27
+# Public domain.
+
 # $Id$
 
+# Reinvoke with perl if available.
+{ ${PERL-perl} -v; } > /dev/null 2>&1 && exec ${PERL-perl} -Sx $0 ${1+"$@"}
+
+# bourne shell; portable, but much slower and less functional.
+# It may even fail if the `-x' test flag is not supported.
 {
-  for dir in `echo "$PATH" \
-               | sed -e 's/^:/.:/;s/::/:.:/g;s/:$/:./;s/:/ /g'`
+  for dir in `echo "$PATH" | sed -e 's/^:/.:/;s/::/:.:/g;s/:$/:./;s/:/ /g'`
   do
     ls -1a "$dir" \
       | grep -i "$1" \
-      | {
-          while read f; do
-            test -f "$dir/$f" && test -x "$dir/$f" && echo "$f"
-          done
-        }
-  done
-} | sort -u
+      | while read f; do
+          test -f "$dir/$f" && test -x "$dir/$f" && echo "$f"
+        done
+  done | sort -u
+  exit $?
+}
 
-# eof
+#!perl   [perl will skip all lines in this file before this line]
+
+{
+  # Cheesy option parsing
+  $filterp = 1;
+  while (substr ($ARGV[0], 0, 1) eq '-')
+    {
+      my $arg = shift @ARGV;
+      last if ($arg eq '--');
+      $filterp = 0 if ($arg eq '-a');
+    }
+
+  my $pattern = shift @ARGV;
+  my @pathlist = split (/:/, $ENV{PATH});
+  my %files;
+  for my $dir (@pathlist)
+    {
+      $dir = "." if ($dir eq "");
+      opendir (D, $dir) || next;
+      for my $file (grep (/$pattern/io, readdir (D)))
+        {
+          if ($filterp)
+            {
+              # Skip shared libraries (which are often marked executable)
+              # unless user specifically put `lib' in the search pattern
+              next if ($file =~ /^lib.*\.(a|so|la)/o && $pattern !~ /lib/o);
+              # Skip backup and autosave files unless explicitly searched
+              next if ($file =~ /[~#]$/o && $pattern !~ /[~#]/o);
+            }
+          my $f = join ("/", $dir, $file);
+          $files{"$file\n"} = undef if (-f $f && -x $f);
+        }
+      closedir (D);
+    }
+  print sort { uc($a) cmp uc($b) } keys %files;
+}
+
+# apropos-command ends here
