@@ -1,27 +1,17 @@
 #!/bin/sh
-# $Id: ssh-add-all,v 1.2 2002/07/18 07:44:20 friedman Exp $
+# $Id: ssh-add-all,v 1.3 2003/09/26 22:44:33 friedman Exp $
 
-ssh1keys='
-  friedman@splode.com
-  friedman@inktomi.com
-  noahf@yahoo-inc.com
-  friedman@mozilla.org
-'
+cd $HOME/etc/certs/ssh || exit 1
+test -f .load-certs || exit 1
 
-openssh_dsakeys='
-  friedman@splode.com
-  friedman@inktomi.com
-  noahf@yahoo-inc.com
-  friedman@mozilla.org
-'
+ids=`cat .load-certs`
 
-for key in $ssh1keys; do
-  ssh-add $HOME/etc/certs/ssh1/$key/identity
-done
-
-cd $HOME/etc/certs/openssh
-for key in $openssh_dsakeys; do
-  ssh-add $key/id_dsa
+for id in $ids; do
+  for key in id_rsa id_dsa identity ; do
+    if [ -f $id/$key ]; then
+      ssh-add $id/$key
+    fi
+  done
 done
 
 # eof
