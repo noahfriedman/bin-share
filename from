@@ -1,9 +1,12 @@
-#!/usr/local/bin/gawk -f
-# From - show you who your mail is from.
-# 19-Jan-92 Noah Friedman <friedman@prep.ai.mit.edu>
-# Last modified 27-Mar-93 (alpha test)
+#!/usr/local/gnubin/gawk -f
+# from --- show you who your mail is from
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1992-01-19
+# Last modified: 1993-03-27
 # Public domain
-#
+
+# Commentary:
+# Code:
 
 function initialize_variables ()
 {
@@ -224,6 +227,4 @@ BEGIN {
     add_header($0, headers);
 }
 
-#
-# eof
-#
+# from ends here
