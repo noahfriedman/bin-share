@@ -1,7 +1,7 @@
 #!/bin/sh
 # mkpass --- prompt for cleartext password and echo crypted result
 
-# Copyright (C) 1993, 1994, 1996 Noah S. Friedman
+# Copyright (C) 1993, 1994, 1996, 1997 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1993-09-26
@@ -41,6 +41,7 @@ Options are:
 If cleartext is not specified on the command line, it will be prompted for
 interactively.  Specifying the cleartext on the command line is less secure
 since someone may be able to see it with the ${bq}ps$eq command.
+You can also feed the cleartext password as input using a pipe.
 "
 
 # Initialize variables.
@@ -170,57 +171,61 @@ case "$debug" in -d ) set -x ;; esac
 
 case $# in
   0 )
-    umask 077
-    stty_settings=`stty -g 2> /dev/null`
+    if test -t 0 ; then
+      umask 077
+      stty_settings=`stty -g 2> /dev/null`
 
-    reset_stty='
-      {
-        case "$stty_settings" in
-          "" ) stty echo 2> /dev/null ;;
-          * )  stty "$stty_settings" 2> /dev/null ;;
+      reset_stty='
+        {
+          case "$stty_settings" in
+            "" ) stty echo 2> /dev/null ;;
+            * )  stty "$stty_settings" 2> /dev/null ;;
+          esac
+        }
+      '
+
+      trap '{
+              exitstat=$?
+
+              eval "$reset_stty"
+              echo 1>&2
+
+              trap "" 1 2 3 15
+              exit $exitstat
+            }' 1 2 3 15
+
+      stty -echo 2> /dev/null
+
+      while : ; do
+        # Must echo to stderr, because in all likelihood stdout is being
+        # subtituted by a shell command to get the resultant ciphertext.
+        # This is what comes of using an operating system that only has lame
+        # numeric return values.  feh!
+        exec 9>&1 1>&2
+
+        echo -n "Password:"
+        read passwd
+        echo
+
+        case "$passwd" in ?????????* )
+          echo "Warning: only first 8 characters will be used." ;;
         esac
-      }
-    '
 
-    trap '{
-            exitstat=$?
+        echo -n "Password (again):"
+        read passwd1
+        echo
 
-            eval "$reset_stty"
-            echo 1>&2
+        case "$passwd" in "$passwd1") break ;; esac
 
-            trap "" 1 2 3 15
-            exit $exitstat
-          }' 1 2 3 15
+        echo
+        echo "Password mismatch; try again."
+      done
 
-    stty -echo 2> /dev/null
-
-    while : ; do
-      # Must echo to stderr, because in all likelihood stdout is being
-      # subtituted by a shell command to get the resultant ciphertext.
-      # This is what comes of using an operating system that only has lame
-      # numeric return values.  feh!
-      exec 9>&1 1>&2
-
-      echo -n "Password:"
+      exec 1>&9 9>&-
+      eval "$reset_stty"
+    else
       read passwd
-      echo
-
-      case "$passwd" in ?????????* )
-        echo "Warning: only first 8 characters will be used." ;;
-      esac
-
-      echo -n "Password (again):"
-      read passwd1
-      echo
-
-      case "$passwd" in "$passwd1") break ;; esac
-
-      echo
-      echo "Password mismatch; try again."
-    done
-
-    exec 1>&9 9>&-
-    eval "$reset_stty"
+    fi
    ;;
  1)
     passwd="$1"
@@ -232,28 +237,28 @@ case $# in
 esac
 
 exec perl - << __EOF__
-  if ("$salt" eq "")
+  if ('$salt' eq '')
     {
       srand (time ());
       # Not sure if '&' and '^' are valid; a few accounts on gnu.ai.mit.edu
       # use them, but I haven't found instances anywhere else.
-      @salt_chars = ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J",
-                     "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T",
-                     "U", "V", "W", "X", "Y", "Z",
-                     "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
-                     "k", "l", "m", "n", "o", "p", "q", "r", "s", "t",
-                     "u", "v", "w", "x", "y", "z",
-                     "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
-                     ".", "/");
+      @salt_chars = ('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+                     'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
+                     'U', 'V', 'W', 'X', 'Y', 'Z',
+                     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j',
+                     'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't',
+                     'u', 'v', 'w', 'x', 'y', 'z',
+                     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+                     '.', '/');
       \$s1 = int (rand() * 100000) % (\$#salt_chars + 1);
       \$s2 = int (rand() * 100000) % (\$#salt_chars + 1);
       \$salt = "\$salt_chars[\$s1]" . "\$salt_chars[\$s2]";
     }
   else
     {
-      \$salt = "$salt";
+      \$salt = '$salt';
     }
-  print crypt("$passwd", "\$salt") . "\n";
+  print crypt('$passwd', "\$salt") . "\n";
 __EOF__
 
 :
