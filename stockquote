@@ -4,7 +4,7 @@
 # Created: 1995-11-10
 # Public domain.
 
-# $Id: stockquote,v 1.1 1995/11/10 21:37:58 friedman Exp friedman $
+# $Id: stockquote,v 1.2 1995/12/18 17:00:29 friedman Exp $
 
 # Commentary:
 
@@ -14,7 +14,7 @@
 # Code:
 
 case "$1" in
-  -v ) shift; v=v ;;
+  -v ) shift; v=-v ;;
    * ) v= ;;
 esac
 
@@ -30,7 +30,7 @@ Content-type: application/x-www-form-urlencoded
 
 tick=$query
 
-" | tcpconnect -H$v $server $port \
+" | tcpconnect $v $server $port \
   | sed -ne '/^<[Pp][Rr][Ee]>/!d
              :l
              n
