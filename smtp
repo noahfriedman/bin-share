@@ -4,25 +4,25 @@
 # Created: 1995-04-15
 # Public domain
 
-# $Id: smtp,v 1.5 1996/06/07 02:43:55 friedman Exp $
+# $Id: smtp,v 1.6 1996/09/20 17:18:11 friedman Exp $
 
 case "$1" in
   aeneas )             h=aeneas.mit.edu            ;;
+  ai | life )          h=life.ai.mit.edu           ;;
   athena )             h=athena.mit.edu            ;;
   ccwf )               h=ccwf.cc.utexas.edu        ;;
-  cli )                h=cli.com                   ;;
-  cyclic | totoro )    h=cyclic.com                ;;
+  cyclic          )    h=cyclic.com                ;;
   es | rc )            h=hawkwind.utcs.toronto.edu ;;
-  floss )              h=floss.cyclic.com          ;;
+  eterna )             h=splode.eterna.com.au      ;;
   frob | baal )        h=frob.com                  ;;
-  gnu | albert)        h=albert.gnu.ai.mit.edu     ;;
+  gnu )                h=mail.gnu.org              ;;
   lcs | mintaka )      h=mintaka.lcs.mit.edu       ;;
   mc )                 h=mc.lcs.mit.edu            ;;
   media )              h=media.mit.edu             ;;
-  prep | ai | life )   h=life.ai.mit.edu           ;;
   osu | cis )          h=cis.ohio-state.edu        ;;
   piglet )             h=piglet.splode.com         ;;
-  splode )             h=splode.mame.mu.oz.au      ;;
+  prep )               h=gnu-life.ai.mit.edu       ;;
+  red-bean )           h=totoro.red-bean.com       ;;
   * )                  h="$1"                      ;;
 esac
 
