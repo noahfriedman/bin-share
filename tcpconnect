@@ -1,12 +1,15 @@
-#! /bin/sh
+#!/bin/sh
+exec ${PERL-perl} -Swx $0 ${1+"$@"}
+#!perl		  [perl will skip all lines in this file before this line]
+
 # tcpconnect --- connect via TCP to a specified host and port
 
-# Copyright (C) 1995, 1996 Noah S. Friedman
+# Copyright (C) 1995, 1996, 2001 Noah S. Friedman
 
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-04-15
 
-# $Id: tcpconnect,v 1.9 1996/03/22 21:31:47 friedman Exp $
+# $Id: tcpconnect,v 1.10 1996/06/06 08:34:53 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,329 +29,220 @@
 # Commentary:
 # Code:
 
-# Name by which this script was invoked.
-progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+use 5.002;
+use Getopt::Long;
+use Symbol;
+use Socket;
+use Fcntl;
+use POSIX qw(:errno_h);
+use strict;
 
-# To prevent hairy quoting and escaping later.
-bq='`'
-eq="'"
+my $progname         = $0;
+my $opt_no_intr      = 0;
+my $opt_no_proctitle = 0;
+my $opt_no_revres    = 0;
+my @opt_stty;
+my $opt_timeout;
+my $opt_verbose   = 0;
 
-usage="Usage: $progname {options} [host {port}]
-
-Options are:
--D, --debug           Turn on interactive debugging in perl.
--h, --help            You're looking at it.
--I, --include   DIR   Include DIR in @INC path for perl.
-                      This option may be specified multiple times to append
-                      search paths to perl.
--i, --no-intr         Ignore interrupts (SIGINT).
--d, --no-dynload      Do not attempt to use perl5 dynamic loaded libraries.
-                      This option is automatic if you are using perl4 or older.
--R, --no-resolve      Do not attempt to reverse-resolve numeric IP
-                      addresses if specified on the command line.
--s, --stty     FLAGS  Run with arbitrary terminal settings,
-                      e.g. ${bq}raw$eq, $bq-echo$eq, etc.  All flags will
-                      be restored on exit.
--v, --verbose         Report on status of connection.
-"
-
-# Initialize variables.
-# Don't use `unset' since old bourne shells don't have this command.
-# Instead, assign them an empty value.
-debug=
-includes=
-perl=${TCPCONNECT_PERL-${PERL-perl}}
-TCPCONNECT_DYNLOAD=
-TCPCONNECT_RESREV=
-TCPCONNECT_SIGINT=
-TCPCONNECT_STTY=
-TCPCONNECT_VERBOSE=
-
-# Usage: eval "$getopt"; value=$optarg
-# or     optarg_optional=t; eval "$getopt"; value=$optarg
-#
-# This function automatically shifts the positional args as appropriate.
-# The argument to an option is optional if the variable `optarg_optional'
-# is non-empty.  Otherwise, the argument is required and getopt will cause
-# the program to exit on an error.  optarg_optional is reset to be empty
-# after every call to getopt.  The argument (if any) is stored in the
-# variable `optarg'.
-#
-# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument
-# won't get used if first long option syntax was used.
-#
-# Note: because of broken bourne shells, using --foo=bar syntax can
-# actually screw the quoting of args that end with trailing newlines.
-# Specifically, most shells strip trailing newlines from substituted
-# output, regardless of quoting.
-getopt='
-  {
-    optarg=
-    case "$1" in
-      --*=* )
-        optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
-        shift
-       ;;
-      * )
-        case ${2+set} in
-          set )
-            optarg="$2"
-            shift
-            shift
-           ;;
-          * )
-            case "$optarg_optional" in
-              "" )
-                case "$1" in
-                  --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
-                  * ) option="$1" ;;
-                esac
-                exec 1>&2
-                echo "$progname: option $bq$option$eq requires argument."
-                echo "$progname: use $bq--help$eq to list option syntax."
-                exit 1
-               ;;
-           esac
-           shift
-         ;;
-        esac
-     ;;
-    esac
-    optarg_optional=
-  }'
-
-# Parse command line arguments.
-# Make sure that all wildcarded options are long enough to be unambiguous.
-# It's a good idea to document the full long option name in each case.
-# Long options which take arguments will need a `*' appended to the
-# canonical name to match the value appended after the `=' character.
-while : ; do
-  case $# in 0) break ;; esac
-  case "$1" in
-    -D | --debug | --de* )
-      debug=-d
-      shift
-      set -x
-     ;;
-    -d | --no-dynamic-loading | --no-dynload | --no-d* )
-      TCPCONNECT_DYNLOAD=nil
-      export TCPCONNECT_DYNLOAD
-      shift
-     ;;
-    -h | --help | --he* )
-      echo "$usage" 1>&2
-      exit 0
-     ;;
-    -I | --include* | --i* )
-      eval "$getopt"
-      includes="$includes -I$optarg"
-     ;;
-    -i | --no-intr | --no-in* )
-      TCPCONNECT_SIGINT=nil
-      export TCPCONNECT_SIGINT
-      shift
-     ;;
-    -R | --no-resolve | --no-reverse-resolve | --no-r* )
-      TCPCONNECT_REVRES=nil
-      export TCPCONNECT_REVRES
-      shift
-     ;;
-    -s | --stty* | -s* )
-      eval "$getopt"
-      case "$optarg" in
-        *,* ) optarg=`echo "$optarg" | sed 's/,/ /g'` ;;
-      esac
-      TCPCONNECT_STTY="$optarg"
-      export TCPCONNECT_STTY
-     ;;
-    -v | --verbose | --v* )
-      TCPCONNECT_VERBOSE=t
-      export TCPCONNECT_VERBOSE
-      shift
-     ;;
-    -- )     # Stop option processing
-      shift
-      break
-     ;;
-    -? | --* )
-      case "$1" in
-        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
-        * )     arg="$1" ;;
-      esac
-      exec 1>&2
-      echo "$progname: unknown or ambiguous option $bq$arg$eq"
-      echo "$progname: Use $bq--help$eq for a list of options."
-      exit 1
-     ;;
-    -??* )
-      # Split grouped single options into separate args and try again
-      optarg="$1"
-      shift
-      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
-      shift
-     ;;
-    * )
-      break
-     ;;
-  esac
-done
-
-case $# in
-  0 )
-    echo "$usage" 1>&2
-    exit 1
-   ;;
-esac
-
-TCPCONNECT_PROGNAME="$progname"
-export TCPCONNECT_PROGNAME
-
-# By using a here-document to include the source of the perl script (to
-# avoid command line length limits), we usurp the normal stdin the inferior
-# process might have expected.  So dup stdin onto fd 9, and before the
-# inferior process is started, it will be reduped back onto fd 0.
-exec $perl $debug $includes - ${1+"$@"} 9<&0 <<'__EOF__'
-
-&main;
-
-sub main
+sub verbose
 {
-  $progname = $ENV{TCPCONNECT_PROGNAME};
-  $0 = "$progname ($0)";
-
-  # See comments preceding perl invocation for an explanation.
-  if (! open (STDIN, "<&9"))
-    {
-      &errmsg ("cannot recover stdin from fd 9", "$!");
-      exit (1);
-    }
-  close (9);  # I don't think this works... lose lose.
-
-  $saved_stty_settings = '';
-  if ($ENV{'TCPCONNECT_STTY'} ne "")
-    {
-      $saved_stty_settings = `stty -g`;
-      `stty $ENV{'TCPCONNECT_STTY'}`;
-
-      $SIG{'HUP'}  = 'restore_stty';
-      $SIG{'INT'}  = $SIG{'HUP'};
-      $SIG{'QUIT'} = $SIG{'HUP'};
-      $SIG{'TERM'} = $SIG{'HUP'};
-    }
-
-  &initialize_sockvars;
-  &tcpconnect (@ARGV);
+  print join (": ", $progname, @_), "\n"
+    if ($opt_verbose);
 }
 
-# Args: host, port
-sub tcpconnect
+sub err
 {
-  local ($rhostname, $port) = @_;
-  local ($proto, $name, $aliases, $type, $len, $thisaddr);
-  local (@rhostaddr, $rhostaddrlen);
-  local ($in, $out);
-  # This is made global so that do_shutdown can use it.
-  #local ($child);
+  print STDERR join (": ", $progname, @_), "\n";
+  return undef;
+}
 
-  $0 = "$progname ($rhostname:$port)";
+
+my $SHUTDOWN_RECEIVE = 0;
+my $SHUTDOWN_SEND    = 1;
+my $SHUTDOWN_BOTH    = 2;
 
-  $hostname = `hostname`;
-  chop $hostname;
+my $h_errno = 0;
+my %herrstr = (-1 => "Resolver internal error",
+                0 => "Resolver Error 0 (no error)",
+                1 => "Unknown host",
+                2 => "Host name lookup failure",
+                3 => "Unknown server error",
+                4 => "No address associated with name");
 
-  ($name, $aliases, $proto) = getprotobyname ("tcp");
+my $ons_errstr = '';
 
-  if ($port !~ /^\d+$/o)
+sub ipaddrp ($)
+{
+  $_[0] =~ /^[\d.]+$/o;
+}
+
+sub herrstr (;$)
+{
+  my $null_if_no_error = shift;
+
+  return undef if ($null_if_no_error && $h_errno == 0);
+  return $herrstr{$h_errno};
+}
+
+sub netstream_gethostbyname ($)
+{
+  my $name = shift;
+
+  $h_errno = $? = 0;
+  my @data = gethostbyname ($name);
+  return @data if (scalar @data > 0);
+
+  $h_errno = $? if ($? != 0);
+  return undef;
+}
+
+sub netstream_gethostbyaddr ($;$)
+{
+  my ($addr, $type) = @_;
+
+  $type = AF_INET unless (defined $type);
+  $h_errno = $? = 0;
+  my $name = gethostbyaddr ($addr, $type);
+  $h_errno = $? if (!defined $name && $? != 0);
+
+  return (defined $name && $name ne "") ? $name : inet_ntoa ($addr);
+}
+
+# mode 1 = buffering, 0 = no buffering
+sub set_buffering_mode ($$)
+{
+  my ($sock, $mode) = @_;
+
+  my $orig_handle = select ($sock);
+  $| = ($mode == 0);
+  select ($orig_handle);
+}
+
+# mode 1 = blocking, 0 = non-blocking
+sub set_blocking_mode ($$)
+{
+  my ($sock, $mode) = @_;
+  my $flags = fcntl ($sock, F_GETFL, 0);
+  my $newflags = ($mode
+                  ? $flags & ~(O_NONBLOCK)
+                  : $flags | O_NONBLOCK);
+
+  fcntl ($sock, F_SETFL, $newflags)
+    if ($flags != $newflags);
+}
+
+# Currently the timeout argument applies independently to each connection
+# attempt for multiaddressed hosts.  Should this change?
+sub open_network_stream ($$;$)
+{
+  my ($rhostname, $port, $timeout) = @_;
+
+  $ons_errstr = '';
+
+  my $proto = getprotobyname ("tcp");
+  (undef, undef, $port) = getservbyname ($port, "tcp") if ($port !~ /^\d+$/o);
+
+  my @rhostaddr;
+  if (ipaddrp ($rhostname))
     {
-      ($name, $aliases, $port) = getservbyname ($port, "tcp");
-    }
-
-  ($name, $aliases, $type, $len, $thisaddr) = gethostbyname ($hostname);
-
-  if ($rhostname =~ /^[0-9.][0-9.]*$/o)
-    {
-      $canon_rhostname = &my_gethostbyaddr ($rhostname, $type);
-      @rhostaddr = &ip_canonical ($rhostname);
+      push @rhostaddr, inet_aton ($rhostname);
     }
   else
     {
-      ($name, $aliases, $type, $len, @rhostaddr) = gethostbyname ($rhostname);
-      if ($name eq "")
-        {
-          print (STDERR "$progname: cannot resolve $rhostname\n");
-          exit (1);
-        }
-      $canon_rhostname = $name;
+      @rhostaddr = netstream_gethostbyname ($rhostname);
+      return undef unless (defined @rhostaddr);
+      # try to get fully-qualified name.
+      $rhostname = $rhostaddr[0]
+        if (length ($rhostaddr[0]) > length ($rhostname));
+      splice (@rhostaddr, 0, 4);
     }
 
-  # Do not use Socket::sockaddr_in even if available, since it does not
-  # work for sparc-sun-solaris2.4.  In particular, the pack structure it
-  # uses is "S n C4 x8", which is wrong.
-  $sockaddr = "S n a4 x8";
-  $thishost = pack ($sockaddr, &AF_INET, 0, $thisaddr);
-
-  $rhostaddrlen = $#rhostaddr + 1;
-  $ok = 0;
-  while ($ok == 0 && $#rhostaddr > -1)
+  my $sock = gensym;
+  my $connected = 0;
+  my $hinfo;
+  while (!$connected && scalar @rhostaddr > 0)
     {
-      $rhost = pack ($sockaddr, &AF_INET, $port, $rhostaddr[0]);
-      close (S);
-
-      socket (S, &AF_INET, &SOCK_STREAM, $proto)
-        || die ("$progname: socket: $!");
-
-      if ("$canon_rhostname" =~ /^[0-9.]+$/o)
+      close ($sock) if (defined fileno ($sock));
+      unless (socket ($sock, AF_INET, SOCK_STREAM, $proto))
         {
-          $hinfo = "$canon_rhostname port $port";
+          $ons_errstr = "socket";
+          return undef;
+        }
+
+      $hinfo = $rhostname;
+      $hinfo .= sprintf " [%s]", inet_ntoa ($rhostaddr[0])
+        unless (ipaddrp ($rhostname));
+      verbose ("trying $hinfo port $port...");
+
+      # If a timeout is specified, put socket into non-blocking mode and
+      # select on it; if the connection succeeds before the timer expires,
+      # put the socket back in blocking mode and return it.
+      if (defined $timeout)
+        {
+          set_blocking_mode ($sock, 0);
+          my $status = connect ($sock, sockaddr_in ($port, shift @rhostaddr));
+          if ((!defined $status || $status == -1) && $! == EINPROGRESS)
+            {
+              my ($wbits, $tmout) = ('', $timeout);
+              vec ($wbits, fileno ($sock), 1) = 1;
+              my $n = select (undef, $wbits, undef, $tmout);
+
+              next if ($n == -1);
+
+              if ($n != 1)
+                {
+                  $! = ETIMEDOUT;
+                  next;
+                }
+
+              # We got an event before timeout, but don't know what kind.
+              # Check to make sure the connection actually succeeded.
+              my $so_error = getsockopt ($sock, SOL_SOCKET, SO_ERROR);
+              if (defined $so_error && unpack ('i', $so_error) != 0)
+                {
+                  $! = unpack ('i', $so_error);
+                  next;
+                }
+
+              set_blocking_mode ($sock, 1);
+              $connected = 1;
+            }
         }
       else
         {
-          $hinfo = "$canon_rhostname ["
-                     . &ipaddr2string ($rhostaddr[0])
-                     . "] port $port";
-        }
-
-      &verbose ("trying $hinfo...");
-      if (! connect (S, $rhost))
-        {
-          &errmsg ("connect", $hinfo, "$!");
-
-          shift (@rhostaddr);
-          if ($#rhostaddr >= 0)
-            {
-              next;
-            }
-          else
-            {
-              exit (1);
-            }
-        }
-      else
-        {
-          &verbose ($hinfo, "connection established.");
-          $ok = 1;
+          $connected = 1
+            if connect ($sock, sockaddr_in ($port, shift @rhostaddr));
         }
     }
 
-  # This is not done until now so that the program is interruptible until
-  # the conection is established.
-  if ("$ENV{TCPCONNECT_SIGINT}" eq 'nil')
+  if ($connected)
     {
-      $SIG{'INT'} = 'IGNORE';
+      verbose ("$hinfo port $port", "connection established.");
+      return $sock;
     }
 
-  &client_setproctitle ($canon_rhostname, $rhostname, $rhostaddrlen,
-                        $rhostaddr[0], $port);
+  # Must save errno value and undefine sock handle, otherwise an implicit
+  # destructor is called as this function exits with no remaining
+  # references to the handle; that destructor can modify errno if the
+  # handle does not contain a valid file descriptor (and it probably won't
+  # if the connect failed.)
+  my $errno = $!;
+  undef $sock;
+  $! = $errno;
 
-  &do_io (STDIN, STDOUT, S);
+  $ons_errstr = "connect";
+  return undef;
 }
 
-sub do_io
+sub copy_io_until_close ($$$)
 {
-  local ($inh, $outh, $remh) = @_;
-  local ($inbits, $outbits, $len) = ('', '', 0);
-  local ($bufsize) = 4096;
+  my ($inh, $outh, $remh) = @_;
+  my $inbits = '';
+  my $outbits = '';
+  my $bufsize = 4096;
 
-  vec ($inbits, fileno ($inh), 1) = 1;
+  vec ($inbits, fileno ($inh),  1) = 1;
   vec ($inbits, fileno ($remh), 1) = 1;
 
   while (1)
@@ -357,7 +251,7 @@ sub do_io
 
       if (vec ($outbits, fileno ($inh), 1) == 1)
         {
-          if ($len = sysread ($inh, $_, $bufsize))
+          if (my $len = sysread ($inh, $_, $bufsize))
             {
               syswrite ($remh, $_, $len);
             }
@@ -372,7 +266,7 @@ sub do_io
 
       if (vec ($outbits, fileno ($remh), 1) == 1)
         {
-          if ($len = sysread ($remh, $_, $bufsize))
+          if (my $len = sysread ($remh, $_, $bufsize))
             {
               syswrite ($outh, $_, $len);
             }
@@ -385,175 +279,128 @@ sub do_io
    }
 }
 
-sub initialize_sockvars
+
+my $stty_saveparm;
+
+sub stty ($)
 {
-  # Args to shutdown.
-  $SHUTDOWN_RECEIVE = 0;
-  $SHUTDOWN_SEND    = 1;
-  $SHUTDOWN_BOTH    = 2;
+  my $stty_args = shift;
+  return undef unless (defined $stty_args && scalar @$stty_args > 0);
 
-  if ( int ($]) <= 4 || $ENV{'TCPCONNECT_DYNLOAD'} eq "nil" )
+  unless (defined $stty_saveparm)
     {
-      # Push some include dirs which are pretty standard, just in case.
-      # Perl5 does not usually install .ph files.
-      push (@INC, "$ENV{HOME}/lib/perl",
-                  "/usr/local/gnu/lib/perl",
-                  "/usr/local/lib/perl",
-                  "/usr/lib/perl"
-           );
+      $stty_saveparm = `stty -g`;
+      chop $stty_saveparm;
 
-      if (! &require_soft ("sys/socket.ph"))
+      for my $sig (qw(HUP INT QUIT TERM))
         {
-          # Backdown if socket.ph cannot be found.
-          # These are probably correct, but not guaranteed to be.
-          # For example, on sparc-sun-solaris2.4, SOCK_STREAM is 2, not 1.
-          sub AF_INET     { return 2; }
-          sub SOCK_STREAM { return 1; }
-        }
-    }
-  else
-    {
-      eval "use Socket;";
-    }
-}
-
-sub require_soft
-{
-  local ($f) = @_;
-
-  foreach $dir (@INC)
-    {
-      if (-f "$dir/$f")
-        {
-          require "$f";
-          return "$dir";
-        }
-    }
-  return 0;
-}
-
-sub client_setproctitle
-{
-  local ($canon_rhostname, $rhostname,
-         $rhostaddrlen, $rhostaddr[0], $port) = @_;
-  local ($hinfo) = "$canon_rhostname";
-
-  if ($rhostname !~ /^[0-9.][0-9.]*$/o)
-    {
-      $hinfo = "$rhostname";
-    }
-
-  # If host has a name and that name has more than one IP address, show
-  # the address actually connected.
-  if (($rhostname =~ /^[0-9.][0-9.]*$/o || $rhostaddrlen > 1)
-        && "$hinfo" !~ /^[0-9.]+$/o)
-      {
-        $hinfo = "$hinfo" . "[" . &ipaddr2string ($rhostaddr[0]) . "]";
-      }
-
-    $0 = "$progname ($hinfo:$port)";
-}
-
-sub my_gethostbyaddr
-{
-  local ($addrstring, $type) = @_;
-  local ($addr) = 0;
-  local ($name) = "";
-
-  $addr = &ip_canonical ($addrstring);
-  $addrstring = &ipaddr2string ($addr);
-
-  if ("$ENV{TCPCONNECT_REVRES}" ne "nil")
-    {
-      $name = gethostbyaddr($addr, $type);
-    }
-
-  if ($name eq "")
-    {
-      return $addrstring;
-    }
-
-  return $name;
-}
-
-sub ip_canonical
-{
-  local ($addrstring) = @_;
-  local ($addr) = $addrstring;
-
-  if ($addrstring =~ /^[0-9.][0-9.]*$/o)
-    {
-      if ($addrstring =~ /[.]/o)
-        {
-          # String is in 255.255.255.255 format
-          local (@octet) = split (/[.]/o, $rhostname);
-          $addr = pack ('C4', @octet);
-        }
-      else
-        {
-          # If string is not in octet form but instead is a flat ascii IP,
-          # then just convert it to network byte order.
-          # Convert addrstring to the dotted decimal representation for it.
-          #
-          # source IP addresses are specified in this flat format in the
-          # IRC DCC protocol; I don't know if it's common anywhere else.
-          $addrstring = pack ("I", "$addrstring");
-          $addr = &htonl ($addrstring);
+          $SIG{$sig} = \&stty_restore;
         }
     }
 
-  return $addr;
+  system ("stty", @$stty_args);
 }
 
-sub this_host_big_endian_p
+sub stty_restore (;$)
 {
-  local ($x) = 1;
-  local (@y) = unpack ("c2", pack ("i", $x));
+  return undef unless (defined $stty_saveparm);
+  system ("stty", $stty_saveparm);
 
-  if ($y[0] == 1)
+  my $sig = shift;
+  if (defined $sig)
     {
-      # we're little-endian
-      return 0;
-    }
-  # we're big-endian
-  return 1;
-}
-
-# Convert integers from host byte order to network byte order.
-# Network byte order is big-endian.
-sub htonl
-{
-  local ($h) = @_;
-  local (@o);
-
-  if (&this_host_big_endian_p ())
-    {
-      return $h;
-    }
-
-  @o = unpack ('C4', $h);
-  $h = pack ('C4', $o[3], $o[2], $o[1], $o[0]);
-  return $h;
-}
-
-sub ipaddr2string
-{
-  return sprintf ("%d.%d.%d.%d", unpack ("C4", $_[0]));
-}
-
-sub errmsg
-{
-  printf (STDERR join(": ", $progname, @_) . "\n");
-}
-
-sub verbose
-{
-  if ("$ENV{TCPCONNECT_VERBOSE}" eq "t")
-    {
-      printf (STDERR join(": ", $progname, @_) . "\n");
+      my %sigval = ( HUP  => 1,
+                     INT  => 2,
+                     QUIT => 3,
+                     TERM => 15,
+                   );
+      exit (127 + $sigval{$sig});
     }
 }
 
-__EOF__
+
+sub rhost_setproctitle ($$;$)
+{
+  my ($host, $port, $sock) = @_;
+
+  if (defined $sock)
+    {
+      my $rsockaddr = getpeername ($sock);
+      ($port, my $raddr) = unpack_sockaddr_in ($rsockaddr);
+
+      unless ($opt_no_revres || ipaddrp ($host))
+        {
+          my $fqdn = netstream_gethostbyaddr ($raddr);
+          $host = $fqdn if (defined $fqdn && $fqdn ne $raddr);
+        }
+      $host .= sprintf "[%s]", inet_ntoa ($raddr)
+        unless (ipaddrp ($host));
+    }
+  $0 = "$progname ($host:$port)";
+}
+
+sub usage ()
+{
+  print "Usage: $progname {options} [host] [port]
+
+Options are:
+-h, --help            You're looking at it.
+-i, --no-intr         Ignore interrupts (SIGINT).
+-R, --no-resolve      Do not attempt to reverse-resolve numeric IP
+                      addresses if specified on the command line.
+-s, --stty     FLAGS  Run with arbitrary terminal settings,
+                      e.g. \`raw', \`-echo', etc.  All flags will
+                      be restored on exit.
+-v, --verbose         Report on status of connection.\n";
+  exit (1);
+}
+
+sub parse_options ()
+{
+  $progname =~ s|.*/||o;
+
+  Getopt::Long::config ('bundling', 'autoabbrev');
+  GetOptions ("h|help",                          \&usage,
+              "i|no-intr",                       \$opt_no_intr,
+              "P|no-proctitle",                  \$opt_no_proctitle,
+              "R|no-reverse-resolve|no-resolve", \$opt_no_revres,
+              "s|stty=s@",                       \@opt_stty,
+              "t|timeout=i",                     \$opt_timeout,
+              "v|verbose",                       \$opt_verbose,
+              );
+
+  @opt_stty = split (/\s*,\s*/o, join (",", @opt_stty));
+}
+
+sub main ()
+{
+  parse_options ();
+  usage () unless (scalar @ARGV == 2);
+  stty (\@opt_stty);
+
+  rhost_setproctitle ($ARGV[0], $ARGV[1]) unless ($opt_no_proctitle);
+  my $sock = open_network_stream ($ARGV[0], $ARGV[1], $opt_timeout);
+  unless (defined $sock)
+    {
+      my $h = herrstr (1);
+      err ($ARGV[0], $h . ".") if (defined $h);
+      err ("$ARGV[0] port $ARGV[1]", $ons_errstr, $! . ".") if (!defined $h);
+      exit (1);
+    }
+
+  # This is not done until now so that the program is interruptible until
+  # the conection is established.
+  $SIG{INT} = 'IGNORE' if ($opt_no_intr);
+  rhost_setproctitle ($ARGV[0], $ARGV[1], $sock) unless ($opt_no_proctitle);
+  copy_io_until_close (*STDIN{IO}, *STDOUT{IO}, $sock);
+  stty_restore ();
+}
+
+main ();
+
+# local variables:
+# mode: perl
+# eval: (auto-fill-mode 1)
+# end:
 
 # tcpconnect ends here.
