@@ -1,0 +1,21 @@
+#!/bin/sh
+# ftolower, 10-Feb-93 Noah Friedman <friedman@prep.ai.mit.edu>
+#  Portable script which demonstrates a way to rename all files to lower
+#  case.  Usage: ftolower [f1] {f2} {...}
+# Public domain.
+
+for file in ${1+"$@"} ; do
+    dirname="`echo \"${file}\" | sed -e 's/\/[^\/]*$//'`"
+    basename="`echo \"${file}\" | sed -e 's/.*\/\([^\/]*\)$/\1/'`"
+    new_basename="`echo \"${basename}\" | tr '[A-Z]' '[a-z]'`"
+    if test "z${basename}" = "z${file}" ; then
+       newname="${new_basename}"
+    else
+       newname="${dirname}/${new_basename}"
+    fi
+    if test "z${newname}" = "z${file}" ; then
+       :
+    else
+       mv "${file}" "${newname}"
+    fi
+done
