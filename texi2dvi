@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- smartly produce DVI files from texinfo sources
-# $Id: texi2dvi,v 0.19 1998/08/25 18:36:44 karl Exp $
+# $Id: texi2dvi,v 0.20 1998/11/06 22:24:22 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98 Free Software Foundation, Inc.
 #
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.19 $'
+rcs_revision='$Revision: 0.20 $'
 rcs_version=`set - $rcs_revision; echo $2`
 
 version="$0 (GNU Texinfo 3.12) $rcs_version
@@ -111,7 +111,7 @@ while test $# -gt 0; do
     -I | --I*)
       shift
       miincludes="$miincludes -I $1"
-      txincludes="$txincludes:$1"
+      txincludes="$txincludes$path_sep$1"
       ;;
     -t | --t*)    shift; textra="$textra\\
 $1";;
@@ -163,7 +163,7 @@ for command_line_filename in $nonopt; do
   # Output the macro-expanded file to here.  The vastly abbreviated
   # temporary directory name is so we don't have collisions on 8.3 or
   # 14-character filesystems.
-  tmpdir=${TMPDIR-/tmp}/t2d.$$
+  tmpdir=${TMPDIR-/tmp}/t2d$$
   filename_tmp=$tmpdir/$filename_noext.texi
 
   # Output the file with the user's extra commands to here.
@@ -174,8 +174,8 @@ for command_line_filename in $nonopt; do
   # since 8+3 filesystems don't allow multiple dots in the basename.
   tmpdir_bak=${tmpdir}.bak
   
-  # Make all those directories.
-  mkdir $tmpdir $tmpdir_expand $tmpdir_bak
+  # Make all those directories and give up if we can't succeed.
+  mkdir $tmpdir $tmpdir_expand $tmpdir_bak || exit 1
 
   # Always remove the temporary directories.
   trap "cd / && rm -rf $tmpdir $tmpdir_expand" 1 2 15
@@ -226,7 +226,7 @@ for command_line_filename in $nonopt; do
   # directory where source file(s) reside in TEXINPUTS before anything
   # else.  `.' goes first to ensure that any old .aux, .cps, etc. files in
   # ${directory} don't get used in preference to fresher files in `.'.
-  TEXINPUTS=".$path_sep$directory$txincludes$path_sep${TEXINPUTS_orig}"
+  TEXINPUTS=".$path_sep$directory$path_sep$txincludes$path_sep${TEXINPUTS_orig}"
 
   while :; do # will break out of loop below
     # "Unset" variables that might have values from previous iterations and
