@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.43 2000/01/28 17:22:54 friedman Exp $
+# $Id: from,v 1.44 2000/01/30 08:59:30 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -730,7 +730,7 @@ sub hack_From_data ($)
     if ($d =~ m/\(([^)]+)\)/o           # From: foobar@host (real name)
         || $d =~ m/"([^"]+)"/o          # From: "real name" <foobar@host>
         || $d =~ m/"".*?\<([^\>]+)\>/o  # From: "" <foobar@host>
-        || $d =~ m/^(.*?)\</o           # From: real name <foobar@host>
+        || $d =~ m/^(.+?)\</o           # From: real name <foobar@host>
         || $d =~ m/^\<(.*?)\>/o);       # From: <foobar@host>
 
   # Strip any leading and trailing whitespace
