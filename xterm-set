@@ -1,0 +1,231 @@
+#! /bin/sh
+# xterm-set --- Set xterm display properties
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 1991-06-26
+# Public domain
+
+# $Id$
+
+# Commentary:
+
+# This works by sending terminal escape sequences to the terminal.
+# Not all options are implemented in every version of xterm; for example,
+# some of the color options are only implemented in XFree86.
+
+# This command should work even if run from a shell inside a screen(1)
+# session attached under xterm.
+
+# Gripes: There's no xterm sequence to toggle the scrollbar.
+#         There's no documentation on tektronix ctlseqs.
+
+# Code:
+
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl   [perl will skip all lines in this file before this line]
+
+use strict;
+
+my $prog = $0;
+$prog =~ s|.*/||;
+
+###
+# Parameters are: group/order sequence #, escape seq, param doc, description
+my %ctlseq = (
+ 'vt100-mode'              => [ 101, "\e[?2h", "", ""],
+ 'tektronix-mode'          => [ 102, "\e[?38h", "", ""],
+
+ 'normal-cursor-keys'      => [ 201, "\e[?1l", "", ""],
+ 'application-cursor-keys' => [ 202, "\e[?1h", "", ""],
+
+ 'smoothscroll'            => [ 301, "\e[?4h", "", "Set smooth scrolling"],
+ 'jumpscroll'              => [ 302, "\e[?4l", "", "Set jump scrolling"],
+
+ 'reverse-video'           => [ 401, "\e[?5h", "", "Set reverse video"],
+ 'normal-video'            => [ 402, "\e[?5l", "", "Restore normal video"],
+
+ 'origin-mode'             => [ 501, "\e[?6h", "", ""],
+ 'normal-cursor-mode'      => [ 502, "\e[?6l", "", ""],
+
+ 'wraparound'              => [ 601, "\e[?7h", "", "Wrap long lines to next line"],
+ 'no-wraparound'           => [ 602, "\e[?7l", "", "Truncate display of long lines"],
+
+# 'autorepeat'             => [ 701, "\e[?8h", "", "(not implemented by xterm)"],
+# 'no-autorepeat'          => [ 702, "\e[?8l", "", "(not implemented by xterm)"],
+
+
+ 'allow80-132'             => [ 801, "\e[?40h", "", "Allow 80<->132 column switching"],
+ 'no-allow80-132'          => [ 802, "\e[?40l", "", "Do not allow 80<->132 column switching"],
+ '132col'                  => [ 803, "\e[?3h", "", "Switch to 132 columns"],
+ '80col'                   => [ 804, "\e[?3l", "", "Switch to 80 columns"],
+
+ 'fixcurses'               => [ 901, "\e[?41h", "", "Work around curses bugs"],
+ 'no-fixcurses'            => [ 902, "\e[?41l", "", "Do not work around curses bugs"],
+
+ 'margin-bell'             => [1001, "\e[?44h", "", ""],
+ 'no-margin-bell'          => [1002, "\e[?44l", "", ""],
+
+ 'reverse-wrap'            => [1101, "\e[?45h", "", "Allow backing up past wraparound"],
+ 'no-reverse-wrap'         => [1102, "\e[?45l", "", "Do not allow backing up past wraparound"],
+
+ 'alternate-buffer'        => [1201, "\e[?47h", "", ""],
+ 'normal-buffer'           => [1202, "\e[?47l", "", ""],
+
+ 'char-normal'             => [1301, "\e[0m", "", ""],
+ 'char-blink'              => [1302, "\e[1m", "", ""],
+ 'char-underscore'         => [1303, "\e[4m", "", ""],
+ 'char-bold'               => [1304, "\e[5m", "", ""],
+ 'char-inverse'            => [1305, "\e[7m", "",  ""],
+
+ 'title'                   => [1401, "\e]0\;%s\a", "title", "Set icon and window title"],
+ 'icon-title'              => [1404, "\e]1\;%s\a", "title", "Set icon title only"],
+ 'window-title'            => [1405, "\e]2\;%s\a", "title", "Set window title only"],
+
+ 'logging'                 => [1501, "\e[?46h", "", "Enable logging transcript"],
+ 'no-logging'              => [1502, "\e[?46l", "", "Disable logging transcript"],
+ 'logfile-name'            => [1503, "\e]46\;%s\a", "file", "Set loggin transcript file name"],
+
+ # Roland McGrath memorial option
+ 'frobme-baby'             => [1601, "\e\(0\e\)0\e\*0\e+B", "", "Switch to graphic character set"],
+ 'unfrob'                  => [1602, "\e\(B\e\)B\e\*B\e+B", "", "Switch to ascii character set"],
+
+ 'iconify'                 => [1701, "\e[2t", "", "Iconify window"],
+ 'deiconify'               => [1702, "\e[1t", "", "Deiconify window"],
+
+ # These might only work in XFree86 xterms
+ 'font'                    => [1801, "\e]50;%s\a", "font", "Change terminal font"],
+
+ 'background-color'        => [1901, "\e]10;%s\a", "color", ""],
+ 'foreground-color'        => [1902, "\e]11;%s\a", "color", ""],
+
+ 'cursor-color'            => [2001, "\e]12;%s\a", "color", ""],
+ 'highlight-color'         => [2002, "\e]17;%s\a", "color", ""],
+
+ 'mouse-foreground-color'  => [2101, "\e]13;%s\a", "color", ""],
+ 'mouse-background-color'  => [2102, "\e]14;%s\a", "color", ""],
+
+ 'tek-foreground-color'    => [2201, "\e]15;%s\a", "color", ""],
+ 'tek-background-color'    => [2202, "\e]16;%s\a", "color", ""],
+);
+
+# Aliases
+$ctlseq{wob} = 'reverse-video';
+$ctlseq{bow} = 'normal-video';
+$ctlseq{fg}  = 'foreground-color';
+$ctlseq{bg}  = 'background-color';
+$ctlseq{fn}  = 'font';
+
+###
+
+sub xterm_send
+{
+  my ($seq, $arg) = @_;
+  my $screen_encap = "\eP%s\e\\";
+  $seq = sprintf ($seq, $arg) if ($seq =~ /%s/o);
+  $seq = sprintf ($screen_encap, $seq)
+    if (exists $ENV{STY} || $ENV{TERM} =~ /^screen/o);
+  print $seq;
+}
+
+sub ctlseq
+{
+  my $cmd = lc (shift);
+  my $idx = (shift || 0);
+  return undef unless (exists $ctlseq{$cmd});
+  ref $ctlseq{$cmd} ? $ctlseq{$cmd}->[$idx] : $ctlseq{$ctlseq{$cmd}}->[$idx];
+}
+
+sub ctlseq_maxlen
+{
+  my $maxlen = 0;
+  for my $cmd (keys %ctlseq)
+    {
+      my $len = length ($cmd) + length (ctlseq ($cmd, 2));
+      $maxlen = $len if ($len > $maxlen);
+    }
+  return $maxlen;
+}
+
+sub usage
+{
+  use integer;
+  my @cmds = sort { ctlseq ($a, 0) <=> ctlseq ($b, 0)
+                      || (ref ($ctlseq{$a}) eq 'ARRAY' ? -1 : 1);
+                  } keys %ctlseq;
+  my $maxlen = ctlseq_maxlen() + 3;
+  my $cmd_fmt = "%-${maxlen}s%s\n";
+  my $alias_fmt = "%-${maxlen}s - alias for \`%s'\n";
+  my $last_prio = 0;
+
+  print "Usage: $prog [command {parameter}] ...\n\nCommands are:\n\n";
+
+  for my $cmd (@cmds)
+    {
+      my $val = $ctlseq{$cmd};
+      my $out;
+      my $prio;
+
+      if (ref $val)
+        {
+          my ($hprio, $ignore, $parm, $desc) = @$val;
+          $cmd .= sprintf (" [%s]", $parm) if (defined $parm && $parm ne "");
+          $desc = sprintf (" - %s", $desc) if (defined $desc && $desc ne "");
+          $out = sprintf ($cmd_fmt, $cmd, $desc);
+          $prio = $hprio;
+        }
+      else
+        {
+          $prio = $ctlseq{$ctlseq{$cmd}}->[0];
+          $out = sprintf ($alias_fmt, $cmd, $val);
+        }
+      print "\n" if ($prio / 100 != $last_prio && $last_prio != 0);
+      $last_prio = $prio / 100;
+
+      $out =~ s/[ \t]+$//o;
+      print $out;
+    }
+  exit (1);
+}
+
+sub main
+{
+  return usage() unless ($#ARGV >= 0);
+
+  my @cmdlist;
+  while ($#ARGV >= 0)
+    {
+      my $cmd = shift @ARGV;
+      my $seq = ctlseq ($cmd, 1);
+
+      if (!defined $seq)
+        {
+          print STDERR "$prog: $cmd: unrecognized command\n";
+          exit (1);
+        }
+
+      my $arg;
+      if ($seq =~ /%s/o)
+        {
+          $arg = shift @ARGV;
+          if (!defined $arg)
+            {
+              print STDERR "$prog: $cmd: command requires argument\n";
+              exit (2);
+            }
+        }
+      push @cmdlist, [ $seq, $arg ];
+    }
+
+  for my $cmd (@cmdlist)
+    {
+      xterm_send ($cmd->[0], $cmd->[1]);
+    }
+}
+
+main();
+
+# local variables:
+# mode: perl
+# eval: (auto-fill-mode 1)
+# end:
+
+# xterm-set ends here.
