@@ -1,12 +1,12 @@
 #!/bin/sh
 # ludeconf --- configure autoconfiscated packages for installation in lude
 
-# Copyright (C) 1997, 1998 Noah S. Friedman
+# Copyright (C) 1997, 98, 2000 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-06-03
 
-# $Id: ludeconf,v 2.6 1998/06/23 20:08:56 friedman Exp $
+# $Id: ludeconf,v 2.7 1999/05/22 16:40:22 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -34,7 +34,7 @@ bq='`'
 eq="'"
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 2.6 $'
+rcs_revision='$Revision: 2.7 $'
 revision=`set fnord $rcs_revision; echo $3`
 
 usage="Usage: $progname {$progname-options} {-- {configure-options}}
@@ -62,6 +62,9 @@ $progname options:
                              If not specified, guess.
 
 -h, --help                   You're looking at it.
+-N, --no-shared-install      Do not arrange to share installed files
+                             between classes; set ${bq}exec_prefix$eq and ${bq}prefix$eq
+                             to the same architecture-specific directory.
 -n, --no-exec                Run configure script as a subprocess of this
                              program, rather than doing an ${bq}exec$eq.
                              See comments at the end of this shell script
@@ -81,6 +84,7 @@ $progname options:
 # Instead, assign them an empty value.
 debug=
 execp=t
+shared_install_p=t
 verbose=
 
 configure_program=
@@ -191,6 +195,10 @@ while : ; do
     -h | --help | --h* | -\? )
       echo "$usage" 1>&2
       exit 0
+     ;;
+    -N | --no-shared-install | --no-s* )
+      shared_install_p=
+      shift
      ;;
     -n | --no-exec | --no-e* )
       execp=
@@ -389,12 +397,19 @@ esac
 
 ##########
 
-install_prefix="$lude_depot/$lude_soft/run/$lude_mod"
+install_global_prefix="$lude_depot/$lude_soft/run/$lude_mod"
+install_prefix="$install_global_prefix/share"
+install_exec_prefix="$install_global_prefix/$lude_class"
+
+case "$shared_install_p" in
+  t ) : ;;
+  * ) install_prefix="$install_exec_prefix" ;;
+esac
 
 set fnord \
     "$configure_program" \
-    --prefix="$install_prefix/share" \
-    --exec-prefix="$install_prefix/$lude_class" \
+    --prefix="$install_prefix" \
+    --exec-prefix="$install_exec_prefix" \
     ${1+"$@"}
 shift
 
