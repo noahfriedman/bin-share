@@ -1,10 +1,27 @@
 #!/bin/sh
 # cpdir --- copy directories preserving time, symlinks, etc.
+
+# Copyright (C) 1991, 1995 Noah S. Friedman
+
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1991-08-14
-# Public domain.
 
-# $Id: cpdir,v 1.4 1994/05/22 03:34:13 friedman Exp friedman $
+# $Id: cpdir,v 1.5 1995/09/23 21:58:56 friedman Exp $
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, you can either send email to this
+# program's maintainer or write to: The Free Software Foundation,
+# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
 
 # Commentary:
 # Code:
@@ -132,12 +149,12 @@ for src in ${1+"$@"} ; do
   esac
 
   if test -d "$dst" ; then
-    ( cd "$srcdir" && tar -cf - "$src" ) \
-     | ( cd "$dst" && tar $verbose -xpf - )
+    ( cd "$srcdir" && tar cf - "$src" ) \
+     | ( cd "$dst" && tar xp${verbose}f - )
   else
     mkdir "$dst"
-    ( cd "$srcdir/$src" && tar -cf - . ) \
-     | ( cd "$dst" && tar $verbose -xpf - )
+    ( cd "$srcdir/$src" && tar cf - . ) \
+     | ( cd "$dst" && tar xpv${verbose}f - )
   fi
 done
 

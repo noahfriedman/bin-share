@@ -1,9 +1,12 @@
 #! /bin/sh
 # changelog-extract --- extract entries from ChangeLog files
+
+# Copyright (C) 1993, 1995 Noah S. Friedman
+
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1993-03-26
 
-# $Id: changelog-extract,v 1.6 1996/03/03 17:35:51 friedman Exp $
+# $Id: changelog-extract,v 1.7 1996/03/03 17:36:48 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
