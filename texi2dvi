@@ -1,0 +1,115 @@
+#!/bin/sh
+#
+# Copyright (C) 1991 Free Software Foundation.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# A copy of the GNU General Public License can be obtained from this
+# program's author (send electronic mail to roland@ai.mit.edu) or from
+# the Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA
+# 02139, USA.
+
+if [ $# -eq 0 ]; then
+  echo "Usage: `basename $0` FILE ..." >&2
+  exit 1
+fi
+
+TEXINDEX=${TEXINDEX-texindex}
+TEX=${TEXINFO-${TEX-tex}}
+
+for file in $*; do
+  base="`basename $file .texinfo | \
+	 sed -e 's/\.texi$//' -e 's/\.tex$//'`"
+
+  # Find all existing index files corresponding to FILE.
+  idx_files="`echo ${base}.??`"
+  if [ "$idx_files" = "${base}.??" ]; then
+    idx_files=''
+  else
+    # Ignore files with two-letter extensions that don't look like index files.
+    oidx_files="$idx_files"
+    idx_files=''
+    for idx_file in $oidx_files; do
+      if [ "`sed -n '1s/^\(.\).*$/\1/p' $idx_file`" = \\ ]; then
+        # It starts with a backslash, so it's probably an index file.
+	idx_files="$idx_files $idx_file"
+      fi
+    done
+  fi
+
+  for idx_file in $idx_files; do
+    # Save a copy of the old index file.
+    cp ${idx_file} ${idx_file}O
+  done
+
+  if [ "$idx_files" != "" ]; then
+    # Run texindex on the index files.
+    ${TEXINDEX} $idx_files
+  fi
+
+  # Run TeX on FILE.
+  if ${TEX} $file; then
+
+    # Find all the index files that exist now,
+    # so we can see if there are any new ones.
+    new_idx_files="`echo ${base}.??`"
+    if [ "$new_idx_files" = "${base}.??" ]; then
+      new_idx_files=''
+    else
+      oidx_files="$new_idx_files"
+      new_idx_files=''
+      for idx_file in $oidx_files; do
+	if [ "`sed -n '1s/^\(.\).*$/\1/p' $idx_file`" = \\ ]; then
+	  # It starts with a backslash, so it's probably an index file.
+	  new_idx_files="$new_idx_files $idx_file"
+	fi
+      done
+    fi
+
+    if [ "$new_idx_files" != "$idx_files" ]; then
+      # There are some new index files.
+      changed=yes
+      idx_files="$new_idx_files"
+    else
+      # Run through all the index files, comparing them to the old ones.
+      changed=no
+      for idx_file in $idx_files; do
+	# Compare the old and new index files.
+	cmp -s ${idx_file}O ${idx_file}
+	status=$?
+
+	# Remove the old index file.
+	rm -f ${idx_file}O
+
+	if [ $status -ne 0 ]; then
+	  # The index file has changed.
+	  changed=yes
+	fi
+      done	# for idx_file
+    fi
+
+    if [ $changed = yes ]; then
+      # Some index file changed.  Run texindex and TeX again.
+
+      # Run texindex on the index files.
+      if ${TEXINDEX} $idx_files; then
+	# Run TeX on FILE.
+	${TEX} $file
+      fi
+    fi
+  else
+    # TeX failed.  Remove the copies of the index files.
+    for idx_file in $idx_files; do
+      rm ${idx_file}O
+    done
+  fi
+
+done	   # for file
