@@ -1,0 +1,27 @@
+#! /bin/sh
+
+# $Id$
+
+exec wget \
+  --header='User-Agent: Mozilla/4.04 [en] (X11; I; Linux 2.0.33 i586)' \
+  \
+  --convert-links \
+  --force-html \
+  --ignore-length \
+  --server-response \
+  --timestamping \
+  --wait=0 \
+  \
+  --no-parent \
+  --recursive \
+  --level=0 \
+  --execute 'robots = off' \
+  \
+  --passive-ftp \
+  --follow-ftp \
+  \
+  --verbose \
+  \
+  ${1+"$@"}
+
+# wsnarf ends here
