@@ -3,7 +3,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-11-07
 
-# $Id$
+# $Id: htget,v 1.1 1995/11/07 21:25:57 friedman Exp friedman $
 
 # Commentary:
 
@@ -12,12 +12,87 @@
 # Code:
 
 progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
 bq='`'
 eq="'"
 
+usage="Usage: $progname {options} [URL]
+
+Options are:
+-D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-h, --help                   You're looking at it.
+-o, --only-headers           Output reply headers only (no html).
+-s, --show-headers           Prepend reply headers to html output.
+-v, --verbose                Be verbose.
+"
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+headers=
+verbose=
+
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
+    -D | --debug | --d* )
+      debug=t
+      shift
+     ;;
+    -h | --help | --h* )
+      echo "$usage" 1>&2
+      exit 0
+     ;;
+    -o | --only-headers | --o* )
+      headers=only
+      shift
+     ;;
+    -s | --show-headers | --s* )
+      headers=t
+      shift
+     ;;
+    -v | --verbose | --v* )
+      verbose=v
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -? | --* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    -??* )
+      # Split grouped single options into separate args and try again
+      optarg="$1"
+      shift
+      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+      shift
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+case "$debug" in t ) set -x ;; esac
+
 case "$1" in
   '' )
-    echo "Usage: $progname [url]" 1>&2
+    echo "$usage" 1>&2
     exit 1
    ;;
   http://* ) : ;;
@@ -36,6 +111,23 @@ set fnord `echo "$1" | sed -ne 's/^http:\/\///
                                 s/\([^:]*\):\([0-9]*\)\(\/.*\)/\1 \2 \3/p
                                '`
 
-echo "GET $4" | tcpconnect -Hv "$2" "$3"
+nl='
+'
+
+case "$headers" in
+  t )
+    echo "GET $4 HTTP/1.0$nl" \
+     | tcpconnect -H$verbose "$2" "$3"
+   ;;
+  only )
+    echo "GET $4 HTTP/1.0$nl" \
+     | tcpconnect -H$verbose "$2" "$3" \
+     | sed -e '/^$/q'
+   ;;
+  * )
+    echo "GET $4" \
+     | tcpconnect -H$verbose "$2" "$3"
+   ;;
+esac
 
 # htget ends here
