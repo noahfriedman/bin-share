@@ -1,12 +1,12 @@
 #! /bin/sh
 # from --- show you who your mail is from
 
-# Copyright (C) 1992, 1995-1999 Noah S. Friedman
+# Copyright (C) 1992, 1995-2000 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.32 1999/12/30 10:44:18 friedman Exp $
+# $Id: from,v 1.33 2000/01/10 20:57:34 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,32 +30,26 @@
 
 # Code:
 
-# Name by which this script was invoked.
-progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl     [perl will skip all lines in this file before this line]
 
-# To prevent hairy quoting and escaping later.
-bq='`'
-eq="'"
-bs='\'
-dq='"'
+use 5.001;
+use strict;
+no strict "vars";
 
-# See if "\n" is interpreted by echo as a newline sequence.
-x="`echo 'foo\nbar'`"
-y='foo
-bar'
-if test "$x" = "$y"; then
-  bs='\\'
-fi
+use Getopt::Long;
+use Symbol;
 
-usage="Usage: $progname {options} {folder {...}}
-
+sub usage
+{
+  print "Usage: $progname {options} {folder {...}}\n
 Options are:
 -1, --first-header-line      Do not display header continuation lines; show
                              only the first line of each displayed header.
--a, --all-headers            Show all headers.  Ignore $bq--format$eq.
+-a, --all-headers            Show all headers.  Ignore \`--format'.
 -C, --count-only             Only count the number of messages that would
                              be displayed, without displaying any other
-                             information about them.  E.g. $bq-Cu$eq would
+                             information about them.  E.g. \`-Cu' would
                              print the number of unread messages you have.
 -c, --columns       COLS     Truncate lines exceeding COLS length on output.
                              If COLS=0 or output is not to a terminal, no
@@ -67,401 +61,165 @@ Options are:
                              print only the first LINES number of lines.
 -e, --envelope               Show message envelope instead of headers.
                              This causes any formatting options (e.g.
-                             $bq--columns$eq, $bq--numbered$eq) to be ignored.
+                             \`--columns', \`--numbered') to be ignored.
                              This option only makes sense for local folders.
 -f, --format        FMT      Use FMT as the output format.  The option
-                             $bq--help-format$eq gives instructions for this.
+                             \`--help-format' gives instructions for this.
 -h, --help                   You're looking at it.
 -H, --help-format            Get documentation about the format of the FMT
-                             argument to $bq--format$eq.
+                             argument to \`--format'.
 -M, --match-header  HEADERS  Seach only headers named HEADER for patterns
-                             specified with $bq--match$eq.
-                             By default, the header searched is ${bq}From$eq.
+                             specified with \`--match'.
+                             By default, the header searched is \`From'.
 -m, --match         REGEXP   Only print messages in which REGEXP could be
-                             found in the ${bq}From$eq header, or those
-                             specified with $bq--match-headers$eq.
+                             found in the \`From' header, or those
+                             specified with \`--match-headers'.
 -n, --numbered               Show number of message with respect to the
-                             current folder.  See also $bq--help-format$eq.
+                             current folder.  See also \`--help-format'.
 -s, --sender        ADDR     Show only messages sent from ADDR.
                              This is equivalent to specifying the options
-                             $bq--match-headers=From --match=ADDR$eq.
+                             \`--match-headers=From --match=ADDR'.
 -P, --no-parse               Do not do fancy parsing of From and Date fields.
 -U, --user          USER     Show headers of USER's spooled messages.
 -u, --unread-only            Only show information about unread messages
-                             (i.e. those that do not have a ${bq}R$eq in
-                             the Status header field).
-
+                             (i.e. those that do not have a \`R' in
+                             the Status header field).\n
 It is possible to get headers for messages residing on POP3 servers.
-To specify a POP3 folder, use the syntax $bq:pop3:host:username:password$eq
+To specify a POP3 folder, use the syntax \`:pop3:host:username:password'
 on the command line, or embed it in your MAIL environment variable.
 To specify a particular port to use with the pop3 protocol, the first field
-of the remote specification can contain a port number, e.g. $bq:pop3,110:$eq.
-"
+of the remote specification can contain a port number, e.g. \`:pop3,110:'.\n";
+  exit (1);
+}
 
-format_usage="$progname format usage: --format='%{{-}{n}{.m}}[header] ...' ...
-
-The FMT specifier to the $bq--format$eq option can contain literal text for
-the output, along with header specifiers in the form
-
-      %{{-}{n}{.m}}Header
-
-where
-
-  * ${bq}n$eq is the line width reserved for the value of ${bq}Header$eq.
-  * $bq-$eq means that header strings shorter than ${bq}n$eq chars are
+sub usage_fmt
+{
+  print "$progname format usage: --format='%{{-}{n}{.m}}[header] ...' ...\n
+The FMT specifier to the \`--format' option can contain literal text for
+the output, along with header specifiers in the form\n
+      %{{-}{n}{.m}}Header\n
+where\n
+  * \`n' is the line width reserved for the value of \`Header'.
+  * \`-' means that header strings shorter than \`n' chars are
     flushed left within the field, instead of right.
-  * $bq.m$eq is the maximum allowed length of the field; if the header
+  * \`.m' is the maximum allowed length of the field; if the header
     string is longer than this, it is truncated.
-  * ${bq}Header$eq is the name of the header, e.g. ${bq}Subject$eq.
+  * \`Header' is the name of the header, e.g. \`Subject'.
 
-Some special ${dq}header names$dq are defined for useful information that
+Some special \"header names\" are defined for useful information that
 cannot generally be obtained from message headers.  As usual, you can use
-general format specifiers, e.g ${dq}%-4.3{TLINES}$dq.  These special names,
+general format specifiers, e.g \"%-4.3{TLINES}\".  These special names,
 surrounded by curly braces, are:
 
-  * $bq{TLINES}$eq
+  * \`{TLINES}'
     The number of this message line irrespective of any folder it
     may have come from (if more than one folder was specified on the
     command line).
-  * $bq{FLINES}$eq
+  * \`{FLINES}'
     The number of this message in the current folder.  This number is reset
     whenever this program begins reading a new folder specified on the
     command line.
-  * $bq{FOLDER}$eq
+  * \`{FOLDER}'
     The name of this folder, as specified on the command line.
 
 
 For example, given a message with headers of the form
 
-      From: Noah Friedman <friedman@splode.com>
-      To: nobody@prep.ai.mit.edu
+      From: Noah Friedman <friedman\@splode.com>
+      To: nobody\@prep.ai.mit.edu
       Subject: example
       Date: Tue, 18 Oct 94 12:22:50 CDT
 
 here are some valid format specifiers and the output that results from them.
-($bq-|$eq indicates the results here; it is not actually printed.)
+(\`-|' indicates the results here; it is not actually printed.)
 
-      ${dq}%From %Subject$dq
+      \"%From %Subject\"
       -| Noah Friedman  example
 
-      ${dq}%-19.18From %-13.12Date %-.45Subject$dq
+      \"%-19.18From %-13.12Date %-.45Subject\"
       -| Noah Friedman       Oct 18 12:22  example
 
-      ${dq}To %-19To %-13Date %20Subject$dq
-      -| To nobody@prep.ai.mit.edu Oct 18 12:22                   example
+      \"To %-19To %-13Date %20Subject\"
+      -| To nobody\@prep.ai.mit.edu Oct 18 12:22                   example
 
-      ${dq}To %-19.18To %-13.12Date %-.45Subject$dq
-      -| To nobody@prep.ai.mit.  Oct 18 12:22  example
+      \"To %-19.18To %-13.12Date %-.45Subject\"
+      -| To nobody\@prep.ai.mit.  Oct 18 12:22  example
 
-      ${dq}   From: %From${bs}nSubject: %Subject${bs}n   Date: %Date${bs}n$dq
+      \"   From: %From\\nSubject: %Subject\\n   Date: %Date\\n\"
       -|    From: Noah Friedman
       -| Subject: example
       -|    Date: Oct 18 12:22
       -|
 
 If you use something like last example format specifier, you may wish to
-use the $bq--no-parse$eq option to avoid any parsing (and therefore
-truncation) of the From and Date lines.
-"
+use the \`--no-parse' option to avoid any parsing (and therefore
+truncation) of the From and Date lines.\n";
+  exit (1);
+}
 
-# Initialize variables.
-# Don't use `unset' since old bourne shells don't have this command.
-# Instead, assign them an empty value.
-FROMRC=${FROMRC-$HOME/.fromrc}
-FROM_ALL_HEADERS_P=
-FROM_COUNTP=
-FROM_EXTRACTP=
-FROM_LINELIMIT=
-FROM_MATCH_HEADER=
-FROM_MATCH_REGEXP=
-FROM_FIRSTLINEP=
-FROM_PARSEP=t
-FROM_UNREAD_ONLY_P=
-FROM_USER=$USER
-FROM_NUMBERED=
-debug=
-envelopep=
+sub parse_options ()
+{
+  ($progname = $0) =~ s|.*/||;
 
-# if stdout is not a tty, then disable truncation (user may explicitly
-# enables it later by use of the --columns option).
-if test -t 1; then
+  # if stdout is not a tty, then disable truncation (user may explicitly
+  # enables it later by use of the --columns option).
+  # (Also, if running in an emacs shell, print the whole line since the
+  # user can easily toggle truncate-lines in the buffer.)
   # Decrement number of columns by 1 since output in last column causes
   # wraparound on many (most?) terminals.
-  COLUMNS=`expr ${COLUMNS-80} - 1`
-else
-  COLUMNS=0
-fi
+  $opt_columns = (-t STDOUT && $ENV{TERM} ne 'emacs'
+                  ? ((defined $ENV{COLUMNS}) ? $ENV{COLUMNS} - 1 : 79)
+                  : 0);
+  $opt_user = default_user ();
+  $opt_pass = (getenv ('POPPASS') || 'none');
 
-# Precedence for defs (highest->lowest): options, ~/.fromrc, default
-if test -f "$FROMRC"; then
-  . "$FROMRC"
-fi
+  # Precedence for defs (highest->lowest): options, ~/.fromrc.pl, default
+  $fromrc = (getenv ("FROMRCPL") || "$ENV{HOME}/.fromrc.pl");
+  eval { require "$fromrc" } if (-f $fromrc);
 
-# Usage: eval "$getopt"; value=$optarg
-# or     optarg_optional=t; eval "$getopt"; value=$optarg
-#
-# This function automatically shifts the positional args as appropriate.
-# The argument to an option is optional if the variable `optarg_optional'
-# is non-empty.  Otherwise, the argument is required and getopt will cause
-# the program to exit on an error.  optarg_optional is reset to be empty
-# after every call to getopt.  The argument (if any) is stored in the
-# variable `optarg'.
-#
-# Long option syntax is `--foo=bar' or `--foo bar'.
-# For optional args, you must use the `--foo=bar' long option syntax
-# if the argument starts with `-', otherwise the argument will be ignored
-# and treated as the next option.
-#
-# Note: because of a bourne shell misfeature, using --foo=bar syntax can
-# actually screw the quoting of args that end with trailing newlines.
-# Specifically, most shells strip trailing newlines from substituted
-# output, regardless of quoting.
-getopt='
-  {
-    optarg=
-    case "$1" in
-      --*=* ) optarg=`echo "$1" | sed -e "1s/^[^=]*=//"` ; shift ;;
-      -* )
-        case "${2+set}:$optarg_optional" in
-          set: ) optarg="$2" ; shift ; shift ;;
-          set:?* )
-            case "$2" in
-              -* ) shift ;;
-              * )  optarg="$2"; shift; shift ;;
-            esac
-           ;;
-          : )
-            option="$1"
-            case "$option" in
-              --*=* ) option=`echo "$option" | sed -e "1s/=.*//;q"` ;;
-            esac
-            echo "$progname: option $bq$option$eq requires argument." 1>&2
-            echo "$progname: use $bq--help$eq to list option syntax." 1>&2
-            exit 1
-           ;;
-          * ) shift ;;
-        esac
-       ;;
-    esac
-    optarg_optional=
-  }'
+  Getopt::Long::config ('bundling', 'autoabbrev');
+  GetOptions ("1|first-header-line-only", \$opt_firstlinep,
+              "a|all-headers",            \$opt_all_headers,
+              "C|count-only",             \$opt_countp,
+              "c|columns=i",              \$opt_columns,
+              "E|extract:s",              sub { $opt_extractp = 1;
+                                                $opt_linelimit = $_[1]; },
+              "e|envelope",               \$opt_envelopep,
+              "f|format=s",               \$opt_format,
+              "h|help",                   \&usage,
+              "H|help-format",            \&usage_fmt,
+              "M|match-header=s",         \$opt_match_header,
+              "m|match=s",                \$opt_match_regexp,
+              "n|numbered",               \$opt_numbered,
+              "P|no-parse",               \$opt_no_parsep,
+              "s|sender=s",               sub { $opt_match_header = 'From';
+                                                $opt_match_regexp = $_[1]; },
+              "U|user=s",                 \$opt_user,
+              "u|unread-only",            \$opt_unread_only,
+              # For debugging
+              "w|warnings",               \$^W);
 
-# Parse command line arguments.
-# Make sure that all wildcarded options are long enough to be unambiguous.
-# It's a good idea to document the full long option name in each case.
-# Long options which take arguments will need a `*' appended to the
-# canonical name to match the value appended after the `=' character.
-while : ; do
-  case $# in 0) break ;; esac
-  case "$1" in
-    -1 | --first-header-line-only | --fi* )
-      FROM_FIRSTLINEP=t
-      shift
-     ;;
-    -a | --all-headers | --a* )
-      FROM_ALL_HEADERS_P=t
-      shift
-     ;;
-    -C | --count-only | --cou* )
-      FROM_COUNTP=t
-      shift
-     ;;
-    -c | --columns* | --col* )
-      eval "$getopt"
-      COLUMNS=$optarg
-     ;;
-    -D | --debug | --d* )
-      debug=-d
-      shift
-     ;;
-    -E | --extract* | --ex* )
-      FROM_EXTRACTP=t
-      optarg_optional=t
-      eval "$getopt"
-      case "$optarg" in
-        '' ) : ;;
-        *  ) FROM_LINELIMIT="$optarg" ;;
-      esac
-     ;;
-    -e | --envelope | --en* )
-      envelopep=t
-      shift
-     ;;
-    -f | --format* | --f* )
-      eval "$getopt"
-      FROM_FORMAT="$optarg"
-     ;;
-    -H | --help-format | --help-* )
-      echo "$format_usage" 1>&2
-      exit 1
-     ;;
-    -h | --help | --h* )
-      echo "$usage" 1>&2
-      exit 1
-     ;;
-    -M | --match-header* | --match-h* )
-      eval "$getopt"
-      FROM_MATCH_HEADER="$optarg"
-     ;;
-    -m | --match* )
-      eval "$getopt"
-      FROM_MATCH_REGEXP="$optarg"
-     ;;
-    -n | --numbered | --n* )
-      FROM_NUMBERED=t
-      shift
-     ;;
-    -P | --no-parse | --n* )
-      FROM_PARSEP=
-      shift
-     ;;
-    -s | --sender* | --s* )
-      # This option is for compatibility with Brian Fox's implementation.
-      eval "$getopt"
-      FROM_MATCH_REGEXP="$optarg"
-      FROM_MATCH_HEADER=From
-     ;;
-    -U | --user* | --us* )
-      eval "$getopt"
-      FROM_USER="$optarg"
-     ;;
-    -u | --unread-only | --un* )
-      FROM_UNREAD_ONLY_P=t
-      shift
-     ;;
-    -- )     # Stop option processing
-      shift
-      break
-     ;;
-    -? | --* )
-      case "$1" in
-        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
-        * )     arg="$1" ;;
-      esac
-      exec 1>&2
-      echo "$progname: unknown or ambiguous option $bq$arg$eq"
-      echo "$progname: Use $bq--help$eq for a list of options."
-      exit 1
-     ;;
-    -??* )
-      # Split grouped single options into separate args and try again
-      optarg="$1"
-      shift
-      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
-      shift
-     ;;
-    * )
-      break
-     ;;
-  esac
-done
-
-case "$debug" in -d ) set -x ;; esac
-
-case $# in
-  0 )
-    if test ".$FROM_USER" != ".$USER" || test "${MAIL-unset}" = "unset"; then
-      USER=${USER-${LOGNAME-`{ id | sed -ne 's/.*uid=[0-9]*(//
-                                             s/).*//
-                                             p'
-                             } \
-                             || { (whoami) 2> /dev/null; }`}}
-
-      spooldirs='
-        /var/mail
-        /var/spool/mail
-        /usr/spool/mail
-        /usr/mail
-        /com/mail
-      '
-
-      MAIL=
-      for f in $spooldirs ; do
-        if test -f "$f/$USER" ; then
-          MAIL="$f/$USER"
-          break
-        fi
-      done
-
-      case "$MAIL" in
-        '' ) exit 1 ;;
-      esac
-    fi
-
-    set fnord "$MAIL" ${1+"$@"}
-    shift
-   ;;
-esac
-
-perl="${FROM_PERL-${PERL-perl}}"
-
-# Use quick grep only if no more complicated parsing need be done.
-case "$envelopep:$FROM_EXTRACTP$FROM_MATCHP$FROM_UNREAD_ONLY_P" in
-  't:' )
-    case "$FROM_COUNTP" in
-       '') exec sed -n -e '/^From /p' ${1+"$@"} ;;
-       t )
-         exec $perl -e '$! = 0; while (<>) { /^From /o && $n++; }' \
-                    -e '$! && exit $!;' \
-                    -e 'print "$n\n";' \
-                    ${1+"$@"}
-        ;;
-    esac
-  ;;
-esac
-
-case "${FROM_FORMAT+set}" in
-  set ) : ;;
-  * )
-    case "$FROM_EXTRACTP" in
-      t )
-        FROM_PARSEP=
-        for h in From To Cc Subject Date ; do
-          FROM_FORMAT="${FROM_FORMAT}$h: %$h\n"
-        done
-       ;;
-      * )
-        FROM_FORMAT='%-19.18From %-13.12Date %Subject\n'
-
-        case "$FROM_NUMBERED" in
-          t )
-            FROM_FORMAT="%-3{FLINES} $FROM_FORMAT"
-           ;;
-        esac
-       ;;
-    esac
-   ;;
-esac
-
-export FROM_ALL_HEADERS_P FROM_COUNTP FROM_EXTRACTP FROM_FIRSTLINEP
-export FROM_PARSEP FROM_UNREAD_ONLY_P FROM_LINELIMIT FROM_MATCH_HEADER
-export FROM_MATCH_REGEXP FROM_FORMAT FROM_USER
-export COLUMNS MAIL POPPASS
-
-# this commented quote rebalances perl mode font-lock: "
-exec $perl $debug -Sx $0 ${1+"$@"}
-#!perl     [perl will skip all lines in this file before this line]
-
-use Symbol;
-use strict;
-no strict "vars";
+  set_default_format () unless (defined $opt_format);
+}
 
 sub main ()
 {
-  $0 =~ s/.*\///o;
+  parse_options ();
   initialize_variables ();
-  make_format_vector (getenv ('FROM_FORMAT'));
+  make_format_vector ($opt_format);
 
-  $header_save_p{STATUS} = 1 if ($unread_only_p);
+  $header_save_p{STATUS} = 1 if ($opt_unread_only);
 
-  if ($from_match_header ne '')
+  if (defined $opt_match_header && $opt_match_header ne '')
     {
       # Must store actual header name as well as MATCH header name, so that
       # contents will be stored.
-      $header_save_p{uc ($from_match_header)} = 1;
-      $from_match_header = join ('', "{MATCH_", uc ($from_match_header), "}");
-      $header_save_p{$from_match_header} = 1;
+      $header_save_p{uc ($opt_match_header)} = 1;
+      $opt_match_header = join ('', "{MATCH_", uc ($opt_match_header), "}");
+      $header_save_p{$opt_match_header} = 1;
     }
+
+  push (@ARGV, default_spool_file ($opt_user)) unless ($#ARGV >= 0);
 
   for my $file (@ARGV)
     {
@@ -481,18 +239,18 @@ sub main ()
           my ($ignore, $port, $host, $user, $pass) = split (/:/, $file);
 
           $port =~ s/.*,//o if ($port =~ /,/);
-          if (!defined $user || $user eq '')
-            {
-              for my $envvar ('USER', 'LOGNAME')
-                {
-                  last if ($user = getenv ($envvar));
-                }
-            }
-
-          $pass = (getenv ('POPPASS') || 'none')
-            if (!defined $pass || $pass eq '');
-
+          $user = $opt_user if (!defined $user || $user eq '');
+          $pass = $opt_pass if (!defined $pass || $pass eq '');
           process_pop3_folder ($host, $port, $user, $pass);
+        }
+      elsif ($opt_countp)
+        {
+          my $n = folder_message_count ($file);
+          print $n, "\n" if (defined $n);
+        }
+      elsif ($opt_envelopep)
+        {
+          print_envelopes ($file);
         }
       else
         {
@@ -502,15 +260,10 @@ sub main ()
   exit ($exit_status);
 }
 
+
 sub initialize_variables ()
 {
-  $t = 1;
-  $nil = 0;
-
   $ctime_now = my_ctime ();
-
-  @month_conv = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec');
 
   # This is perhaps a little too specific, but some MTAs do not
   # quote 'From ' at the beginning of a line in the body, especially
@@ -524,12 +277,12 @@ sub initialize_variables ()
   # and 126, except colon)", i.e. any chars except ctl chars, space, or colon.
   $re_header_name = '[][!"#$%&\'()*+,-./0-9;<=>?@A-Z\\^_`a-z{|}~]+';
 
-  # However, these are the characters allowed in FROM_FORMAT specifier
-  # header names; some restrictions exist for the sake of formatting.
+  # However, these are the characters allowed in the $opt_format specifiers;
+  # some restrictions exist for the sake of formatting.
   $re_fmt_header_name = '[!"#$&\'*+,-./0-9;<=>?@A-Z\\^_`a-z{|}~]+';
 
   $re_whitespace = "[ \f\n\r\t]+";
-  $re_blank_line = '(^' . $re_whitespace . '$)|(^$)';
+  $re_blank_line = join ("", '(^', $re_whitespace, '$)|(^$)');
   $re_format_modifier = '%[0-9.-]*';
 
   $hack_header_function{FROM} = \&hack_From_data;
@@ -538,53 +291,112 @@ sub initialize_variables ()
   $format_token{'{TLINES}'} = 'd';
   $format_token{'{FLINES}'} = 'd';
 
-  $all_headers_p            = truep ('FROM_ALL_HEADERS_P');
-  $hack_data_p              = truep ('FROM_PARSEP');
-  $extract_body_p           = truep ('FROM_EXTRACTP');
-  $unread_only_p            = truep ('FROM_UNREAD_ONLY_P');
-  $count_only_p             = truep ('FROM_COUNTP');
-  $first_header_line_only_p = truep ('FROM_FIRSTLINEP');
-
   $total_message_lines = 0;
-  $in_message_body_p = $nil;
   $exit_status = 0;
 
-  $columns           = getenv ('COLUMNS');
-  $from_match_header = getenv ('FROM_MATCH_HEADER');
-  $from_match_regexp = getenv ('FROM_MATCH_REGEXP');
+  $body_line_limit = ($opt_linelimit
+                      ? $opt_linelimit + 0
+                      : ($opt_extractp ? -1 : 0));
+}
 
-  $body_line_limit = 0;
-  if (getenv ('FROM_LINELIMIT'))
+sub default_user ()
+{
+  my @envvars = qw(FROM_USER USER LOGNAME);
+
+  for my $var (@envvars)
     {
-      $body_line_limit = getenv ('FROM_LINELIMIT') + 0;
+      my $val = getenv ($var);
+      return $val if (defined $val);
     }
-  elsif ($extract_body_p)
+  return scalar getpwuid ($<);
+}
+
+sub default_spool_file ($;$)
+{
+  return $opt_mail if (defined $opt_mail);
+
+  my $mailfile = getenv ("MAIL");
+  return $mailfile if (defined $mailfile);
+
+  my $user = shift;
+  my $spooldirs = (shift || [qw(/var/mail
+                                /var/spool/mail
+                                /usr/spool/mail
+                                /usr/mail
+                                /com/mail)]);
+  for my $spool (@$spooldirs)
     {
-      $body_line_limit = -1;
+      my $file = join ("/", $spool, $user);
+      return $file if (-f $file);
+    }
+  return undef;
+}
+
+sub set_default_format ()
+{
+  if ($opt_extractp)
+    {
+      $opt_no_parsep = 1;
+      $opt_format = join ("", map { sprintf ("%s: %%%s\n", $_, $_) }
+                                  qw(From To Cc Subject Date));
+    }
+  else
+    {
+      $opt_format = ($opt_numbered? "%-3{FLINES} " : "")
+                    . "%-19.18From %-13.12Date %Subject\n";
+
     }
 }
 
+sub print_envelopes (@)
+{
+  my $fh = gensym;
+  for my $file (@_)
+    {
+      if (!open ($fh, $file))
+        {
+          err ($file, $!);
+          next;
+        }
+      while (<$fh>) { print if (/$re_message_delimiter/o); };
+      close ($fh);
+    }
+}
+
+sub folder_message_count (@)
+{
+  my $fh = gensym;
+  my $n = 0;
+
+  for my $file (@_)
+    {
+      if (!open ($fh, $file))
+        {
+          err ($file, $!);
+          next;
+        }
+      while (<$fh>) { $n++ if (/$re_message_delimiter/o); };
+      close ($fh);
+    }
+  return $n;
+}
+
+
 sub make_format_vector ($)
 {
-  my ($format) = @_;
+  my $format = shift;
   my ($fstring, $tmp, $i, $modifier, $tok) = ($format, '', 0);
-  my $re_token = "$re_format_modifier" . "[^%]*";
+  my $re_token = $re_format_modifier . "[^%]*";
 
   undef %header_save_p;
   undef %vector_header_name;
   undef @format_vector;
 
-  # Here we temporarily disable multi-line scanning ($* = 0) and do not use
-  # /(re)|(re)/, but rather use two pattern matching comparisons.  This is
-  # because otherwise perl will use ^ to match the beginning of any line,
-  # not just the beginning of the string.  What a pain.
-  $* = 0;
   while ($fstring =~ /^[^%]+/o || $fstring =~ /^%%/o)
     {
-      $tmp = $tmp . $&;
+      $tmp .= $&;
       $fstring = $';
     }
-  $* = 1;
 
   $vector_header_name[0] = 'prefix';
   $format_vector[0] = $tmp;
@@ -611,13 +423,11 @@ sub make_format_vector ($)
             }
         }
 
-      $* = 0;
       while ($fstring =~ /^[^%]+/o || $fstring =~ /^%%/o)
         {
-          $trailing_whitespace = $trailing_whitespace . $&;
+          $trailing_whitespace .= $&;
           $fstring = $';
         }
-      $* = 1;
 
       # Make header name all upper case to distinguish from extraneous data
       # like the `prefix' element.
@@ -625,23 +435,24 @@ sub make_format_vector ($)
       $tok = $format_token{$tmp} || 's';
       $header_save_p{$tmp} = 1;
       $vector_header_name[$i] = $tmp;
-      $format_vector[$i] = $modifier . $tok . $trailing_whitespace;
+
+      my $fmt = join ('', $modifier, $tok, $trailing_whitespace);
+      $fmt = eval "\"$fmt\"" if ($fmt =~ /\\/o);
+      $format_vector[$i] = $fmt;
     }
 }
 
 sub process_file ($)
 {
   my $file = shift;
-  my $header_contents = "";
-  my @all_headers;
-  my $all_headers_count = 0;
   my $fh = gensym;
 
   open ($fh, $file) || return err ("open", $file, "$!");
 
-  $folder_message_lines = 0;
-  $counted_messages = 0;
-  $in_message_body_p = $t;
+  my @headers;
+  my $header_contents = "";
+  my $in_message_body_p = 1;
+  my $folder_message_lines = 0;
 
   while (<$fh>)
     {
@@ -651,20 +462,18 @@ sub process_file ($)
       # getting info about the next message.
       if ($in_message_body_p && $_ =~ /$re_message_delimiter/o)
         {
-          undef @all_headers;
+          undef @headers;
+          $header_contents = "";
           undef %current_headers;
-          undef $header_contents;
-          $all_headers_count = 0;
-          $in_message_body_p = $nil;
+          $in_message_body_p = 0;
           next;
         }
 
       # If we're finished reading header continuation line (evidenced by
       # coming upon a new header name), finish processing this header.
-      if (defined ($header_contents) && $_ =~ /^$re_header_name/o)
+      if ($header_contents ne "" && $_ =~ /^$re_header_name/o)
         {
-          $all_headers[$all_headers_count++] = $header_contents
-            if ($all_headers_p);
+          push (@headers, $header_contents) if ($opt_all_headers);
           add_header ($header_contents);
           $header_contents = $_;
           next;
@@ -675,10 +484,9 @@ sub process_file ($)
       if (! $in_message_body_p && $_ =~ /$re_blank_line/o)
         {
           # Add last buffered header.
-          $all_headers[$all_headers_count++] = $header_contents
-            if ($all_headers_p);
+          push (@headers, $header_contents) if ($opt_all_headers);
           add_header ($header_contents);
-          undef $header_contents;
+          $header_contents = "";
 
           $total_message_lines++;
           $folder_message_lines++;
@@ -686,38 +494,29 @@ sub process_file ($)
           $current_headers{'{FLINES}'} = $folder_message_lines;
           $current_headers{'{FOLDER}'} = $file;
 
-          $in_message_body_p = $t;
+          $in_message_body_p = 1;
           $body_line_count = 0;
 
-          maybe_print_headers
-            ($all_headers_count, \@all_headers, $all_headers_p);
+          maybe_print_headers ($#headers+1, \@headers, $opt_all_headers);
         }
 
       if ($in_message_body_p)
         {
-          if ($extract_body_p
+          if ($opt_extractp
               && ! $ignore_this_message_p
               && (($body_line_limit < 0)
                   || ($body_line_count <= $body_line_limit)))
             {
-              print "$_\n";
+              print $_, "\n";
               $body_line_count++;
             }
           next;
         }
 
       # Otherwise, append current header info.
-      if (!defined $header_contents)
-        {
-          $header_contents = $_;
-        }
-      elsif (! $first_header_line_only_p)
-        {
-          $header_contents .= "\n$_";
-        }
+      $header_contents .= "\n" . $_
+        unless ($opt_firstlinep && $header_contents ne "");
     }
-
-  print "$counted_messages\n" if ($count_only_p);
   close ($fh);
 }
 
@@ -733,21 +532,19 @@ sub process_pop3_folder ($$$$)
 
   $total_message_count = pop3_message_count ($sock);
 
-  if ($count_only_p && ! $unread_only_p)
+  if ($opt_countp && ! $opt_unread_only)
     {
       pop3_close ($sock);
-      print "$total_message_count\n";
+      print $total_message_count, "\n";
       return 1;
     }
 
-  $current_headers{'{FOLDER}'} = "$host:$port:$user";
-  $folder_message_lines = 0;
-  $counted_messages = 0;
+  $current_headers{'{FOLDER}'} = join (":", $host, $port, $user);
   $msgnumber = 1;
 
   while ($msgnumber <= $total_message_count)
     {
-      if ($extract_body_p && $from_match_header ne '' && $body_line_limit != 0)
+      if ($opt_extractp && $opt_match_header ne '' && $body_line_limit != 0)
         {
           # If we're searching for a particular message for extraction, get
           # just the headers first to see if this is a matching message.
@@ -767,13 +564,13 @@ sub process_pop3_folder ($$$$)
       $current_headers{'{FLINES}'} = $msgnumber;
       $current_headers{'{TLINES}'} = $total_message_lines;
 
-      maybe_print_headers ($lineno, $lines, $all_headers_p);
+      maybe_print_headers ($lineno, $lines, $opt_all_headers);
 
-      if (! $ignore_this_message_p && $extract_body_p)
+      if (! $ignore_this_message_p && $opt_extractp)
         {
           while (defined $lines->[$lineno])
             {
-              print $lines->[$lineno] . "\n";
+              print $lines->[$lineno], "\n";
               $lineno++;
             }
           print "\n" if ($body_line_limit != 0);
@@ -787,13 +584,13 @@ sub process_pop3_folder ($$$$)
 sub process_pop3_folder_get ($$$)
 {
   my ($sock, $msgnumber, $body_line_limit) = @_;
-  my $lineno = 0;
-  my ($header_line_count, $lines)
-    = pop3_retrieve_lines ($sock, $msgnumber, $body_line_limit);
+  my $pop3_data = pop3_retrieve_lines ($sock, $msgnumber, $body_line_limit);
+  my $header_line_count = $pop3_data->[0];
+  my $lines = $pop3_data->[1];
   my $header_contents = '';
+  my $lineno = 0;
 
   undef %current_headers;
-
   while ($lineno < $header_line_count)
     {
       if ($header_contents ne ''
@@ -804,8 +601,8 @@ sub process_pop3_folder_get ($$$)
         }
       else
         {
-          $header_contents .= "\n" . $lines->[$lineno]
-            if ($header_contents eq '' || ! $first_header_line_only_p);
+           $header_contents .= "\n" . $lines->[$lineno]
+            unless ($opt_firstlinep && $header_contents ne '');
         }
       $lineno++;
     }
@@ -819,26 +616,25 @@ sub process_pop3_folder_get ($$$)
 sub maybe_print_headers ($$$)
 {
   # $lines should be a reference to an array of lines.
-  my ($lines_header_end, $lines, $all_headers_p) = @_;
+  my ($lines_header_end, $lines, $opt_all_headers) = @_;
 
-  $ignore_this_message_p = $t;
+  $ignore_this_message_p = 1;
 
-  if (! ($unread_only_p
-         && $current_headers{STATUS} =~ /[Rr]/o)
+  if (! ($opt_unread_only
+         && index ($current_headers{STATUS}, "R"))
       && message_header_pattern_matched_p ())
     {
-      $counted_messages++;
-      $ignore_this_message_p = $nil;
-      if (! $count_only_p)
+      $ignore_this_message_p = 0;
+      if (! $opt_countp)
         {
-          printf ("From ----------Message-%.3d---------- %s\n",
-                  $total_message_lines, $ctime_now)
-            if ($extract_body_p);
+          printf "From ----------Message-%.3d---------- %s\n",
+                  $total_message_lines, $ctime_now
+            if ($opt_extractp);
 
-          if (defined $lines_header_end && $all_headers_p)
+          if (defined $lines_header_end && $opt_all_headers)
             {
               my $l = 0;
-              print $lines->[$l++] . "\n"
+              print $lines->[$l++], "\n"
                 while ($l < $lines_header_end);
             }
           else
@@ -850,40 +646,35 @@ sub maybe_print_headers ($$$)
 }
 
 
-sub add_header
+sub add_header ($)
 {
-  my ($line) = @_;
-  my $header;
-  my $data;
+  my $line = shift;
 
   return unless ($line =~ /^[^ :]*: /o);
 
-  $header = uc ($&);
+  my $header = uc ($&);
   # Get rid of trailing `: ';
   substr ($header, -2) = '';
 
-  if (defined ($header_save_p{$header}))
+  if (defined $header_save_p{$header})
     {
-      $data = $';
+      my $data = $';
 
       # Store the unparsed header data in the match_header, if defined.
-      $current_headers{$from_match_header} = $data
-        if ("{MATCH_$header}" eq $from_match_header);
+      $current_headers{$opt_match_header} = $data
+        if (defined $opt_match_header
+            && "{MATCH_$header}" eq $opt_match_header);
 
-      if ($hack_data_p && defined ($hack_header_function{$header}))
-        {
-          my $fn = $hack_header_function{$header};
-          $data = &$fn ($data);
-        }
-
+      $data = &{$hack_header_function{$header}} ($data)
+        if (!$opt_no_parsep && exists $hack_header_function{$header});
       $current_headers{$header} = $data;
     }
 }
 
 # Try to extract real name from From: line when possible
-sub hack_From_data
+sub hack_From_data ($)
 {
-  my ($data) = @_;
+  my $data = shift;
 
   # From: foobar@host (real name)
   # From: "real name" <foobar@host>
@@ -992,16 +783,19 @@ sub parse_rfc1522 ($)
 }
 
 # Prettify date
-sub hack_Date_data
+sub hack_Date_data ($)
 {
-  my ($data) = @_;
+  my $data = shift;
   $data =~ s/^[ \t]+//o;
+
+  my @month_conv = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec');
 
   # Hack ISO-8601 date format: YYYY-MM-DD HH:MM:SS-hh:mm
   # (where hh:mm is the timezone offset from UTC)
   # This parsing doesn't attempt to convert the originating time zone to
   # the local time.
-  if ($data =~ /[0-9]+-[0-9]+-[0-9]+[ \t][0-9]+:[0-9]+:[0-9]+[ \t+-][0-9:]*/o)
+  if ($data =~ /\d+-\d+-\d+[ \t]\d+:\d+:\d+[ \t+-][0-9:]*/o)
     {
       my @fields = split (/[:\t -]+/o, $data);
       return sprintf ("%s %-2.2d %-2.2d:%-2.2d",
@@ -1012,7 +806,7 @@ sub hack_Date_data
   # Handle dates of the form:
   #    Mon, 14 Feb 1972 17:29:00 -0500
   #    14 Feb 1972 17:29:00 -0500 (EST)
-  if ($data =~ /[0-9]+ ... [0-9]+ [0-9]+:[0-9]+:[0-9]/o)
+  if ($data =~ /\d+ ... \d+ \d+:\d+:\d/o)
     {
       my @fields = split (/[:\t ]+/o, $data);
       shift @fields if ($data =~ /...,/o);
@@ -1026,8 +820,8 @@ sub hack_Date_data
 
 sub print_headers
 {
-  my $data = shift || \%current_headers;
-  my $str;
+  my $data = (shift || \%current_headers);
+  my $str = "";
   my $i = 0;
 
   while (1)
@@ -1035,51 +829,38 @@ sub print_headers
       if (!defined $format_vector[$i])
         {
           # Truncate output string if appropriate.
-          if ($columns > 0 && length ($str) > $columns)
+          if ($opt_columns > 0 && length ($str) > $opt_columns)
             {
-              # Specifying a limit field here (length($str)) prevents the
-              # split function from throwing away null fields, which could
-              # happen if there are sequential newlines.
-              # We certainly cannot have more than length($str) fields.
-              my @lines = split (/\n/, $str, length ($str));
-              my $len = $#lines;
-              my $i = 0;
-
-              while ($i <= $len)
-                {
-                  $lines[$i] = substr ($lines[$i], 0, $columns)
-                    if (length ($lines[$i]) > $columns);
-                  $i++;
-                }
-
-              $str = join ("\n", @lines);
+              $str = join ("\n",
+                           map { (length ($_) > $opt_columns)
+                                   ? substr ($_, 0, $opt_columns) : $_; }
+                           split (/\n/, $str, -1));
             }
-          print "$str";
+          print $str;
           return;
         }
 
       my $header = $vector_header_name[$i];
       my $format = $format_vector[$i];
-      $format = eval "\"$format\"" if ($format =~ /\\/o);
-      $str .= sprintf ($format, $data->{$header});
+      $str .= sprintf ($format, $data->{$header} || "");
       $i++;
     }
 }
 
 sub message_header_pattern_matched_p
 {
-  return $t if ($from_match_header eq '');
+  return 1 if (!defined $opt_match_header || $opt_match_header eq '');
 
-  return $t
-    if (defined ($current_headers{$from_match_header})
-        && ($current_headers{$from_match_header} =~ /$from_match_regexp/oi));
+  return 1
+    if (defined ($current_headers{$opt_match_header})
+        && ($current_headers{$opt_match_header} =~ /$opt_match_regexp/oi));
 
-  return $nil;
+  return 0;
 }
 
 sub err
 {
-  printf (STDERR join (": ", $0, @_) . "\n");
+  print STDERR join (": ", $progname, @_), "\n";
   return undef;
 }
 
@@ -1092,16 +873,26 @@ sub getenv
 
 sub truep
 {
-  return $t if (getenv ($_[0]) eq 't');
-  return $nil;
+  return 1 if (getenv ($_[0]) eq 't');
+  return 0;
 }
 
-sub my_ctime
+sub disable_stdio_buffering
 {
-  my $time = (length (@_) > 0)? $_[0] : time ();
-  my $TZ = defined($ENV{'TZ'}) ? ( $ENV{'TZ'} ? $ENV{'TZ'} : 'UTC' ) : '';
+  for my $handle (@_)
+    {
+      my $orig_handle = select ($handle);
+      $| = 1;
+      select ($orig_handle);
+    }
+}
+
+sub my_ctime (;$)
+{
+  my $time = (shift || time);
+  my $TZ = (getenv ('TZ') || '');
   my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) =
-      ($TZ eq 'UTC') ? gmtime ($time) : localtime ($time);
+    ($TZ eq 'UTC') ? gmtime ($time) : localtime ($time);
 
   $TZ = $isdst ? $4 : $1
     if ($TZ =~ /^([^:\d+\-,]{3,})([+-]?\d{1,2}(:\d{1,2}){0,2})([^\d+\-,]{3,})?/o);
@@ -1124,8 +915,8 @@ sub pop3_login ($$$)
 
   # greeting
   return 1 if (pop3_response_ok_p ($sock)
-               && pop3_send_command_ok_p ($sock, "USER $login")
-               && pop3_send_command_ok_p ($sock, "PASS $pass"));
+               && pop3_send_command_ok_p ($sock, "USER " . $login)
+               && pop3_send_command_ok_p ($sock, "PASS " . $pass));
 
   pop3_close ($sock);
   return 0;
@@ -1135,38 +926,30 @@ sub pop3_message_count ($)
 {
   my $sock = $_[0];
   pop3_send_command ($sock, "STAT");
-  my @results = pop3_parse_response ($sock);
-  return $results[1];
+  my $results = pop3_parse_response ($sock);
+  return $results->[1];
 }
 
 sub pop3_retrieve_lines ($$$)
 {
   my ($sock, $msgnumber, $bodylines) = @_;
-  my ($i, $headers_end) = 0;
-  my @lines;
-
   $bodylines += 0;  # force into numeric context
-  if ($bodylines < 0)
-    {
-      pop3_send_command ($sock, "RETR $msgnumber");
-    }
-  else
-    {
-      pop3_send_command ($sock, "TOP $msgnumber $bodylines");
-    }
-  if (! pop3_response_ok_p ($sock))
-    {
-      pop3_close ($sock);
-      return 0;
-    }
 
+  pop3_send_command ($sock, ($bodylines < 0
+                             ? "RETR $msgnumber"
+                             : "TOP $msgnumber $bodylines"));
+  return undef unless (pop3_response_ok_p ($sock));
+
+  my $i = 0;
+  my $headers_end = 0;
+  my @lines;
   while (<$sock>)
     {
       s/[\r\n]+$//o;
 
       # The end of the transmission always ends with a single period on a
       # line by itself.
-      return ($headers_end, \@lines) if ($_ eq '.');
+      last if ($_ eq '.');
       # Otherwise, any period at the beginning of a line is quoted with an
       # additional period.  Periods after the first aren't quoted, so at
       # the most we need strip only one.
@@ -1174,17 +957,17 @@ sub pop3_retrieve_lines ($$$)
 
       # The first blank line signals the end of headers.
       $headers_end = $i if ($_ eq '' && $headers_end == 0);
-      $lines[$i] = $_;
+      push @lines, $_;
       $i++;
     }
 
-  return ($headers_end, \@lines);
+  return [ $headers_end, \@lines ];
 }
 
 sub pop3_send_command ($$)
 {
   my $sock = shift;
-  printf ($sock "%s\r\n", $_[0]);
+  print $sock $_[0], "\r\n";
 }
 
 sub pop3_response_ok_p ($)
@@ -1207,27 +990,16 @@ sub pop3_parse_response ($)
 {
   my $sock = shift;
   my $response = pop3_read_response ($sock);
-
-  # In the future this may be the wrong thing, but for now we have no
-  # additional exception processing interest.
-  if ($response !~ /^\+OK/oi)
-    {
-      pop3_close ($sock);
-      return;
-    }
   $response =~ s/[\r\n]+$//o;
-  split (/[ \t]+/, $response);
+  [ split (/[ \t]+/o, $response) ];
 }
 
 sub pop3_read_response ($)
 {
   my $sock = shift;
-
-  while (my $line = <$sock>)
-    {
-      # $line =~ s/[\r\n]+$//o;
-      return $line;
-    }
+  my $line = <$sock>;
+  #$line =~ s/[\r\n]+$//o;
+  return $line;
 }
 
 sub pop3_close ($)
@@ -1243,62 +1015,22 @@ sub pop3_close ($)
 }
 
 
-# Args: host, port
-sub open_network_stream ($$)
+# Convert integers from host byte order to network byte order.
+# Network byte order is big-endian.
+sub htonl ($)
 {
-  use Socket;
-
-  my ($rhostname, $port) = @_;
-  my @rhostaddr;
-
-  my ($ignore, $ignore, $proto) = getprotobyname ("tcp");
-  (undef, undef, $port) = getservbyname ($port, "tcp") if ($port !~ /^\d+$/o);
-
-  if ($rhostname =~ /^[0-9.]+$/o)
-    {
-      $canon_rhostname = my_gethostbyaddr ($rhostname, AF_INET);
-      @rhostaddr = ip_canonical ($rhostname);
-    }
-  else
-    {
-      ($canon_rhostname, undef, undef, undef, @rhostaddr)
-        = gethostbyname ($rhostname);
-      return err ($rhostname, "cannot resolve host name.")
-        unless (defined $canon_rhostname && $canon_rhostname ne "");
-    }
-
-  my $sock = gensym;
-  socket ($sock, AF_INET, SOCK_STREAM, $proto) || return err ("socket", "$!");
-
-  while ($#rhostaddr >= 0)
-    {
-      my $rhost = sockaddr_in ($port, $rhostaddr[0]);
-      return $sock if (connect ($sock, $rhost));
-      shift @rhostaddr;
-    }
-  return undef;
+  return $_[0] unless (unpack ("c2", pack ("i", 1)));
+  return pack ('C4', reverse unpack ('C4', $_[0]));
 }
 
-sub my_gethostbyaddr
-{
-  my ($addrstring, $type) = @_;
-
-  my $addr = ip_canonical ($addrstring);
-  $addrstring = sprintf ("%d.%d.%d.%d", unpack ("C4", $addr));
-  my $name = gethostbyaddr ($addr, $type);
-
-  return $addrstring if ($name eq "");
-  return $name;
-}
-
-sub ip_canonical ($)
+sub ipaddr_aton ($)
 {
   my $addr = shift;
 
-  return $addr unless ($addr =~ /^[0-9.]+$/o);
+  return $addr unless ($addr =~ /^\d+$/o);
 
   # String is in 255.255.255.255 format
-  return pack ('C4', split (/[.]/o, $addr))
+  return pack ('C4', split (/\./, $addr))
     if (index ($addr, ".") >= 0);
 
   # If string is not in octet form but instead is a flat ascii IP,
@@ -1307,40 +1039,42 @@ sub ip_canonical ($)
   #
   # source IP addresses are specified in this flat format in the
   # IRC DCC protocol; I don't know if it's common anywhere else.
-  htonl (pack ("I", "$addr"));
+  htonl (pack ("I", $addr));
 }
 
-# Convert integers from host byte order to network byte order.
-# Network byte order is big-endian.
-sub htonl ($)
+sub open_network_stream ($$)
 {
-  my $h = shift;
-  my $big_endian_p = 1;
+  use Socket;
 
-  # Test to see if we are little-endian
-  {
-    my $x = 1;
-    my @y = unpack ("c2", pack ("i", $x));
-    $big_endian_p = 0 if ($y[0] == 1);
-  }
+  my ($rhostname, $port) = @_;
 
-  return $h if ($big_endian_p);
-  my @o = unpack ('C4', $h);
-  $h = pack ('C4', $o[3], $o[2], $o[1], $o[0]);
-  return $h;
-}
+  my $proto = getprotobyname ("tcp");
+  (undef, undef, $port) = getservbyname ($port, "tcp") if ($port !~ /^\d+$/o);
 
-sub disable_stdio_buffering
-{
-  for my $handle (@_)
+  my @rhostaddr;
+  if ($rhostname =~ /^[0-9.]+$/o)
     {
-      my $orig_handle = select ($handle);
-      $| = 1;
-      select ($orig_handle);
+      push @rhostaddr, ipaddr_aton ($rhostname);
     }
+  else
+    {
+      @rhostaddr = gethostbyname ($rhostname);
+      return err ($rhostname, "cannot resolve host name.")
+        unless (defined $rhostaddr[0] && $rhostaddr[0] ne "");
+      splice (@rhostaddr, 0, 4);
+    }
+
+  my $sock = gensym;
+  socket ($sock, AF_INET, SOCK_STREAM, $proto) || return err ("socket", $!);
+  while ($#rhostaddr >= 0)
+    {
+      connect ($sock, sockaddr_in ($port, shift @rhostaddr)) && return $sock;
+    }
+  return err ("socket", $!);
 }
 
-main();
+
+main ();
 
 # local variables:
 # mode: perl
