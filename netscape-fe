@@ -1,29 +1,29 @@
 #! /bin/sh
 # netscape-fe --- front end driver for multiple installations of Mozilla
 
-# Copyright (C) 1996, 1997 Noah S. Friedman
+# $Id: netscape-fe,v 2.5 1997/09/08 04:43:22 friedman Exp $
 
-# $Id: netscape-fe,v 2.4 1997/09/01 05:35:17 friedman Exp $
-
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2, or (at your option)
-# any later version.
+# The contents of this file are subject to the Netscape Public License
+# Version 1.0 (the "License"); you may not use this file except in
+# compliance with the License.  You may obtain a copy of the License at
+# http://www.mozilla.org/NPL/
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
+# Software distributed under the License is distributed on an "AS IS"
+# basis, WITHOUT WARRANTY OF ANY KIND, either express or implied. See the
+# License for the specific language governing rights and limitations
+# under the License.
 #
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, you can either send email to this
-# program's maintainer or write to: The Free Software Foundation,
-# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
+# The Original Code is netscape-fe, a front end driver for multiple
+# installations of Mozilla, released July 20, 1998.  The Initial Developer
+# of the Original Code is Noah Friedman <friedman@splode.com>.  Portions
+# created by Noah Friedman are Copyright (C) 1996, 1997 Noah Friedman.
+# All Rights Reserved.
+#
+# Contributor(s): ______________________________.
 
 # Commentary:
 
-# Front-end shell script for Mozilla, used to
-# manage multiple versions of netscape.
+# Front-end shell script for mozilla, used to manage multiple versions.
 
 # Strategy: Install this script as "$prefix/netscape".
 # This is what users should normally execute to run "netscape".
