@@ -1,12 +1,12 @@
 #! /bin/sh
 # from --- show you who your mail is from
 
-# Copyright (C) 1992, 1995, 1996 Noah S. Friedman
+# Copyright (C) 1992, 1995, 1996, 1997 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-01-19
 
-# $Id: from,v 1.19 1996/10/21 23:52:42 friedman Exp $
+# $Id: from,v 1.20 1997/03/05 21:49:46 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -399,7 +399,7 @@ case "${FROM_FORMAT+set}" in
     case "$FROM_EXTRACTP" in
       t )
         FROM_PARSEP=
-        FROM_FORMAT='From: %From\nSubject: %Subject\nDate: %Date\n'
+        FROM_FORMAT='From: %From\nTo: %To\nSubject: %Subject\nDate: %Date\n'
        ;;
       * )
         FROM_FORMAT='%-19.18From %-13.12Date %Subject\n'
@@ -855,14 +855,15 @@ sub hack_From_data
   return &parse_rfc1522 ($data);
 }
 
-# Parse names of the form =?ISO-8859-1?Q?Fran=E7ois_Pinard?=
+# Parse names of the form =?ISO-8859-1?Q?Fran=E7ois?= Pinard
+#                      or =?ISO-8859-1?Q?Fran=E7ois_Pinard?=
 #                      or =?ISO-8859-1?B?4672616EE76F69732050696E617264?=
 # See RFC1522 for more details.
 sub parse_rfc1522
 {
   local ($data) = @_;
 
-  if ($data =~ /^=\?iso-8859-1\?[^?]*\?[^?]*\?=$/io)
+  if ($data =~ /=\?iso-8859-1\?[^?]*\?[^?]*\?=/io)
     {
       local ($str) = $data;
       local ($encoding);
@@ -882,7 +883,7 @@ sub parse_rfc1522
 
           # Strip away encoding and trailing `?=', leaving the quoted name.
           $str =~ s/^[^?]*\?//;
-          $str =~ s/\?=$//;
+          $str =~ s/\?=//;
 
           # Convert all occurences of `_' to ` '.
           $str =~ s/_/ /og;
@@ -916,7 +917,7 @@ sub parse_rfc1522
 
           # Strip away encoding and trailing `?=', leaving the base64 string
           $str =~ s/^[^?]*\?//;
-          $str =~ s/\?=$//;
+          $str =~ s/\?=//;
 
           $len = length ($str);
 
