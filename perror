@@ -1,4 +1,17 @@
-#!/usr/bin/perl -w
+#!/bin/sh
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl
+
+# perror --- show system error messages from symbolic or numeric errno values
+
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2002-03-16
+# Public domain
+
+# $Id$
+
+# Commentary:
+# Code:
 
 use POSIX qw(:errno_h);
 use strict;
@@ -34,3 +47,9 @@ sub main ()
 }
 
 main ();
+
+# local variables:
+# mode: perl
+# end:
+
+# perror ends here
