@@ -21,17 +21,25 @@ usage="Usage: $progname {options} [rhost] [cmd] {args...}
 Options are:
 -D, --debug                  Turn on shell debugging (${bq}set -x$eq).
 -d, --display      DISP      Set DISPLAY environment variable to DISP.
+-e, --export       VAR       Export current definition of environment
+                   V,V1,...  variable VAR on remote host.  If multiple,
+                             comma-separated variables are specified,
+                             export the value of each one.  
+                             This option can also be specified multiple
+                             times, once for each variable.
 -h, --help                   You're looking at it.
 -l, --login-as     USER      Log in as USER on remote host. 
 -x, --xhost-enable XHOST     Use ${bq}xhost$eq to enable X server access
-                             for this host.
+                             for host XHOST.
 "
 
-# Make sure stdout and stderr are readable *somewhere*.
-# Maybe I should use syslog via `logger' instead?
+# Make sure stdout and stderr are readable; if not
+# on a terminal, then in a file.
 for fd in 1 2; do
   if test ! -t $fd ; then
-    eval exec "$fd>" /dev/console
+    # Redirect in append mode, in case the file is already there with
+    # previous output.
+    eval exec "$fd>>" ${XONERRORFILE-$HOME/.xon-errors}
   fi
 done
 
@@ -87,6 +95,8 @@ shift_n_times='
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
 debug=
+explicit_display=
+export_vars=
 xhost_enable_host=
 
 # Parse command line arguments. 
@@ -94,18 +104,37 @@ xhost_enable_host=
 # It's a good idea to document the full long option name in each case.
 # Long options which take arguments will need a `*' appended to the
 # canonical name to match the value appended after the `=' character. 
-while test $# != 0; do
+while : ; do
+  case $# in 0) break ;; esac
   case "$1" in 
-    -D | --debug | --d* )
+    -D | --debug | --de* )
       set -x
       debug=-x
       shift
      ;;
     -d | --display* | --di* )
+      explicit_display=t
       DISPLAY=`(set - "$1" "$2"; eval "$get_option_argument")`
       retval=$?
       case $retval in 3 ) exit 1 ;; esac
       eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -e | --export* | --e* )
+      var=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+
+      case "$var" in
+        *,* ) var=`echo "$var" | sed -e 's/,/ /g'` ;;
+      esac
+
+      for v in $var ; do
+        case " $export_vars " in
+          *" $v "* ) : ;;
+          * )        export_vars="$export_vars $v" ;;
+        esac
+      done
      ;;
     -l | --login-as* | --l* )
       USER=`(set - "$1" "$2"; eval "$get_option_argument")`
@@ -127,15 +156,14 @@ while test $# != 0; do
       shift
       break
      ;;
-    --*=* )
-      arg=`echo $1 | sed -e 's/=.*//'`
-      echo "$progname: unknown option $bq$arg$eq" 1>&2
-      echo "$usage" 1>&2
-      exit 1
-     ;;
     -* )
-      echo "$progname: unknown option $bq$1$eq" 1>&2
-      echo "$usage" 1>&2
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
       exit 1
      ;;
     * )
@@ -167,62 +195,96 @@ case "$hostname" in
     # Note that if this is done the result could be incorrect.
     # "domainname" is actually supposed to return the NIS domain rather
     # than the domain of the host, but many system administrators
-    # configure systems incorrectly.
+    # configure systems incorrectly.  If `hostname' doesn't return the
+    # fully-qualified domain name, gripe at your sysadmin today!
     hostname=$hostname.`domainname 2> /dev/null`
    ;;
 esac
 
-# canonicalize DISPLAY
+# canonicalize DISPLAY if not explicitly declared on the command line
 {
-  # If DISPLAY isn't already set, then we really don't know the display.
-  # Assume :0.0 on current host.
-  case "$DISPLAY" in
-    '' )
-      DISPLAY=$hostname:0.0
-      export DISPLAY
-     ;;
+  case "$explicit_display" in
+    t ) : ;;
     * )
-      display_number=`echo "$DISPLAY" | sed -e 's/.*://'`
-      display_host=`echo "$DISPLAY" | sed -e 's/:[^:]*//'`
-
-      # This will only happen if there's no display number in the first place.
-      case "$display_number" in "$display_host" )
-        display_number=0.0 ;;
-      esac
-
-      # Try to guess intelligently whether display host should be reset
-      # (e.g., if it's a hostname that's not local, then it's probably
-      # accurate and we shouldn't clobber it by setting it to the local host) 
-      case "$display_host" in
-        unix | loopback | localhost | '' )
-          display_host=$hostname
+      # If DISPLAY isn't already set, then we really don't know the display.
+      # Assume :0.0 on current host.
+      case "$DISPLAY" in
+        '' )
+          DISPLAY=$hostname:0.0
+          export DISPLAY
          ;;
-      esac
-
-      DISPLAY=$display_host:$display_number
-      export DISPLAY
-     ;;
-  esac
-}
-
-# enable access via xhost, if necessary.
-# This calls this script recursively (without the --xhost-enable option) to
-# do the whole path searching and exporting frobs implemented below.
-# Perhaps the stuff below could be turned into a pseudo shell function a la 
-# the `get_option_argument' fragment above.
-{
-  case "$xhost_enable_host" in
-    . ) : ;;
-    * )
-      case "`xhost 2>&1`" in
-        *"$xhost_enable_host"* | *'access control disabled'* ) ;;
         * )
-          case "`xhost $xhost_enable_host 2>&1`" in
-            *'must be on local machine'*)
-              display_host=`echo "$DISPLAY" | sed -e 's/:[^:]*//'`
-              "$fullprogname" -- "$display_host" xhost "$xhost_enable_host"
+          display_number=`echo "$DISPLAY" | sed -e 's/.*://'`
+          display_host=`echo "$DISPLAY" | sed -e 's/:[^:]*//'`
+
+          # This will only happen if there's no display number in the first place.
+          case "$display_number" in "$display_host" )
+            display_number=0.0 ;;
+          esac
+
+          # Try to guess intelligently whether display host should be reset
+          # (e.g., if it's a hostname that's not local, then it's probably
+          # accurate and we shouldn't clobber it by setting it to the local host) 
+          case "$display_host" in
+            unix | loopback | localhost | '' )
+              display_host=$hostname
              ;;
           esac
+
+          DISPLAY=$display_host:$display_number
+          export DISPLAY
+         ;;
+      esac
+     ;;
+  esac
+}
+
+# Enable access via xhost, if necessary.
+# The xhost in some later versions of X11 (X11R6) refuse to accept
+# connections to any display other than the local display number
+# (e.g. ":0.0" or ":1.0", but not "foo:0.0" even if xhost is run on foo).
+# So munge the display appropriately.
+#
+# This calls this script recursively (sans the --xhost-enable option) to
+# do the whole path searching and exporting frobs implemented below.
+{
+  case "$xhost_enable_host" in
+    '' ) : ;;
+    * )
+      # usage: xhost_args="arguments..."; eval "$do_xhost"
+      # Then inspect value of $xhost_msg.
+      do_xhost='
+        {
+          xhost_msg=`
+            xhost $xhost_args 2>&1 \
+             | sed -ne '\''
+                          /access control disabled/{s/.*/win/p;q;}
+                          /^'\''"$xhost_enable_host"'\''$/{s/.*/win/p;q;}
+                          /connection to .* refused by server/{s/.*/refused/p;q;}
+                          /must be on local machine/{s/.*/refused/p;q;}
+                          /added to access control list/{s/.*/added/p;q;}
+                          /removed from access control list/{s/.*/removed/p;q;}
+                          $s/.*/unauthorized/p
+                       '\''
+          `
+         }'
+
+      xhost_args=; eval "$do_xhost"
+      case "$xhost_msg" in
+        unauthorized )
+          xhost_args=$xhost_enable_host
+          eval "$do_xhost"
+         ;;
+      esac
+ 
+      case "$xhost_msg" in
+        win | added ) : ;;
+        refused )
+          display_host=`echo "$DISPLAY" | sed -e 's/:[^:]*//'`
+          display_number=`echo "$DISPLAY" | sed -e 's/.*:/:/'`
+          "$fullprogname" --display "$display_number" \
+                          -- \
+                          "$display_host" xhost "$xhost_enable_host"
          ;;
       esac
      ;;
@@ -230,6 +292,41 @@ esac
 }
 
 {
+  # Construct the export variable string that gets evaluated in the rsh
+  # subshell.
+  export_var_string=
+  for var in $export_vars; do
+    # You are not expected to understand this.
+    str=$var=\'`eval echo \"\\$$var\"`\'';'
+    export_var_string="$export_var_string $str"
+  done
+  export_var_string="$export_var_string export $export_vars"
+
+  # Standard global places that ought to go in path
+  pdirs='
+    /usr/local/gnu/bin
+    /usr/local/gnubin
+    /usr/local/gnu
+    /usr/local/bin
+    /gnu/bin
+    /lusr/gnu/bin
+    /lusr/bin/gnu
+    /usr/site
+    /bin
+    /usr/bin
+    /usr/ucb
+    /usr/local/etc
+    /usr/etc
+    /etc
+    /usr/local/sbin
+    /usr/sbin
+    /sbin
+    /usr/libexec
+    /usr/lib
+'
+
+  # Places where X binaries might reside
+  # These will appear in PATH *after* those listed in $pdirs.
   xdirs='
     /usr/X11R6/bin
     /usr/X11R5/bin
@@ -273,16 +370,18 @@ esac
   # inherit them.  (6, 7, 8, and 9 show up under various operating
   # systems where rshd hasn't been fixed).
   $rsh "$rhost" -l "$USER" sh $debug <<__EOF__
+    $export_var_string
+
     case "$1" in
       /* | ./* ) : ;;
       * )
-        for dir in `echo $xdirs` ; do
+        for dir in `echo $pdirs $xdirs` ; do
           if test -f "\$dir/$1" ; then
             PATH="\$PATH:\$dir"
-            export PATH
             break
           fi
         done
+        export PATH
        ;;
     esac 
 
