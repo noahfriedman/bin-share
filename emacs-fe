@@ -4,7 +4,7 @@
 # Created: 1995-09-11
 # Public domain.
 
-# $Id: emacs-fe,v 1.2 1995/10/26 23:38:43 friedman Exp $
+# $Id: emacs-fe,v 1.3 1996/02/21 00:04:38 friedman Exp $
 
 # Commentary:
 
@@ -239,6 +239,7 @@ searchdirs="
    bin \
    libexec/$VARIANT/$version/* \
    lib/$VARIANT/$version/*
+   lib/$VARIANT-$version/*
    lib/$VARIANT/etc
    lib/etc
 "
