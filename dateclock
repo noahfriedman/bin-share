@@ -1,0 +1,25 @@
+#!/bin/sh
+# $Id$
+
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl
+
+use POSIX;
+
+sub main
+{
+  my $cl = `tput clear 2>/dev/null`;
+  my $ho = `tput home  2>/dev/null`;
+
+  select (STDOUT);
+  $| = 1;
+
+  print "$cl";
+  while (1)
+    {
+      print "$ho", strftime ("%a %b %e %H:%M:%S %Z %Y", localtime ()), "\n";
+      select (undef, undef, undef, 0.33);
+    }
+}
+
+main;
