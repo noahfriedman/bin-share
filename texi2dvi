@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- smartly produce DVI files from texinfo sources
-# $Id: texi2dvi,v 0.16 1998/06/27 23:19:26 karl Exp $
+# $Id: texi2dvi,v 0.17 1998/07/05 12:17:43 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98 Free Software Foundation, Inc.
 #
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.16 $'
+rcs_revision='$Revision: 0.17 $'
 rcs_version=`set - $rcs_revision; echo $2`
 
 version="$0 (GNU Texinfo 3.12) $rcs_version
@@ -141,7 +141,7 @@ for command_line_filename in $nonopt; do
   # See if file exists.  If it doesn't we're in trouble since, even
   # though the user may be able to reenter a valid filename at the tex
   # prompt (assuming they're attending the terminal), this script won't
-  # be able to find the right index files and so forth.
+  # be able to find the right xref files and so forth.
   if test ! -r "${command_line_filename}"; then
     echo "$0: Could not read ${command_line_filename}." >&2
     continue
@@ -167,7 +167,7 @@ for command_line_filename in $nonopt; do
   tmpdir_expand=${tmpdir}.xpn
   filename_expand=$tmpdir_expand/$filename_noext.texi
 
-  # Save the previous index files in a separate directory $tmpdir.bak,
+  # Save the previous xref files in a separate directory $tmpdir.bak,
   # since 8+3 filesystems don't allow multiple dots in the basename.
   tmpdir_bak=${tmpdir}.bak
   
@@ -179,7 +179,7 @@ for command_line_filename in $nonopt; do
 
   # If directory and file are the same, then it's probably because there's
   # no pathname component.  Set dirname to `.', the current directory.
-  if test "z${directory}" = "z${command_line_filename}"; then
+  if test "x${directory}" = "x${command_line_filename}"; then
     directory=.
   fi
 
@@ -228,45 +228,44 @@ for command_line_filename in $nonopt; do
   while :; do # will break out of loop below
     # "Unset" variables that might have values from previous iterations and
     # which won't be completely reset later.
-    definite_index_files=
+    definite_xref_files=
 
     # Find all files having root filename with a two-letter extension,
-    # determine whether they're really index files, and save them.  foo.aux
-    # is actually the cross-references file, but we need to keep track of
-    # that too.
-    possible_index_files="`eval echo ${filename_noext}.?? \
+    # saves the ones that are really Texinfo-related files.
+    possible_xref_files="`eval echo ${filename_noext}.?? \
                                  ${filename_noext}.aux ${filename_noext}.toc`" 
-    for this_file in ${possible_index_files}; do
+    for this_file in $possible_xref_files; do
       # If file is empty, forget it.
-      test -s "${this_file}" || continue
+      test -s "$this_file" || continue
 
       # Examine first character of file.  If it's not suitable to be an
       # index or xref file, don't process it.
       first_character="`sed -n '1s/^\(.\).*$/\1/p;q' ${this_file}`"
-      if test "x${first_character}" = "x\\" \
-         || test "x${first_character}" = "x'"; then
-        definite_index_files="${definite_index_files} ${this_file}"
+      if test "x$first_character" = "x\\" \
+         || test "x$first_character" = "x'"; then
+        definite_xref_files="$definite_xref_files $this_file"
       fi
     done
-    orig_index_files="${definite_index_files}"
-    orig_index_files_sans_aux="`echo ${definite_index_files} \
-                                 | sed 's/'${filename_noext}'\.aux//;
-                                        s/^[ ]*//;s/[ ]*$//;'`"
+    orig_xref_files="$definite_xref_files"
+    # What we'll run texindex on -- exclude non-index files.
+    orig_index_files="`echo $definite_xref_files \
+                       | sed 's/'$filename_noext'\.aux//;
+                              s/'$filename_noext'\.toc//;
+                              s/^[ ]*//;s/[ ]*$//;'`"
 
-    # Now save copies of original index files so we have some means of
-    # comparison later.
-    $verbose "Backing up current index files: $orig_index_files ..."  
-    for index_file_to_save in ${orig_index_files}; do
-      cp "$index_file_to_save" "$tmpdir_bak/$index_file_to_save"
+    # Save copies of originals for later comparison.
+    $verbose "Backing up current xref files: $orig_xref_files ..."  
+    for xref_file_to_save in $orig_xref_files; do
+      cp "$xref_file_to_save" "$tmpdir_bak/$xref_file_to_save"
     done
 
     # Run texindex on current index files.  If they already exist, and
     # after running TeX a first time the index files don't change, then
     # there's no reason to run TeX again.  But we won't know that if the
     # index files are out of date or nonexistent.
-    if test -n "${orig_index_files_sans_aux}"; then
-      $verbose "Running $texindex $orig_index_files_sans_aux ..."
-      ${texindex} ${orig_index_files_sans_aux}
+    if test -n "$orig_index_files"; then
+      $verbose "Running $texindex $orig_index_files ..."
+      $texindex $orig_index_files
     fi
 
     # Finally, run TeX.
@@ -281,12 +280,12 @@ for command_line_filename in $nonopt; do
 
     # Check if index or other such files changed.
     # 
-    definite_index_files=
-    # Get list of new index files.  Include the toc file since it might
+    definite_xref_files=
+    # Get list of new xref files.  Include the toc file since the toc might
     # be at the beginning now.
-    possible_index_files="`eval echo ${filename_noext}.?? \
+    possible_xref_files="`eval echo ${filename_noext}.?? \
                                  ${filename_noext}.aux ${filename_noext}.toc`" 
-    for this_file in ${possible_index_files}; do
+    for this_file in ${possible_xref_files}; do
        # If file is empty, forget it.
        test -s "${this_file}" || continue
 
@@ -297,35 +296,36 @@ for command_line_filename in $nonopt; do
        first_character="`sed -n '1s/^\(.\).*$/\1/p;q' ${this_file}`"
        if test "x${first_character}" = "x\\" \
           || test "x${first_character}" = "x'"; then
-         definite_index_files="${definite_index_files} ${this_file}"
+         definite_xref_files="${definite_xref_files} ${this_file}"
        fi
     done
-    new_index_files="${definite_index_files}"
-    new_index_files_sans_aux="`echo ${definite_index_files} \
+    new_xref_files="${definite_xref_files}"
+    new_index_files="`echo ${definite_xref_files} \
                                | sed 's/'${filename_noext}'\.aux//;
+                                      s/'${filename_noext}'\.toc//;
                                       s/^[ ]*//;s/[ ]*$//;'`"
 
     # If old and new list don't at least have the same file list, then one
     # file or another has definitely changed.
     # 
-    $verbose "Original index files =$orig_index_files"
-    $verbose "New index files =$new_index_files"
-    if test "z${orig_index_files}" != "z${new_index_files}"; then
-      index_files_changed_p=t
+    $verbose "Original xref files =$orig_xref_files"
+    $verbose "New xref files =$new_xref_files"
+    if test "x${orig_xref_files}" != "x${new_xref_files}"; then
+      xref_files_changed_p=t
     else
       # File list is the same.  We must compare each file until we find a
       # difference.
-      index_files_changed_p=
-      for this_file in ${new_index_files}; do
-        $verbose "Comparing index file $this_file ..."
+      xref_files_changed_p=
+      for this_file in ${new_xref_files}; do
+        $verbose "Comparing xref file $this_file ..."
         # cmp -s will return nonzero exit status if files differ.
         cmp -s "$this_file" "$tmpdir_bak/$this_file"
         if test $? -ne 0; then
           # We only need to keep comparing until we find *one* that
           # differs, because we'll have to run texindex & tex no
           # matter what.
-          index_files_changed_p=t
-          $verbose "Index file $this_file differed:"
+          xref_files_changed_p=t
+          $verbose "xref file $this_file differed:"
           test $verbose = echo \
           && diff -c "$tmpdir_bak/$this_file" "$this_file"
           break
@@ -333,9 +333,9 @@ for command_line_filename in $nonopt; do
       done
     fi
 
-    # If index files have changed since TeX has been run, or if the aux
+    # If xref files have changed since TeX has been run, or if the aux
     # file wasn't present originally, run texindex and TeX again.
-    if test "${index_files_changed_p}"; then :; else
+    if test -n "$xref_files_changed_p"; then :; else
       # Nothing changed.  We're done with TeX.
       break
     fi
@@ -356,7 +356,7 @@ for command_line_filename in $nonopt; do
   # Generate list of files to delete, then call rm once with the entire
   # list.  This is noticeably faster than multiple executions of rm.
   file_list=
-  for file in ${orig_index_files}; do
+  for file in ${orig_xref_files}; do
     file_list="$file_list $tmpdir_bak/$file"
   done
   if test -n "${file_list}"; then
