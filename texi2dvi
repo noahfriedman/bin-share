@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- smartly produce DVI files from texinfo sources
-# $Id: texi2dvi,v 0.18 1998/07/31 19:20:20 karl Exp $
+# $Id: texi2dvi,v 0.19 1998/08/25 18:36:44 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98 Free Software Foundation, Inc.
 #
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.18 $'
+rcs_revision='$Revision: 0.19 $'
 rcs_version=`set - $rcs_revision; echo $2`
 
 version="$0 (GNU Texinfo 3.12) $rcs_version
@@ -279,7 +279,10 @@ for command_line_filename in $nonopt; do
     fi
     $verbose "Running $tex $filename_input ..."
     cmd="$tex $tex_mode \\input $filename_input"
-    $cmd
+    if $cmd; then :; else
+      echo "$0: TeX exited with bad status, quitting." >&2
+      exit 1
+    fi
 
     # Check if index or other such files changed.
     # 
