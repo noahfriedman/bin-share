@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-04-15
 
-# $Id: tcpconnect,v 1.6 1995/09/26 00:42:10 friedman Exp $
+# $Id: tcpconnect,v 1.7 1996/03/03 23:01:26 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -250,7 +250,7 @@ sub main
 sub tcpconnect
 {
   local ($rhostname, $port) = @_;
-  local ($proto, $name, $aliases, $type, $len, $thisaddr, $rhostaddr);
+  local ($proto, $name, $aliases, $type, $len, $thisaddr, @rhostaddr);
   local ($in, $out);
   # This is made global so that do_shutdown can use it.
   #local ($child);
@@ -271,9 +271,8 @@ sub tcpconnect
 
   if ($rhostname =~ /^[0-9.][0-9.]*$/)
     {
-      local (@octet) = split (/[.]/, $rhostname);
-      @rhostaddr = (pack ('C4', @octet));
-      $canon_rhostname = &my_gethostbyaddr ($rhostname, $rhostaddr[0], $type);
+      $canon_rhostname = &my_gethostbyaddr ($rhostname, $type);
+      @rhostaddr = &ip_canonical ($rhostname);
     }
   else
     {
@@ -489,8 +488,12 @@ sub require_soft
 
 sub my_gethostbyaddr
 {
-  local ($addrstring, $addr, $type) = @_;
+  local ($addrstring, $type) = @_;
+  local ($addr) = 0;
   local ($name) = "";
+
+  $addr = &ip_canonical ($addrstring);
+  $addrstring = &ipaddr2string ($addr);
 
   if ("$ENV{TCPCONNECT_REVRES}" ne "nil")
     {
@@ -501,7 +504,67 @@ sub my_gethostbyaddr
     {
       return $addrstring;
     }
+
   return $name;
+}
+
+sub ip_canonical
+{
+  local ($addrstring) = @_;
+  local ($addr) = 0;
+
+  if ($addrstring =~ /^[0-9.][0-9.]*$/)
+    {
+      if ($addrstring =~ /[.]/)
+        {
+          # String is in 255.255.255.255 format
+          local (@octet) = split (/[.]/, $rhostname);
+          $addr = pack ('C4', @octet);
+        }
+      else
+        {
+          # If string is not in octet form but instead is a flat ascii IP,
+          # then just convert it to network byte order.
+          # Convert addrstring to the dotted decimal representation for it.
+          #
+          # source IP addresses are specified in this flat format in the
+          # IRC DCC protocol; I don't know if it's common anywhere else.
+          $addr = &htonl ($addrstring);
+        }
+    }
+
+  return $addr;
+}
+
+sub this_host_big_endian_p
+{
+  local ($x) = 1;
+  local (@y) = unpack ("c2", pack ("i", $x));
+
+  if ($y[0] == 1)
+    {
+      # we're little-endian
+      return 0;
+    }
+  # we're big-endian
+  return 1;
+}
+
+# Convert integers from host byte order to network byte order.
+# Network byte order is big-endian.
+sub htonl
+{
+  local ($h) = @_;
+  local (@o);
+
+  if (&this_host_big_endian_p ())
+    {
+      return $h;
+    }
+
+  @o = unpack ('C4', pack ("I", "$h"));
+  $h = pack ('C4', $o[3], $o[2], $o[1], $o[0]);
+  return $h;
 }
 
 sub ipaddr2string
