@@ -1,0 +1,65 @@
+#! /usr/local/bin/perl
+# mkhomelinks --- create links in /home for user home directories
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1995-06-23
+# Public domain.
+
+# $Id$
+
+$tophome = "/home";
+
+while (@pwent = getpwent ())
+  {
+    if (&invalid_user_p (@pwent)) { next; }
+
+    local ($user, $pw, $uid, $gid, $quota, $comment, $gcos, $home, $shell)
+      = @pwent;
+
+    local ($symlink) = $tophome . "/" . $user;
+
+    if ($symlink ne $home)
+      {
+        # Don't clobber entry if it's not a symlink already.
+        if (-e $symlink && ! -l $symlink) { next; }
+
+        local ($linkname) = readlink ($symlink);
+
+        if (-d $home)
+          {
+            if ($linkname ne $home)
+              {
+                # Create symlink to home directory.
+                unlink ($symlink);
+                symlink ($symlink, $home);
+              }
+          }
+        else
+          {
+            # Remove symlink; it doesn't point to anything that exists.
+            unlink ($symlink);
+          }
+      }
+  }
+
+# Various heuristics to decide if this is a real user account or not.
+sub invalid_user_p
+{
+  local ($user, $pw, $uid, $gid, $quota, $comment, $gcos, $home, $shell)
+    = @pwent;
+
+  if ($pw =~ /[*]/          # * is never a valid char in ciphertext
+      || $pw =~ /nologin/
+      || $uid < 100
+      || $home eq "/"
+      || $shell =~ /logout/
+      || $shell =~ /!/
+      || $shell =~ /false/
+     )
+    {
+      return 1;
+    }
+
+  return 0;
+}
+
+# mkhomelinks ends here
