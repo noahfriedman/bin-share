@@ -1,12 +1,12 @@
 #!/bin/sh
 # ludeconf --- configure autoconfiscated packages for installation in lude
 
-# Copyright (C) 1997 Noah S. Friedman
+# Copyright (C) 1997, 1998 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-06-03
 
-# $Id: ludeconf,v 2.2 1997/06/05 10:39:46 friedman Exp $
+# $Id: ludeconf,v 2.3 1998/05/04 19:42:18 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -34,7 +34,7 @@ bq='`'
 eq="'"
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 2.2 $'
+rcs_revision='$Revision: 2.3 $'
 revision=`set fnord $rcs_revision; echo $3`
 
 usage="Usage: $progname {$progname-options} {-- {configure-options}}
@@ -56,6 +56,8 @@ $progname options:
                              If not specified, guess using ${bq}ludeclass$eq.
 -D, --depot          DEPOT   Use DEPOT as the lude system depot.
                              If not specified, guess.
+-M, --modification   MOD     Use MOD as the package modification.
+                             If not specified, guess (usually ${bq}default$eq).
 -S, --soft           PKG     Use PKG as the lude software package.
                              If not specified, guess.
 
@@ -80,6 +82,7 @@ configure_x=
 
 lude_class=${LUDE2_CLASS}
 lude_depot=${LUDE2_DEPOT}
+lude_mod=${LUDE2_MODIFICATION}
 lude_soft=${LUDE2_SOFTWARE}
 
 ##########
@@ -150,6 +153,10 @@ while : ; do
     -D | --depot* | --lude-depot* | --dep* | --lude-d* )
        eval "$getopt"
        lude_depot="$optarg"
+     ;;
+    -M | --modification* | --lude-modification* | --mod* | --lude-m* )
+       eval "$getopt"
+       lude_mod="$optarg"
      ;;
     -S | --soft* | --lude-soft* | --s* | --lude-s* )
        eval "$getopt"
@@ -253,11 +260,12 @@ case "$lude_depot" in
    ;;
 esac
 
+sed_re_quote='s/\([][*.\\\/?+|^$]\)/\\\1/g'
+
 case "$lude_soft" in
   '' )
-    sed_re_quote='s/\([][*.\\\/?+|^$]\)/\\\1/g'
-    depot_re=`{ cd "$lude_depot" && pwd; } | sed -e "$sed_re_quote"`
-    lude_soft=`pwd | sed -e "s/^$depot_re\///" -e 's/\/.*//'`
+    re=`{ cd "$lude_depot" && pwd; } | sed -e "$sed_re_quote"`
+    lude_soft=`pwd | sed -e "s/^$re\///" -e 's/\/.*//'`
 
     case "$lude_soft" in
       '' | */* )
@@ -268,8 +276,39 @@ case "$lude_soft" in
    ;;
 esac
 
+case "$lude_mod" in
+  '' )
+    re=`{ cd "$lude_depot/$lude_soft" && pwd; } | sed -e "$sed_re_quote"`
+    lude_mod=`pwd | sed -e "s/^$re\/[^/]*\///" -e 's/\/.*//'`
+
+    case "$lude_mod" in
+      orig )
+        exec 1>&2
+        echo "$progname: ${bq}orig$eq: improper modification."
+        echo "$progname: Specify ${bq}--modification orig$eq to force this."
+        exit 1
+       ;;
+      '' | */* )
+        echo "$progname: Can't determine LUDE software modification type." 1>&2
+        exit 1
+       ;;
+    esac
+   ;;
+esac
+
 case "$lude_class" in
-  '' ) lude_class=`ludeclass` ;;
+  '' )
+    re=`{ cd "$lude_depot/$lude_soft/src/$lude_mod" && pwd; } \
+          | sed -e "$sed_re_quote"`
+    lude_class=`pwd | sed -e "s/^$re\///" -e 's/\/.*//'`
+
+    case "$lude_class" in
+      '' | */* )
+        lude_class=`ludeclass`
+        echo "$progname: warning: Can't autodetect LUDE software class." 1>&2
+        echo "$progname: warning: Defaulting to $bq$lude_class$eq." 1>&2
+       ;;
+    esac
 esac
 
 ##########
@@ -295,6 +334,7 @@ case "$configure_x:$x11dir" in
   yes: )
     x11dirs='
       /usr/X11R6
+      /opt/X11
       /usr/local/X11
       /usr/openwin
       /usr
@@ -338,7 +378,7 @@ esac
 
 ##########
 
-install_prefix=$lude_depot/$lude_soft/run/default
+install_prefix="$lude_depot/$lude_soft/run/$lude_mod"
 
 set fnord \
     "$configure_program" \
@@ -352,6 +392,7 @@ case "$verbose" in
     echo "$progname:" \
          "depot=$lude_depot," \
          "soft=$lude_soft," \
+         "modification=$lude_mod," \
          "class=$lude_class"
     echo ${1+"$@"}
    ;;
