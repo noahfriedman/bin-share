@@ -4,7 +4,7 @@
 # Created: 1993-09-21
 # Public domain
 
-# $Id: biffjr,v 1.4 1995/03/21 14:48:44 friedman Exp $
+# $Id: biffjr,v 1.4 1995/03/21 14:50:30 friedman Exp friedman $
 
 # Commentary:
 
@@ -20,7 +20,6 @@
 # the case in emacs shell buffers.
 #
 # The --foreground and --ignore-tty-owner options frob this behavior.
-
 
 # Code:
 
@@ -212,7 +211,7 @@ while test $# != 0 ; do
       shift
       break
      ;;
-    -* )
+    -? | --* )
       case "$1" in
         --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
         * )     arg="$1" ;;
@@ -221,6 +220,13 @@ while test $# != 0 ; do
       echo "$progname: unknown or ambiguous option $bq$arg$eq"
       echo "$progname: Use $bq--help$eq for a list of options."
       exit 1
+     ;;
+    -??* )
+      # Split grouped single options into separate args and try again
+      optarg="$1"
+      shift
+      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+      shift
      ;;
     * )
       break
