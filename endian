@@ -1,10 +1,10 @@
 #!/bin/sh
 # endian -- determine endian-ness of machine
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1993-01-21
 # Public domain.
 
-# $Id$
+# $Id: endian,v 1.2 1995/09/22 23:50:26 friedman Exp $
 
 # Commentary:
 
@@ -15,14 +15,9 @@
 # Code:
 
 if { perl -v; } > /dev/null 2>&1; then
-  perl -e '
-    $x = 1;
-    @y = unpack ("c2", pack ("i", $x));
-    $s = "big";
-    if ($y[0] == 1) { $s = "little"; }
-    print "$s-endian\n";
-    exit (0);
-  '
+  exec perl -e '
+    $e = unpack ("c2", pack ("i", 1)) ? "little" : "big";
+    print $e, "-endian\n";'
 else
   cd /tmp || exit 1
   file="endian$$"
