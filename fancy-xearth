@@ -5,26 +5,13 @@
 # Created: 1996-03-05
 # Public domain
 
-# $Id: fancy-xearth,v 1.7 1998/04/13 20:30:44 friedman Exp $
+# $Id: fancy-xearth,v 1.8 1999/11/09 06:20:11 friedman Exp $
 
 # Commentary:
 # Code:
 
 DISPLAY=${DISPLAY-:0.0}
 export DISPLAY
-
-version=`{ xearth -version 2>&1 \
-            | sed -n -e '/This is xearth version /{s///p;s/\.$//;p;}'
-         } 2> /dev/null` || exit 1
-
-# Align using galactic axis if available.
-#case "$version" in
-#  1.0 ) rot=21       ;;
-#  *   ) rot=galactic ;;
-#esac
-
-# Actually, I still prefer the traditional rotation.
-rot=21
 
 # Calculate relative offset based on the size of the display.
 {
@@ -44,8 +31,6 @@ rot=21
   width=`echo "$xrdb_syms"  | sed -ne "/-DWIDTH=/!d;s/.*-DWIDTH=//;$sedfilt"`
   height=`echo "$xrdb_syms" | sed -ne "/-DHEIGHT=/!d;s/.*-DHEIGHT=//;$sedfilt"`
 
-  xshift=`expr $width / 4`
-  yshift=`expr $height / 6`
 }
 
 # Set X cursor to resemble star trek enterprise
@@ -86,26 +71,85 @@ __EOF_MASKFILE__
   rm -f "$cursorfile" "$maskfile"
 }
 
-# Now run xearth with computed offset and other parameters.
-# This should background itself unless this script is called with `-nofork'
-# on the command line.
 {
-  xearth -nolabel \
-         -stars \
-         -onepix \
-         -nomarkers \
-         -night 15 \
-         -wait 3600 \
-         -nice 19 \
-         -mag 0.25 \
-         -shift -$xshift,-$yshift \
-         -pos sunrel,24.64,41.3 \
-         -gamma 1.0 \
-         -rot $rot \
-         -proj orthographic \
-         -bigstars 20 \
-         -fork \
-         ${1+"$@"} > /dev/null 2>&1 0<&1
+  case "$1" in
+    xearth | xplanet ) prog=$1; shift ;;
+    * )
+      prog=xearth
+      if { xplanetbg -version > /dev/null 2>&1; } 2> /dev/null; then
+        prog=xplanet
+      fi
+     ;;
+  esac
 }
+
+case "$prog" in
+  xplanet )
+    prog=xplanetbg
+    case "$1" in
+      -once )
+        prog=xplanet
+        shift
+       ;;
+    esac
+
+    # Assumes display has a 4:3 aspect ratio
+    xpos=`expr $width / 4`
+    ypos=`expr $height / 3`
+
+    set fnord \
+        -proj orthographic \
+        -radius 12 \
+        -center $xpos,$ypos \
+        -sunrel 25,35 \
+        -starfreq .0015 \
+        -blend \
+        -mapdir $HOME/etc/images/xplanet \
+        ${1+"$@"}
+    shift
+
+    case "$prog" in
+      xplanet ) $prog ${1+"$@"} ;;
+      * ) $prog -wait 3600 -nice 19 ${1+"$@"} > /dev/null 2>&1 0<&1 & ;;
+    esac
+   ;;
+  xearth )
+    # Run xearth with computed offset and other parameters.
+    # This should background itself unless this script is called with
+    # `-nofork' on the command line.
+    version=`{ xearth -version 2>&1 \
+                | sed -n -e '/This is xearth version /{s///p;s/\.$//;p;}'
+             } 2> /dev/null` || exit 1
+
+    # Align using galactic axis if available.
+    #case "$version" in
+    #  1.0 ) rot=21       ;;
+    #  *   ) rot=galactic ;;
+    #esac
+
+    # Actually, I still prefer the traditional rotation.
+    rot=21
+
+    xshift=`expr $width / 4`
+    yshift=`expr $height / 6`
+
+    xearth -nolabel \
+           -stars \
+           -onepix \
+           -nomarkers \
+           -night 15 \
+           -wait 3600 \
+           -nice 19 \
+           -mag 0.25 \
+           -shift -$xshift,-$yshift \
+           -pos sunrel,24.64,41.3 \
+           -gamma 1.0 \
+           -rot $rot \
+           -proj orthographic \
+           -bigstars 20 \
+           -fork \
+           ${1+"$@"} > /dev/null 2>&1 0<&1
+   ;;
+esac
 
 # fancy-xearth ends here
