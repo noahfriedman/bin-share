@@ -4,9 +4,12 @@
 # Created: 1992-02-10
 # Public domain
 
-# $Id: rotate-log,v 1.9 1995/10/03 22:20:18 friedman Exp friedman $
+# $Id: rotate-log,v 1.10 1995/10/03 22:57:32 friedman Exp friedman $
 
 # Commentary:
+
+# Todo: rewrite this in perl.
+
 # Code:
 
 # Name by which this script was invoked.
@@ -15,12 +18,13 @@ progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 # To prevent hairy quoting and escaping later.
 bq='`'
 eq="'"
+dq='"'
 
 usage="Usage: $progname {options} [logfile-name ...]
 
 Options are:
 -c, --compress                Compress old logs while rotating.
--C, --compress-active         Compress the active log (which will be
+-C, --compress-active         Compress the active log (which is first
                               rotated to log.0).  Normally this isn't done
                               because it may cause a race condition if the
                               file is still open, e.g. for process
@@ -36,8 +40,12 @@ Options are:
                               ${bq}compact$eq, ${bq}compress$eq, ${bq}gzip$eq.
                               Default is ${bq}gzip$eq.
 -m, --mode, --chmod     MODE  Change permissions to MODE on rotated logs.
+-N, --no-new-log              After rotating log->log.0, do not recreate log.
 -n, --number-of-logs       N  Keep up to N versions of log total (default 7).
                               Rotated logs are numbered zero-origin.
+                              The ${dq}active$dq log is included in the count,
+                              so the highest kept log number would be 6 by
+                              default.
 -o, --owner, --chown   OWNER  Change owner of logs to OWNER (you should use
                               OWNER.GROUP and avoid using --group if the
                               ${bq}chown${eq} command supports this syntax).
@@ -48,6 +56,12 @@ Options are:
                               the size is interpreted as bytes. By default
                               no minimum size is required for rotation.
 -v, --verbose                 Report renaming of files as they occur.
+-V, --verbose-if-not-rotated  If a size threshold is specified with
+                              $bq--size-threshold$eq and the primary log
+                              file doesn't meet that threshold, print
+                              a message saying so.  $bq--verbose$eq alone
+                              doesn't report this condition since it is one
+                              of inactivity, rather than activity.
 "
 
 # Usage: eval "$getopt"; value=$optarg
@@ -95,6 +109,7 @@ getopt='
                 exit 1
                ;;
            esac
+           shift
          ;;
         esac
      ;;
@@ -111,11 +126,13 @@ chown=:
 compressp=
 compress_activep=
 compress_method=gzip
+create_new_log_p=t
 debug=
 default_directory=.
 number_of_logs=7
 size_threshold=
 verbose=
+verbose_not_rotated=
 
 # Parse command line arguments.
 # Make sure that all wildcarded options are long enough to be unambiguous.
@@ -154,7 +171,11 @@ while : ; do
       eval "$getopt"
       chmod="${CHMOD-chmod} $optarg"
      ;;
-    -n | --number-of-logs* | --n* )
+    -N | --no-new-log | --no* )
+      create_new_log_p=
+      shift
+     ;;
+    -n | --number-of-logs* | --nu* )
       eval "$getopt"
       number_of_logs="$optarg"
      ;;
@@ -187,11 +208,15 @@ while : ; do
         [Mm] ) size_threshold=`expr $size_threshold '*' 1024 '*' 1024` ;;
       esac
      ;;
+    -V | --verbose-if-not-rotated | --verbose-* )
+      verbose_not_rotated=t
+      shift
+     ;;
     -v | --verbose | --v* )
       verbose=t
       shift
      ;;
-    -h | --help | --h )
+    -h | --help | --h* )
       echo "$usage" 1>&2
       exit 1
      ;;
@@ -232,17 +257,24 @@ case $# in
 esac
 
 case "$compress_method" in
-  compact )  compress_cmd='compact -f';  suffix='.C'  ;;
-  compress ) compress_cmd='compress -f'; suffix='.Z'  ;;
-  gzip )     compress_cmd='gzip';        suffix='.gz' ;;
+  # re_suffix is regexp-quoted
+  compact )  compress_cmd='compact -f'  suffix='.C'  re_suffix='\.C'  ;;
+  compress ) compress_cmd='compress -f' suffix='.Z'  re_suffix='\.Z'  ;;
+  gzip )     compress_cmd='gzip';       suffix='.gz' re_suffix='\.gz' ;;
   * )
     echo "$progname: unknown compress-method $bq$compress_method$eq" 1>&2
+    echo "$progname: Known compression methods: compact compress gzip" 1>&2
     exit 1
    ;;
 esac
 
 orig_cwd=${PWD-`pwd`}
 max_log_number=`expr $number_of_logs - 1`  # make it zero-origin
+
+# Used to quote strings so that sed will match exactly that string
+# (i.e. quote special characters so that they lose their specialness).
+sed_regexp_quote='s/\([][*.\\\/?|^$]\)/\\\1/g'
+re_end='$'  # to avoid quoting nightmares in command substitutions
 
 for log in ${1+"$@"} ; do
   cd "$orig_cwd"
@@ -281,32 +313,57 @@ for log in ${1+"$@"} ; do
     suffix=
   fi
 
-  # Don't check size if log file doesn't exist.
-  if test -f "$basename"; then
-    case "$size_threshold" in
-      '' ) : ;;
-      * )
+  num=
+  case "$size_threshold" in
+    '' ) : ;;
+    * )
+      if test -f "$basename"; then
         # Using wc should be relatively inexpensive since most (if not all)
         # implementations simply stat the file and use st_size to obtain the
         # number of characters.
-        # This is more reliable than using `ls' and parsing out irrelevant
+        # This is also more reliable than using `ls' and parsing out irrelevant
         # fields since not all versions of `ls' print the same number of
         # fields given identical options, and choosing fields based on the
-        # presence of numerals only is risky since a file might have a uid or
-        # gid with no corresponding name.
+        # presence of numerals only is risky since a file might have a uid
+        # or gid with no corresponding name.
         logsize=`wc -c $basename | sed -e 's/^ *//;s/ .*//'`
         if test "$logsize" -lt "$size_threshold"; then
-          if test ".$verbose" = '.t'; then
-            echo "$progname: $log: size=$logsize less than threshold=$size_threshold; not rotating."
-          fi
+          case "$verbose_not_rotated" in t)
+            echo "$progname: $log: size=$logsize less than threshold=$size_threshold; not rotating." ;;
+          esac
           continue
         fi
-       ;;
-    esac
-  fi
+      else
+        # If log doesn't exist, we'll skip any rotation.
+        num=-2
+      fi
+     ;;
+  esac
 
-  num=$max_log_number
-  nextnum=$number_of_logs
+  # Check to see if there are any gaps in the existing logfiles and, if so,
+  # fill them before rotating the higher-numbered logfiles.
+  case "$num" in
+    -2 ) : ;;
+    * )
+      re_basename=`echo "$basename" | sed -e "$sed_regexp_quote"`
+      numbers=`ls -1 $basename.*$suffix 2> /dev/null \
+                | sed -ne "/^$re_basename[.][0-9][0-9]*$re_suffix$re_end/!d
+                           s/^$re_basename[.]//
+                           s/$re_suffix$re_end//
+                           p" \
+                | sort -n`
+      num=-1
+      nextnum=0
+      for n in $numbers; do
+        if test $n -eq $number_of_logs || test $n -gt $nextnum ; then
+          break
+        fi
+        num=$n
+        nextnum=`expr $n + 1`
+      done
+     ;;
+  esac
+
   while : ; do
     case $num in
       -2 ) break ;;
@@ -339,19 +396,24 @@ for log in ${1+"$@"} ; do
 
   # Create new logfile (or rather, append to it just in case some other
   # random process has already created it and started writing into it)
-  >> "$basename"
-  $chmod "$basename"
-  $chgrp "$basename"
-  $chown "$basename"
+  case "$create_new_log_p" in
+    t)
+      >> "$basename"
+      $chmod "$basename"
+      $chgrp "$basename"
+      $chown "$basename"
+     ;;
+  esac
 
   case "$compress_activep" in t)
-    $compress_cmd "$basename.0" \
+     test -f "$basename.0" \
+     && $compress_cmd "$basename.0" \
      && test ".$verbose" = '.t' \
      && echo "$basename.0 -> $basename.0$suffix"
   esac
 
-  case "$verbose" in t )
-    echo "Created $log" ;;
+  case "$create_new_log_p:$verbose" in
+    t:t ) echo "Created $log" ;;
   esac
 done
 
