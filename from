@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.28 1999/05/22 16:35:42 friedman Exp $
+# $Id: from,v 1.29 1999/09/22 06:42:43 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -94,6 +94,8 @@ Options are:
 It is possible to get headers for messages residing on POP3 servers.
 To specify a POP3 folder, use the syntax $bq:pop3:host:username:password$eq
 on the command line, or embed it in your MAIL environment variable.
+To specify a particular port to use with the pop3 protocol, the first field
+of the remote specification can contain a port number, e.g. $bq:pop3,110:$eq.
 "
 
 format_usage="$progname format usage: --format='%{{-}{n}{.m}}[header] ...' ...
@@ -444,6 +446,7 @@ export MAIL POPPASS
 # process might have expected.  So dup stdin onto fd 9, and before the
 # inferior process is started, it will be reduped back onto fd 0.
 exec $perl $debug - ${1+"$@"} 9<&0 <<'__EOF__'
+# this commented quote rebalance perl mode font-lock: "
 
 &main;
 
@@ -498,10 +501,11 @@ sub main
 
   foreach $file (@ARGV)
     {
-      if ($file =~ /^:(pop3|pop-3|pop):/oi)
+      if ($file =~ /^:(pop-?3|pop)[:,]/oi)
         {
           local ($ignore, $port, $host, $user, $pass) = split (/:/, $file);
 
+          $port =~ s/.*,//o if ($port =~ /,/);
           if (! defined ($user) || $user eq '')
             {
               foreach $envvar ('USER', 'LOGNAME')
