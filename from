@@ -4,7 +4,7 @@
 # Created: 1992-01-19
 # Public domain
 
-# $Id: from,v 1.6 1995/09/23 22:01:49 friedman Exp $
+# $Id: from,v 1.7 1995/10/16 03:11:14 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -213,15 +213,6 @@ done
 
 case "$debug" in -d ) set -x ;; esac
 
-case "${FROM_FORMAT+set}" in
-  set ) : ;;
-  * )
-    FROM_FORMAT="%-19.18From %-13.12Date %-.`expr ${COLUMNS-80} - 35`Subject"
-   ;;
-esac
-
-export FROM_FORMAT FROM_PARSEP
-
 case $# in
   0 )
     USER=${USER-${LOGNAME-`{ id | sed -ne 's/.*uid=[0-9]*(//
@@ -230,6 +221,7 @@ case $# in
                            } \
                            || { (whoami) 2> /dev/null; }`}}
 
+    spoolfile=
     for f in /var/mail /var/spool/mail /usr/spool/mail /usr/mail ; do
       if test -f "$f/$USER" ; then
         spoolfile="$f/$USER"
@@ -237,8 +229,13 @@ case $# in
       fi
     done
 
-    set fnord "$spoolfile"
-    shift
+    case "$spoolfile" in
+      '' ) exit 1 ;;
+      * )
+        set fnord "$spoolfile"
+        shift
+       ;;
+    esac
    ;;
 esac
 
@@ -248,8 +245,16 @@ case "$envelopep" in
  ;;
 esac
 
+case "${FROM_FORMAT+set}" in
+  set ) : ;;
+  * )
+    FROM_FORMAT="%-19.18From %-13.12Date %-.`expr ${COLUMNS-80} - 35`Subject"
+   ;;
+esac
+
 FROM_PROGNAME=$progname
-export FROM_PROGNAME
+
+export FROM_FORMAT FROM_PARSEP FROM_PROGNAME
 
 # By using a here-document to include the source of the perl script (to
 # avoid command line length limits), we usurp the normal stdin the inferior
@@ -364,15 +369,18 @@ sub make_important_header_vector
   local ($re_token) = "$re_format_modifier" . "[^%]*";
 
   $fstring = $format;
-  $i = 0;
-  $fstring = $format;
   $important_header_vector{'prefix'} = '';
-  if ($fstring =~ /^[^%]*/o)
-    {
-      $important_header_vector{'prefix'} = $&;
-    }
+  $i = 0;
+  $tmp = '';
 
-  while ($fstring =~ /$re_token/o)
+  while ($fstring =~ /(^[^%]+)|(^%%)/o)
+    {
+      $tmp = $tmp . $&;
+      $fstring = $';
+    }
+  $important_header_vector{'prefix'} = $tmp;
+
+  while ($fstring =~ /^$re_token/o)
     {
       $i++;
       $modifier = "";
@@ -393,6 +401,13 @@ sub make_important_header_vector
               $trailing_whitespace = "";
             }
         }
+
+      while ($fstring =~ /(^[^%]+)|(^%%)/o)
+        {
+          $trailing_whitespace = $trailing_whitespace . $&;
+          $fstring = $';
+        }
+
       # Make header name all upper case to distinguish from extraneous data
       # like the `prefix' element.
       $tmp = "\U$tmp";
@@ -539,7 +554,13 @@ sub print_headers
   local ($format, $header, $i);
 
   $i = 1;
-  printf ("%s", $important_header_vector{'prefix'});
+
+  # Let the prefix string be its own format, for consistency with the
+  # treatment of the rest of the format strings.
+  # The prefix string shouldn't contain any formatting constructs except
+  # possibly for "%%" sequences, which will appear as a single % character.
+  #printf ("%s", $important_header_vector{'prefix'});
+  printf ($important_header_vector{'prefix'});
 
   while (1)
     {
