@@ -1,26 +1,42 @@
 #!/bin/sh
-# $Id$
+# $Id: h2ph-all,v 1.1 1996/02/16 01:15:48 friedman Exp $
 
-include=/usr/include
-export include
+include=${INCLUDE-/usr/include}
+h2ph=${H2PH-h2ph}
+export include h2ph
+
+# The obscure hackery here is to get around arg length limitations in some
+# operating systems.  Using xargs isn't sufficient because the script text
+# itself seems to overflow some systems (e.g. Solaris 2.3).
 
 (cd "$include" && find * -follow \( -name '*.h' -o -type d \) -print) \
- | xargs sh -c 'for h in ${1+"$@"}; do
-                  if [ -d "$include/$h" ]; then
-                    if [ ! -d "$h" ]; then
-                      echo "mkdir $h"
-                      mkdir "$h"
-                    fi
-                  else
-                    ph=`echo "$h" | sed -e "s/\.h\$/.ph/"`
-                    if [ "$include/$h" -nt "$ph" ]; then
-                      echo "$ph is up to date."
-                    else
-                      echo "$h -> $ph"
-                      h2ph < "$include/$h" > "$ph"
-                    fi
-                  fi
-                done
-               ' mkphfiles
+ | sh 9<&0 <<'__EOF__'
+     (
+       # Put entire script in a subprocess because some versions of sh
+       # don't cope with redirecting the file descriptor on which the
+       # program text originated.  Forking first means that the process
+       # reading the data input is different from the one reading program
+       # text.
+       exec 0<&9
+       while read h; do
+         if [ -d "$include/$h" ]; then
+           if [ ! -d "$h" ]; then
+             echo "mkdir $h"
+             mkdir "$h"
+           fi
+         else
+           ph=`echo "$h" | sed -e "s/\.h\$/.ph/"`
+           # Note that the -nt flag isn't supported on some systems, e.g.
+           # Solaris 2.3 (although it works in 2.5).
+           if [ -f "$ph" ] && [ "$include/$h" -nt "$ph" ]; then
+             echo "$ph is up to date."
+           else
+             echo "$h -> $ph"
+             $h2ph < "$include/$h" > "$ph"
+           fi
+         fi
+       done
+     )
+__EOF__
 
 #eof
