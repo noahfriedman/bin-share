@@ -4,7 +4,7 @@
 # Created: 1995-04-15
 # Public domain
 
-# $Id: smtp,v 1.11 1999/12/06 06:08:27 friedman Exp $
+# $Id: smtp,v 1.12 2002/06/05 23:13:57 friedman Exp $
 
 case $1 in
   # Skip mx resolution for some names.
@@ -24,26 +24,26 @@ case $1 in
              }' \
           | sort -n \
           | sed -e 's/.*[ 	]//'`
+   ;;
+esac
 
-    case `echo $mx` in
-      '' )
-        exec tcpconnect -v "$1" "${2-smtp}"
-       ;;
-      *' '* )
-        for addr in $mx; do
-           tcpconnect -v "$addr" "${2-smtp}"
-           e=$?
-           case $e in
-             2 ) : ;; # means connection refused
-             * ) exit $e ;;
-           esac
-        done
-        exit $e
-       ;;
-      * )
-        exec tcpconnect -v "$mx" "${2-smtp}"
-       ;;
-    esac
+case `echo $mx` in
+  '' )
+    exec tcpconnect -v "$1" "${2-smtp}"
+   ;;
+  *' '* )
+    for addr in $mx; do
+       tcpconnect -v "$addr" "${2-smtp}"
+       e=$?
+       case $e in
+         2 ) : ;; # means connection refused
+         * ) exit $e ;;
+       esac
+    done
+    exit $e
+   ;;
+  * )
+    exec tcpconnect -v "$mx" "${2-smtp}"
    ;;
 esac
 
