@@ -1,0 +1,106 @@
+#! /usr/local/bin/perl
+# tcpconnect --- connect via TCP to a specified host and port
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1995-04-15
+# Public domain
+
+# $Id$
+
+# Commentary:
+# Code:
+
+&tcpconnect(@ARGV);
+
+# Args: host, port
+sub tcpconnect
+{
+  local ($rhost, $port) = @_;
+  local ($name, $aliases, $type, $len, $thisaddr, $rhostaddr);
+  local ($proto);
+  # This is made global so that do_shutdown can use it.
+  #local ($child);
+
+  local ($sockaddr) = "S n a4 x8";
+
+  # So we don't have to include socket.ph
+  # These are probably correct, but not guaranteed to be.
+  local ($AF_INET) = 2;
+  local ($SOCK_STREAM) = 1;
+
+  local ($hostname) = `hostname`;
+  chop $hostname;
+
+  ($name, $aliases, $proto) = getprotobyname ("tcp");
+
+  if ($port !~ /^\d+$/)
+    {
+      ($name, $aliases, $port) = getservbyname ($port, "tcp");
+    }
+
+  ($name, $aliases, $type, $len, $thisaddr) = gethostbyname ($hostname);
+  ($name, $aliases, $type, $len, $rhostaddr) = gethostbyname ($rhost);
+
+  $thishost = pack ($sockaddr, $AF_INET, 0, $thisaddr);
+  $rhost    = pack ($sockaddr, $AF_INET, $port, $rhostaddr);
+
+  # Make socket filehandle.
+  socket (S, $AF_INET, $SOCK_STREAM, $proto) || die ("$0: socket: $!");
+
+  # Give the socket an address.
+  bind (S, $thishost) || die ("$0: bind: $!");
+
+  # Connect to server.
+  connect (S, $rhost) || die ("$0: connect: $!");
+
+  # Avoid deadlock by forking.
+  $child = fork();
+
+  # Set file handles to be command buffered.
+  # Since we do unbuffered sysreads and syswrites this may actually be
+  # unnecessary.
+  select (S); $| = 1; select (STDOUT); $| = 1;
+
+  $SIG{'HUP'} = 'shutdown';
+
+  if ($child == 0)
+    {
+      # child
+      while ($len = sysread(STDIN, $_, 16384))
+        {
+          syswrite (S, $_, $len);
+        }
+      &shutdown;
+    }
+  else
+    {
+      while ($len = sysread (S, $_, 16384))
+        {
+          syswrite (STDOUT, $_, $len);
+        }
+      &shutdown;
+    }
+}
+
+sub shutdown
+{
+  close (S);
+
+  if ($child == 0)
+    {
+      # Child.  Slaughter parent if not already orphaned.
+      $ppid = getppid();
+      if ($ppid != 1)
+        {
+          kill 1, $ppid;
+        }
+    }
+  else
+    {
+      # Parent.  Slay children.
+      kill 1, $child;
+    }
+
+  exit (0);
+}
+
+# tcpconnect ends here.
