@@ -1,0 +1,85 @@
+#! /bin/sh
+# bash-login --- invoke bash when using /bin/sh as shell
+
+# Copyright (C) 1996 Noah S. Friedman
+
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1996-10-11
+
+# $Id$
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, you can either send email to this
+# program's maintainer or write to: The Free Software Foundation,
+# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
+
+# Commentary:
+
+# This script allows you to set your login shell to /bin/sh, but invoke
+# bash transparently on login.  If bash can't be found, restart the bourne
+# shell.  This script should either be `execed' from .profile or else
+# copied into it wholesale.
+
+# This allows you to set your login shell to something safe in heterogenous
+# environments where bash may not exist, but you want to use it if it's
+# available.
+
+# Code:
+
+# Directories where bash may exist.
+pathdirs='
+  /opt/gnu/bin
+  /tools/ns/bin
+  /usr/local/gnu/bin
+  /usr/local/gnubin
+  /usr/local/bin
+'
+
+find_bash_p=
+
+# If we are sh, maybe look for bash
+case "$0" in
+  '-sh' | '-bin/sh' | '-usr/bin/sh' ) find_bash_p=t ;;
+esac
+
+# If we are already running bash, don't do anything.
+case "${BASH_VERSION+set}" in set ) find_bash_p= ;; esac
+
+# If my environment is defined already, don't do anything.
+case "$LOGGED" in t ) find_bash_p= ;; esac
+
+case "$find_bash_p" in
+  t )
+    for d in $pathdirs; do
+      case "$PATH" in
+         "$d" | *":$d:"* | "$d:"* | *":$d" ) : ;;
+         * ) PATH="$d:$PATH"; export PATH ;;
+      esac
+    done
+
+    if { bash -c : ; } 2> /dev/null ; then
+      exec bash -norc -c '
+        no_exit_on_failed_exec=t
+        SHELL=`type -path bash`
+        export SHELL no_exit_on_failed_exec
+
+        exec - bash
+
+        SHELL=/bin/sh
+        exec - sh
+      '
+    fi
+   ;;
+esac
+
+# bash-login ends here
