@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- produce DVI (or PDF) files from Texinfo (or LaTeX) sources.
-# $Id: texi2dvi,v 0.31 1999/02/01 19:46:45 karl Exp $
+# $Id: texi2dvi,v 0.32 1999/02/03 21:05:03 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98, 99 Free Software Foundation, Inc.
 #
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.31 $'
+rcs_revision='$Revision: 0.32 $'
 rcs_version=`set - $rcs_revision; echo $2`
 program=`echo $0 | sed -e 's!.*/!!'`
 version="texi2dvi (GNU Texinfo 3.12-pretest) $rcs_version
@@ -71,18 +71,18 @@ general questions and discussion to <help-texinfo@gnu.org>."
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
 escape='\'
-batch=:
+batch=false	# echo for batch mode
 clean=
 debug=
-expand=
+expand=false	# echo for expansion via makeinfo
 oformat=dvi
 set_language=
 makeinfo=
-miincludes= # makeinfo include path
+miincludes=	# makeinfo include path
 textra=
-txincludes= # TEXINPUTS extensions
-quiet=    # by default let the tools' message be displayed
-verbose=: # no verbosity by default
+txincludes=	# TEXINPUTS extensions
+quiet=    	# by default let the tools' message be displayed
+verbose=false	# echo for verbose mode
 
 orig_pwd=`pwd`
 
@@ -129,7 +129,7 @@ while test x"$1" != x"$arg_sep"; do
     -q | -s | --q* | --s*) quiet=t; batch=echo;;
     -c | --c*) clean=t;;
     -D | --d*) debug=t;;
-    -e | --e*) expand=t;;
+    -e | --e*) expand=echo;;
     -h | --h*) echo "$usage"; exit 0;;
     -I | --I*)
       shift
@@ -223,8 +223,10 @@ for command_line_filename in ${1+"$@"}; do
   # Otherwise, guess from the file extension.
   if test -n "$set_language"; then
     language=$set_language
-  elif sed 1q "$command_line_filename" | grep 'input texinfo' >/dev/null; then
+  elif sed 1q "$command_line_filename" | fgrep 'input texinfo' >/dev/null; then
     language=texinfo
+  else
+    language=
   fi
 
   # Get the type of the file (latex or texinfo) based on its extension,
@@ -248,7 +250,7 @@ for command_line_filename in ${1+"$@"}; do
       # and tex.
       bibtex=
       ext=texi
-      test "$expand" = t && makeinfo=${MAKEINFO:-makeinfo}
+      makeinfo=`$expand ${MAKEINFO:-makeinfo}`
       texindex=${TEXINDEX:-texindex}
       if test $oformat = dvi; then
         tex=${TEX:-tex}
@@ -276,14 +278,14 @@ for command_line_filename in ${1+"$@"}; do
   # they differ from the new one).
   tmpdir_bak=$tmpdir/bak
 
-  # Make all those directories and give up if we can't succeed.
-  mkdir $tmpdir || exit 1
-  mkdir $tmpdir_src $tmpdir_xtr $tmpdir_bak || exit 1
-
   # Remove the temporary directories, unless debugging.
   if test -z "$debug"; then
     trap "cd / && rm -rf $tmpdir" 0 1 2 15
   fi
+
+  # Make all those directories and give up if we can't succeed.
+  mkdir $tmpdir || exit 1
+  mkdir $tmpdir_src $tmpdir_xtr $tmpdir_bak || exit 1
 
   # Expand macro commands in the original source file using Makeinfo.
   # Always use `end' footnote style, since the `separate' style
@@ -356,8 +358,9 @@ EOF
   # directory where source file(s) reside in TEXINPUTS before anything
   # else.  `.' goes first to ensure that any old .aux, .cps,
   # etc. files in ${directory} don't get used in preference to fresher
-  # files in `.'.
-  common=".$path_sep$filename_dir$path_sep$txincludes$path_sep"
+  # files in `.'.  Include orig_pwd in case we are in clean mode, where
+  # we've cd'd to a temp directory.
+  common=".$path_sep$orig_pwd$path_sep$filename_dir$path_sep$txincludes$path_sep"
    TEXINPUTS="$common$TEXINPUTS_orig"
   INDEXSTYLE="$common$INDEXSTYLE_orig"
 
