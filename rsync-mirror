@@ -1,0 +1,17 @@
+#!/bin/sh
+# $Id$
+
+exec rsync \
+      --delete \
+      --devices \
+      --force \
+      --group \
+      --hard-links \
+      --links \
+      --owner \
+      --perms \
+      --recursive \
+      --sparse \
+      --times \
+      --verbose \
+      ${1+"$@"}
