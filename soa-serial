@@ -1,8 +1,9 @@
 #! /bin/sh
+# $Id$
 
-dom="$1"
-
-dig "$dom" soa \
+# multiline is a dig 9.x option; ignore error in older versions because
+# they print soa entries in multiline format already anyway.
+dig "$1" soa +multiline 2> /dev/null \
  | sed -ne "/^$dom.*SOA/{
               :l
               /;.*serial/!{
