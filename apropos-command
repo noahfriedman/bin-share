@@ -1,0 +1,10 @@
+#!/bin/sh
+
+{
+  for dir in `echo "$PATH" \
+               | sed -e 's/^:/.:/;s/::/:.:/g;s/:$/:./;s/:/ /g'`
+  do
+    ls -1 "$dir"
+  done
+} | grep -i "$1" \
+  | sort -u
