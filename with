@@ -1,12 +1,15 @@
-#! /bin/sh
+#!/bin/sh
+exec ${PERL-perl} -Swx $0 ${1+"$@"}
+#!perl		  [perl will skip all lines in this file before this line]
+
 # with --- run program with special properties
 
-# Copyright (C) 1995, 2000 Noah S. Friedman
+# Copyright (C) 1995, 2000, 2002 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-08-14
 
-# $Id: with,v 1.9 2000/01/18 19:08:39 friedman Exp $
+# $Id: with,v 1.10 2000/01/20 20:09:45 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,115 +33,75 @@
 
 # Code:
 
-exec ${PERL-perl} -Sx $0 ${1+"$@"}
-#!perl		  [perl will skip all lines in this file before this line]
-
 use Getopt::Long;
-use Fcntl;
+use POSIX qw(setsid);
 use Symbol;
-
 use strict;
-no strict "vars";
 
-sub err (;@)
+(my $progname = $0) =~ s|.*/||;
+my $bgfn;
+my $bgopt = 0;
+
+my $opt_cwd;
+my $opt_egid;
+my $opt_euid;
+my $opt_gid;
+my $opt_groups;
+my @opt_include;
+my $opt_name;
+my $opt_pgrp;
+my $opt_priority;
+my $opt_root;
+my $opt_uid;
+my $opt_umask;
+
+sub err
 {
   my $fh = (ref ($_[0]) ? shift : *STDERR{IO});
   print $fh join (": ", $progname, @_), "\n";
   exit (1);
 }
 
-sub require_soft ($)
+sub get_includes
 {
-  my $f = shift;
-  for my $dir (@INC)
-    {
-      return require "$f" if (-f "$dir/$f");
-    }
-  return undef;
+  unshift @INC, @_;
+  push (@INC,
+        "$ENV{HOME}/lib/perl",
+        "$ENV{HOME}/lib/perl/include");
+
+  eval { require "syscall.ph" } if defined $opt_groups;
 }
 
-sub get_includes ()
+sub numberp
 {
-  push (@INC, @$opt_include,
-              "$ENV{HOME}/lib/perl",
-              "$ENV{HOME}/lib/perl/include")
-    if (defined $opt_include);
-
-  if ($opt_groups)
-    {
-      require_soft ("syscall.ph");
-    }
-
-  if ($opt_notty)
-    {
-      # Look for &TIOCNOTTY
-      require_soft ("sys/ttycom.ph");
-      require_soft ("sys/termios.ph");
-      require_soft ("sys/ttold.ph");
-      require_soft ("sys/ioctl.ph");
-    }
+  defined $_[0] && $_[0] =~ m/^-?\d+$/o;
 }
 
-sub numberp ($)
-{
-  return (defined $_[0] && $_[0] =~ /^-?\d+$/o) ? 1 : 0;
-}
-
-sub group2gid ($)
+sub group2gid
 {
   my $g = shift;
-  return $g if (numberp ($g));
+  return $g if numberp ($g);
   my $gid = getgrnam ($g);
-  return $gid if (defined $gid && numberp ($gid));
+  return $gid if defined $gid && numberp ($gid);
   err ($g, "no such group");
 }
 
-sub user2uid ($)
+sub user2uid
 {
   my $u = shift;
-  return $u if (numberp ($u));
+  return $u if numberp ($u);
   my $uid = getpwnam ($u);
-  return $uid if (defined $uid && numberp ($uid));
+  return $uid if defined $uid && numberp ($uid);
   err ($u, "no such user");
 }
 
-sub background
-{
-  fork && exit (0);
-}
-
-sub notty
-{
-  # Don't allow any file descriptors, including stdin, stdout, or
-  # stderr to be propagated to children.
-  $^F = -1;
-
-  # exit parent
-  fork && exit (0);
-
-  # Duped in case we've closed stderr but can't exec anything.
-  my $saved_stderr = gensym;
-  open ($saved_stderr, ">&STDERR");
-
-  close (STDERR);
-  close (STDOUT);
-  close (STDIN);
-
-  my $fh = gensym;
-  open ($fh, "</dev/tty");
-  ioctl ($fh, &TIOCNOTTY, 0);
-  close ($fh);
-
-  return $saved_stderr;
-}
-
-sub set_cwd ($)
+sub set_cwd
 {
   my $d = shift;
   chdir ($d) || err ("chdir", $d, $!);
 }
 
-sub set_egid ($)
+sub set_egid
 {
   my $sgid = group2gid (shift);
   my $egid = $) + 0;
@@ -147,7 +110,7 @@ sub set_egid ($)
   err ($sgid, "cannot set egid", $!) if ($) == $egid && $egid != $sgid);
 }
 
-sub set_gid ($)
+sub set_gid
 {
   my $sgid = group2gid (shift);
   my $rgid = $( + 0;
@@ -159,21 +122,19 @@ sub set_gid ($)
   err ($sgid, "cannot set egid", $!) if ($) == $egid && $egid != $sgid);
 }
 
-sub big_endian_p ()
+sub big_endian_p
 {
   my $x = 1;
   my @y = unpack ("c2", pack ("i", $x));
   return ($y[0] == 1) ? 0 : 1;
 }
 
-# This function is more complex than it ought to be, all because
-# perl does not export the setgroups function.  Oh, it exports the
-# getgroups function by making $( and $) return multiple values (in the
-# form of a space-separated string) but you cannot set the group list by
-# assigning those variables.  Let's hear it for symmetry and consistency!
-# In any case, there is no portable way to determine what size gid_t is, so
-# we must guess.
-sub set_groups ($)
+# This function is more complex than it ought to be because perl does not
+# export the setgroups function.  It exports the getgroups function by
+# making $( and $) return multiple values in the form of a space-separated
+# string, but you cannot *set* the group list by assigning those variables.
+# There is no portable way to determine what size gid_t is, so we must guess.
+sub set_groups
 {
   my @glist = sort { $a <=> $b } map { group2gid ($_) } split (/[ ,]/, shift);
 
@@ -189,7 +150,7 @@ sub set_groups ($)
   err ("setgroups", "Could not determine gid_t");
 }
 
-sub set_pgrp ($)
+sub set_pgrp
 {
   setpgrp ($$, shift) || err ("setpgrp", $!);
 }
@@ -204,6 +165,7 @@ sub set_root
 {
   my $d = shift;
   chroot ($d) || err ("chroot", $d, $!);
+  chdir ("/");
 }
 
 sub set_euid
@@ -227,83 +189,152 @@ sub set_uid
   err ($suid, "cannot set euid", $!) if ($> == $euid && $euid != $suid);
 }
 
-sub parse_options ()
+
+sub background
 {
-  $progname = $0;
-  $progname =~ s|.*/||;
-
-  Getopt::Long::config ('bundling', 'autoabbrev', 'require_order');
-  GetOptions ("h|help",          \&usage,
-              "b|bg|background", \$opt_bg,
-              "c|cwd=s",         \$opt_cwd,
-              "d|display=s",     \$ENV{DISPLAY},
-              "H|home=s",        \$ENV{HOME},
-              "G|egid=s",        \$opt_egid,
-              "g|gid=s",         \$opt_gid,
-              "I|include=s@",    \@opt_include,
-              "l|groups=s",      \$opt_groups,
-              "m|umask=s",       \$opt_umask,
-              "N|no-tty|notty",  \$opt_notty,
-              "n|name=s",        \$opt_name,
-              "P|priority=i",    \$opt_priority,
-              "p|pgrp=i",        \$opt_pgrp,
-              "r|root=s",        \$opt_root,
-              "U|euid=s",        \$opt_euid,
-              "u|uid=s",         \$opt_uid);
+  fork && exit (0);
+  return *STDERR{IO};
 }
 
-sub usage ()
+sub dosetsid
 {
-  print "Usage: $progname {options} [command {args...}]\n
+  background ();
+  setsid (); # dissociate from controlling terminal
+  return *STDERR{IO};
+}
+
+sub daemon
+{
+  # Don't allow any file descriptors, including stdin, stdout, or
+  # stderr to be propagated to children.
+  $^F = -1;
+  dosetsid ();
+  # Duped in case we've closed stderr but can't exec anything.
+  my $saved_stderr = gensym;
+  open ($saved_stderr, ">&STDERR");
+  close (STDERR);
+  close (STDOUT);
+  close (STDIN);
+  return $saved_stderr;
+}
+
+sub notty
+{
+  # Don't allow any file descriptors other than stdin, stdout, or stderr to
+  # be propagated to children.
+  $^F = 2;
+  dosetsid ();
+  # Duped in case we've closed stderr but can't exec anything.
+  my $saved_stderr = gensym;
+  open ($saved_stderr, ">&STDERR");
+  open (STDIN,  "+</dev/null");
+  open (STDERR, "+<&STDIN");
+  open (STDOUT, "+<&STDIN");
+  return $saved_stderr;
+}
+
+
+sub parse_options
+{
+  Getopt::Long::config (qw(bundling autoabbrev require_order));
+  my $succ = GetOptions
+    ("h|help",          sub { usage () },
+     "c|cwd=s",         \$opt_cwd,
+     "d|display=s",     \$ENV{DISPLAY},
+     "H|home=s",        \$ENV{HOME},
+     "G|egid=s",        \$opt_egid,
+     "g|gid=s",         \$opt_gid,
+     "I|include=s@",    \@opt_include,
+     "l|groups=s",      \$opt_groups,
+     "m|umask=s",       \$opt_umask,
+     "n|name=s",        \$opt_name,
+     "P|priority=i",    \$opt_priority,
+     "p|pgrp=i",        \$opt_pgrp,
+     "r|root=s",        \$opt_root,
+     "U|euid=s",        \$opt_euid,
+     "u|uid=s",         \$opt_uid,
+
+     "b|bg|background", sub { $bgopt |= 1; $bgfn = \&background },
+     "a|daemon|demon",  sub { $bgopt |= 2; $bgfn = \&daemon     },
+     "N|no-tty|notty",  sub { $bgopt |= 4; $bgfn = \&notty      },
+     "s|setsid",        sub { $bgopt |= 8; $bgfn = \&dosetsid   },
+    );
+  usage () unless $succ;
+
+  my $n = 0;
+  do { $n++ if $bgopt & 1 } while ($bgopt >>= 1);
+  err ("Can only specify one of --background, --daemon, --notty, or --setsid")
+    if ($n > 1);
+}
+
+sub usage
+{
+  print STDERR "$progname: @_\n\n" if @_;
+  print STDERR "Usage: $progname {options} [command {args...}]\n
 Options are:
--b, --background      Run process in background.
--c, --cwd       DIR   Run with DIR as the current working directory.
-                      This directory is relative to the root directory as
-                      specified by \`--root', or \`/'.
--D, --debug           Turn on interactive debugging in perl.
--d, --display   DISP  Run with DISP as the X server display.
--G, --egid      EGID  Set \`effective' group ID.
--g, --gid       GID   Set both \`real' and \`effective' group ID.
--H, --home      HOME  Set \$HOME.
 -h, --help            You're looking at it.
+-D, --debug           Turn on interactive debugging in perl.
 -I, --include   DIR   Include DIR in \@INC path for perl.
                       This option may be specified multiple times to append
                       search paths to perl.
--l, --groups    GLIST Set group list to comma-separated GLIST.
--m, --umask     UMASK Set umask.
+
+-d, --display   DISP  Run with DISP as the X server display.
+-H, --home      HOME  Set \$HOME.
 -n, --name      ARGV0 Set name of running program (argv[0]).
--N, --no-tty          Disassociate process from any tty.
-                      This automatically closes stdin,
-                      stdout, and stderr, and backgrounds
-                      the process.
+
+-c, --cwd       DIR   Run with DIR as the current working directory.
+                      This directory is relative to the root directory as
+                      specified by \`--root', or \`/'.
+-r, --root      ROOT  Set root directory (via \`chroot' syscall) to ROOT.
+
+-G, --egid      EGID  Set \`effective' group ID.
+-g, --gid       GID   Set both \`real' and \`effective' group ID.
+-l, --groups    GLIST Set group list to comma-separated GLIST.
+-U, --euid      EUID  Set \`effective' user ID.
+-u, --uid       UID   Set both \`real' and \`effective' user ID.
+
+-m, --umask     UMASK Set umask.
 -P, --priority  NICE  Set scheduling priority to NICE (-20 to 20).
 -p, --pgrp      PGRP  Set process group.
--r, --root      ROOT  Set root directory (via \`chroot' syscall) to ROOT.
--U, --euid      EUID  Set \`effective' user ID.
--u, --uid       UID   Set both \`real' and \`effective' user ID.\n";
+
+The following options cause the resulting process to be backgrounded
+automatically but differ in various ways:
+
+-b, --background      Run process in background.
+
+-a, --daemon          Run process in \"daemon\" mode.
+                      This closes stdin, stdout, and stderr, dissociates
+                      the process from any controlling terminal, and
+                      backgrounds the process.
+
+-N, --no-tty          Run process in background with no controlling
+                      terminal and with stdin, stdout, and stderr
+                      redirected to /dev/null.
+
+-s, --setsid          Dissociate from controlling terminal.
+                      This automatically backgrounds the process but
+                      does not redirect any file descriptors.\n";
   exit (1);
 }
 
-sub main ()
+sub main
 {
   parse_options ();
-  usage () unless ($#ARGV >= 0);
+  usage () unless @ARGV;
 
+  get_includes (@opt_include);
 
-  get_includes ();
+  umask        (oct ($opt_umask)) if defined $opt_umask;
+  set_gid      ($opt_gid)         if defined $opt_gid;
+  set_egid     ($opt_egid)        if defined $opt_egid;
+  set_groups   ($opt_groups)      if defined $opt_groups;
+  set_root     ($opt_root)        if defined $opt_root;
+  set_cwd      ($opt_cwd)         if defined $opt_cwd;
+  set_priority ($opt_priority)    if defined $opt_priority;
+  set_uid      ($opt_uid)         if defined $opt_uid;
+  set_euid     ($opt_euid)        if defined $opt_euid;
 
-  umask (oct ($opt_umask))     if (defined $opt_umask);
-  set_gid ($opt_gid)           if (defined $opt_gid);
-  set_egid ($opt_egid)         if (defined $opt_egid);
-  set_groups ($opt_groups)     if (defined $opt_groups);
-  set_root ($opt_root)         if (defined $opt_root);
-  set_cwd ($opt_cwd)           if (defined $opt_cwd);
-  set_priority ($opt_priority) if (defined $opt_priority);
-  set_uid ($opt_uid)           if (defined $opt_uid);
-  set_euid ($opt_euid)         if (defined $opt_euid);
-  background ()                if (defined $opt_bg && !defined $opt_notty);
-  set_pgrp ($opt_pgrp)         if (defined $opt_pgrp);
-  my $stderr = ($opt_notty? notty () : *STDERR{IO});
+  my $stderr = $bgfn ? &$bgfn () : *STDERR{IO};
 
   my $runprog = $ARGV[0];
   if ($opt_name)
@@ -311,6 +342,7 @@ sub main ()
       shift   @ARGV;
       unshift @ARGV, $opt_name;
     }
+  local $^W = 0; # avoid implicit warnings from exec
   exec ($runprog @ARGV) || err ($stderr, "exec", $runprog, $!);
 }
 
