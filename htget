@@ -1,12 +1,12 @@
 #! /bin/sh
 # htget --- Get raw HTML from URL
 
-# Copyright (C) 1995 Noah S. Friedman
+# Copyright (C) 1995, 1996 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-11-07
 
-# $Id: htget,v 1.3 1995/12/18 05:06:19 friedman Exp $
+# $Id: htget,v 1.4 1996/03/03 22:53:08 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -76,7 +76,7 @@ while : ; do
       shift
      ;;
     -v | --verbose | --v* )
-      verbose=v
+      verbose=-v
       shift
      ;;
     -- )     # Stop option processing
@@ -137,18 +137,18 @@ cr=`echo x | tr x '\015'`
 case "$headers" in
   t )
     echo "GET $4 HTTP/1.0$nl" \
-     | tcpconnect -H$verbose "$2" "$3" \
+     | tcpconnect $verbose "$2" "$3" \
      | sed -e "/$cr\$/s/$cr\$//"
    ;;
   only )
     echo "GET $4 HTTP/1.0$nl" \
-     | tcpconnect -H$verbose "$2" "$3" \
+     | tcpconnect $verbose "$2" "$3" \
      | sed -e "/$cr\$/s/$cr\$//" \
            -e '/^$/q'
    ;;
   * )
     echo "GET $4" \
-     | tcpconnect -H$verbose "$2" "$3" \
+     | tcpconnect $verbose "$2" "$3" \
      | sed -e "/$cr\$/s/$cr\$//"
    ;;
 esac
