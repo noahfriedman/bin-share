@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.39 2000/01/23 01:56:46 friedman Exp $
+# $Id: from,v 1.40 2000/01/23 22:33:45 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -33,7 +33,7 @@
 exec ${PERL-perl} -Sx $0 ${1+"$@"}
 #!perl     [perl will skip all lines in this file before this line]
 
-use 5.001;
+use 5.003;
 use strict;
 no strict "vars";
 
@@ -294,8 +294,11 @@ sub initialize_variables ()
   $re_blank_line = join ("", '^(', $re_whitespace, '|)$');
   $re_format_modifier = '%[0-9.-]*';
 
-  $hack_header_function{FROM} = \&hack_From_data;
-  $hack_header_function{DATE} = \&hack_Date_data;
+  $hack_header_function{FROM}    = \&hack_From_data;
+  $hack_header_function{TO}      = \&parse_rfc1522;
+  $hack_header_function{CC}      = \&parse_rfc1522;
+  $hack_header_function{DATE}    = \&hack_Date_data;
+  $hack_header_function{SUBJECT} = \&parse_rfc1522;
 
   $format_token{'{TLINES}'} = 'd';
   $format_token{'{FLINES}'} = 'd';
@@ -767,70 +770,6 @@ sub hack_From_data ($)
   parse_rfc1522 ($data);
 }
 
-# Parse names of the form =?ISO-8859-1?Q?Fran=E7ois?= Pinard
-#                      or =?ISO-8859-1?Q?Fran=E7ois_Pinard?=
-#                      or =?ISO-8859-1?B?4672616EE76F69732050696E617264?=
-# See RFC1522 for more details.
-sub parse_rfc1522 ($)
-{
-  my $data = shift;
-
-  return $data unless ($data =~ /=\?iso-8859-1\?[^?]*\?[^?]*\?=/io);
-
-  my $str = $data;
-  $str =~ s/^=\?iso-8859-1\?//io;
-
-  my $encoding = lc ($str);
-  $encoding =~ s/\?.*//o;
-
-  if ($encoding eq 'q' || $encoding eq 'quoted-printable')
-    {
-      # Encoding type is Quoted-Printable
-      my $newstr = "";
-      my $i = $[;
-
-      # Strip away encoding and trailing `?=', leaving the quoted name.
-      $str =~ s/^[^?]*\?//o;
-      $str =~ s/\?=//o;
-      $str =~ y/_/ /;
-
-      # Convert "=XX" (where XX is the hexidecimal representation of an
-      # ascii character) to ascii.
-      while ($i >= $[)
-        {
-          $i = index ($str, "=");
-          next if ($i < $[);
-
-          my $s = sprintf ("%c", hex (substr ($str, $i + 1, 2)));
-          $newstr .= join ('', substr ($str, 0, $i), $s);
-          $str = substr ($str, $i + 3);
-        }
-      $data = $newstr . $str;
-    }
-  elsif ($encoding eq 'b' || $encoding eq 'base64')
-    {
-      # Encoding type is BASE64
-
-      # Strip away encoding and trailing `?=', leaving the base64 string
-      $str =~ s/^[^?]*\?//o;
-      $str =~ s/\?=//o;
-
-      # There should be an even number of chars in the base64 string.
-      # If not, immediately return since we cannot reliably parse it.
-      my $len = length ($str);
-      return $data if (($len % 2) != 0);
-      my $newstr = "";
-      my $pos = 0;
-      while ($pos < $len)
-        {
-          $newstr .= sprintf ("%c", hex (substr ($str, $pos, 2)));
-          $pos += 2;
-        }
-      $data = $newstr;
-    }
-  return $data;
-}
-
 # Prettify date
 sub hack_Date_data ($)
 {
@@ -956,6 +895,80 @@ sub my_ctime (;$)
   sprintf ("%s %s %02d %02d:%02d:%02d %s%4d",
            $weekday[$wday], $month[$mon], $mday, $hour, $min, $sec,
            $TZ, $year);
+}
+
+
+my @base64_decoder;
+{
+  my $i = 0;
+  my $s = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  map { $base64_decoder[ord $_] = $i++ } split (//, $s);
+}
+
+sub base64_decode ($)
+{
+  return $_[0] unless (length ($_[0]) % 4 == 0);
+
+  my @input = split (//, $_[0]);
+  my $result = "";
+  my $c = 0;
+  my $n = 0;
+  while (scalar @input > 0)
+    {
+      if ($input[0] eq '=')
+        {
+          $result .= chr ($n >> 10), last if ($c == 2);
+          # $c == 3 if we get to this point.
+          $result .= chr ($n >> 16);
+          $result .= chr (($n >> 8) & 0xff);
+          last;
+        }
+      $n += $base64_decoder[ord shift @input];
+      if (++$c == 4)
+        {
+          $result .= chr ($n >> 16);
+          $result .= chr (($n >> 8) & 0xff);
+          $result .= chr ($n & 0xff);
+          $n = $c = 0;
+          next;
+        }
+      $n <<= 6;
+    }
+  return $result;
+}
+
+sub qp_decode ($)
+{
+  my $data = shift;
+
+  $data =~ y/_/ /;
+  my $p = $[;
+  while (1)
+    {
+      $p = index ($data, "=", $p);
+      last if ($p < $[);
+      # Convert "=XX" (where XX is the hexidecimal representation
+      # of an ascii character) to ascii.
+      substr ($data, $p, 3) = chr hex substr ($data, $p+1, 2);
+      $p++;
+    }
+  return $data;
+}
+
+sub parse_rfc1522 ($)
+{
+  my $input = shift;
+  my $result = "";
+
+  while ($input =~ /(.*?)=\?iso-8859-1\?([^?]).*?\?([^?]*)\?=/gcio)
+    {
+      $result .= $1;
+      my $encoding = lc ($2);
+      $result .= qp_decode ($3)     if ($encoding eq 'q');
+      $result .= base64_decode ($3) if ($encoding eq 'b');
+    }
+  return $input if ($result eq "");
+  return $result . substr ($input, pos $input);
 }
 
 
