@@ -1,8 +1,8 @@
 #! /bin/sh
 # texi2dvi --- produce DVI files from Texinfo/LaTeX sources.
-# $Id: texi2dvi,v 0.23 1998/12/20 14:14:20 karl Exp $
+# $Id: texi2dvi,v 0.24 1999/01/07 23:04:26 karl Exp $
 #
-# Copyright (C) 1992, 93, 94, 95, 96, 97, 98 Free Software Foundation, Inc.
+# Copyright (C) 1992, 93, 94, 95, 96, 97, 98, 99 Free Software Foundation, Inc.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.23 $'
+rcs_revision='$Revision: 0.24 $'
 rcs_version=`set - $rcs_revision; echo $2`
 
 version="texi2dvi (GNU Texinfo 3.12-pretest) $rcs_version
@@ -44,8 +44,7 @@ containing each FILE is searched for included files.  The suffix of FILE
 is used to determine its language (LaTeX or Texinfo).
 
 Options:
-  -@                   Use @input instead of \input; useful if Texinfo
-                         is preloaded into TeX.
+  -@                   Use @input instead of \input; for preloaded Texinfo.
   -c, --clean          Remove all auxiliary files.
   -D, --debug          Turn on shell debugging (set -x).
   -e, --expand         Expand Texinfo macros with makeinfo before running TeX.
@@ -74,9 +73,9 @@ at_escape=
 clean=
 debug=
 expand=t   # FIXME: should be turned off once in-TeX-expansion is fixed
+oformat=dvi
 language=
 miincludes= # makeinfo include path
-pdf=
 textra=
 txincludes= # TEXINPUTS extensions
 quiet=    # by default let the tools' message be displayed
@@ -99,10 +98,13 @@ INDEXSTYLE_orig="$INDEXSTYLE"
 export TEXINPUTS INDEXSTYLE
 
 # Push a token among the arguments that will be used to notice when
-# we ended options/arguments parsing.
+# we ended options/arguments parsing.  Use "set dummy ...; shift" rather
+# than 'set - ..." because on Solaris set - turns off set -x (but keeps
+# set -e).
 arg_sep="$$--$$"
-set - "$@" "$arg_sep"
+set dummy "$@" "$arg_sep"; shift
 
+# 
 # Parse command line arguments.
 while test x"$1" != x"$arg_sep"; do
   
@@ -112,7 +114,7 @@ while test x"$1" != x"$arg_sep"; do
       opt=`echo "$1" | sed -e 's/=.*//'`
       val=`echo "$1" | sed -e 's/[^=]*=//'`
       shift
-      set - "$opt" "$val" "$@"
+      set dummy "$opt" "$val" "$@"; shift
       ;;
   esac
 
@@ -131,7 +133,7 @@ while test x"$1" != x"$arg_sep"; do
       txincludes="$txincludes$path_sep$1"
       ;;
     -l | --l*) shift; language=$1;;
-    -p | --p*) pdf=t;;
+    -p | --p*) oformat=pdf;;
     -t | --t*) shift; textra="$textra\\
 $1";;
     -v | --vers*) echo "$version"; exit 0;;
@@ -139,7 +141,7 @@ $1";;
     --) # What remains are not options.
       shift
       while test x"$1" != x"$arg_sep"; do
-        set - "$@" "$1"
+        set dummy "$@" "$1"; shift
         shift
       done
       break;;
@@ -147,7 +149,7 @@ $1";;
       echo "$0: Unknown or ambiguous option \`$1'." >&2
       echo "$0: Try \`--help' for more information." >&2
       exit 1;;
-    *) set - "$@" "$1";;
+    *) set dummy "$@" "$1"; shift;;
    esac
    shift
 done
@@ -178,7 +180,6 @@ if test "$quiet" = t; then
 else
   exec 5>&1
 fi
-
 
 # 
 # TeXify files.
@@ -221,10 +222,10 @@ for command_line_filename in "$@"; do
       ext=tex
       makeinfo=
       texindex=${MAKEINDEX:-makeindex}
-      if test -z "$pdf"; then
+      if test $oformat = dvi; then
         tex=${LATEX:-latex}
       else
-        tex=${LATEX:-pdflatex}
+        tex=${PDFLATEX:-pdflatex}
       fi
       ;;
 
@@ -235,10 +236,10 @@ for command_line_filename in "$@"; do
       ext=texi
       test "$expand" = t && makeinfo=${MAKEINFO:-makeinfo}
       texindex=${TEXINDEX:-texindex}
-      if test -z "$pdf"; then
+      if test $oformat = dvi; then
         tex=${TEX:-tex}
       else
-        tex=${TEX:-pdftex}
+        tex=${PDFTEX:-pdftex}
       fi
       ;;
   esac
@@ -363,8 +364,11 @@ for command_line_filename in "$@"; do
     # the bbl file exists and is older than the LaTeX file is wrong, since
     # the document might include files that have changed.  We run bibtex
     # first, because I can see reasons for the indexes to change after
-    # bibtex is run, but I see no reasons for the converse.
+    # bibtex is run, but I see no reason for the converse.
     if test -n "$bibtex" \
+       && test -r "$filename_noext.aux" \
+       && fgrep '\bibdata'  "$filename_noext.aux" >/dev/null 2>&1 \
+       && fgrep '\bibstyle' "$filename_noext.aux" >/dev/null 2>&1 \
        && test -r "$filename_noext.log" \
        && fgrep 'Citation' "$filename_noext.log" >/dev/null 2>&1; \
     then
@@ -410,7 +414,7 @@ for command_line_filename in "$@"; do
       echo "$0: $tex exited with bad status, quitting." >&2
       echo "$0: see $filename_noext.log for errors." >&2
       test "$clean" = t \
-      && cp `basename "$filename_input" .$ext`.log $filename_noext.log
+      && cp `basename "$filename_input"`.log $filename_noext.log
       exit 1
     fi
 
@@ -473,14 +477,14 @@ for command_line_filename in "$@"; do
   done
 
   # If we were in clean mode, compilation was in a tmp directory.
-  # Copy the DVI file into the directory where the compilation
+  # Copy the DVI (or PDF) file into the directory where the compilation
   # has been done.  (The temp dir is about to get removed anyway.)
   # We also return to the original directory so that
   # - the next file is processed in correct conditions
   # - the temporary file can be removed
   if test -n "$clean"; then
-    $verbose "Copying DVI file from `pwd` to $orig_pwd"
-    cp -p "./$filename_noext.dvi" "$orig_pwd"
+    $verbose "Copying $oformat file from `pwd` to $orig_pwd"
+    cp -p "./$filename_noext.$oformat" "$orig_pwd"
     cd $orig_pwd || exit 1
   fi
 
@@ -492,5 +496,4 @@ for command_line_filename in "$@"; do
 done
 
 $verbose "$0 done."
-trap 0 1 2 15 # avoid trap's exit 1
-true # exit successfully, not according to whatever we ended the loop with.
+exit 0 # exit successfully, not however we ended the loop.
