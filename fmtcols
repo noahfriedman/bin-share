@@ -1,4 +1,7 @@
 #! /bin/sh
+exec ${PERL-perl} -wSx $0 ${1+"$@"}
+#!perl
+
 # fmtcols --- indent columns so they line up
 
 # Copyright (C) 1997, 2000 Noah S. Friedman
@@ -6,7 +9,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-08-02
 
-# $Id: fmtcols,v 2.3 2000/05/26 05:10:02 friedman Exp $
+# $Id: fmtcols,v 2.4 2000/07/22 10:28:35 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -25,9 +28,6 @@
 
 # Commentary:
 # Code:
-
-exec ${PERL-perl} -Sx $0 ${1+"$@"}
-#!perl
 
 use Getopt::Long;
 use Symbol;
@@ -96,7 +96,8 @@ sub read_input
           foreach my $f (@fields)
             {
               my $l = length $f;
-              $maxwidth[$i] = $l if ($l > $maxwidth[$i]);
+              $maxwidth[$i] = $l
+                if (!defined $maxwidth[$i] || $l > $maxwidth[$i]);
               $i++;
             }
         }
@@ -169,6 +170,7 @@ Options are:
 sub main
 {
   parse_options ();
+  push @ARGV, "-" unless (scalar @ARGV > 0);
   read_input ($fieldsep);
   print_output ($fieldsep, $width_limit);
 }
