@@ -1,0 +1,8 @@
+#!/bin/sh
+
+chmod -R a+rw ${1+"$@"}
+
+find ${1+"$@"} -type d -print0 \
+ | xargs --null --no-run-if-empty chmod 2777
+
+# eof
