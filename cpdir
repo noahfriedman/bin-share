@@ -1,165 +1,132 @@
-#!/usr/local/bin/bash
-# cpdir, 14-Aug-91 Noah Friedman <friedman@prep.ai.mit.edu>
-# Last modified 07-May-93
-#
-#    Copies directory tree preserving time, ownership, and other attributes
-# of files.  Does not dereference symbolic links. 
-#
-# Requires bash version 1.12 or later to work properly. 
-# 
+#!/bin/sh
+# cpdir --- copy directories preserving time, symlinks, etc.
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1991-08-14
+# Last modified: 1994-03-13
 # Public domain.
-#
 
-function usage ()
-{
-    if [ $# -gt 0 ]; then
-       echo -e "${progname}: $*\n" 1>&2
-    fi
+# Commentary:
+# Code:
 
-    cat 1>&2 <<EOF
-Usage: ${progname} {-D|--debug} {-v|--verbose} [src1] {src2} {...} [dstdir]
+# Name by which this script was invoked. 
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 
-   e.g. "${progname} /home/fsf/friedman /home/gp"
-         => /home/fsf/friedman --> /home/gp/friedman
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
 
-EOF
-    exit 1
-}
+usage="Usage: $progname {options} srcdir {srcdir2 ...} dstdir
 
-function main ()
-{
-    initialize_variables "$@"
-    parse_command_args "$@"
-    shift $?
+Options are:
+-D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-f, --full-path              Copy entire src directory component.
+-h, --help                   You're looking at it.
+-v, --verbose                Print filenames as they're copied.
 
-    test -n "${debug+set}" && set -x
+Example: ${progname} /home/fsf/friedman /home/gp
+         => /home/fsf/friedman -> /home/gp/friedman
 
-    srcs="$*"
-    shift $[ $# - 1 ];
-    dst="$1"
+         ${progname} --full-path /home/fsf/friedman /home/gp
+         => /home/fsf/friedman -> /home/gp/home/fsf/friedman
 
-    for src in ${srcs%${dst}} ; do
-       do_cpdir "${src}" "${dst}"
-    done
+"
 
-    exit 0
-}
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+verbose=
+fullpath=
 
-function initialize_variables ()
-{
-    progname="${0##*/}"
-    bq="\`"  # To prevent hairy quoting and escaping later.
-    eq="'"
-}
+# Parse command line arguments. 
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character. 
+while test $# != 0; do
+  case "$1" in 
+    -D | --debug | --d* )
+      debug=t
+      shift
+     ;;
+    -f | --full-path | --f* )
+      fullpath=t
+      shift
+     ;;
+    -h | --help | --h )
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -v | --verbose | --v* )
+      verbose="-v"
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    --*=* )
+      arg=`echo $1 | sed -e 's/=.*//'`
+      echo "$progname: unknown option $bq$arg$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -* )
+      echo "$progname: unknown option $bq$1$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
 
-function parse_command_args ()
-{
- local orig_number_options=$#
+case "$debug" in t ) set -x ;; esac
 
-    # unset option variables to make sure they weren't accidentally
-    # exported 
-    unset verbose debug
+_saved_args=
+while : ; do
+  case $# in 0 | 1 ) break ;; esac
+  eval _saved_args$#=\$1
+  _saved_args="$_saved_args \"\$_saved_args$#\""
+  shift
+done
 
-    # If you add new commands be sure to change the wildcards below to make
-    # sure they are unambiguous (i.e. only match one possible long option)
-    # Be sure to show at least one instance of the full long option name to
-    # document what the long option is canonically called. 
-    while [ $# -gt 0 ]; do
-       case z$1 in
-          z-D | z--debug | z--d* )
-             debug="t"
-             shift
-            ;;
-          z-v | z--verbose | z--v* )
-             verbose="-v"
-             shift
-            ;;
-          z-h* | z--help | z--h* )
-             usage
-            ;;
-          z-- )
-             shift
-             break
-            ;;
-          z-* )
-             usage "${bq}${1}${eq} is not a valid option."
-            ;;
-          * )
-             break
-            ;;
-       esac
-    done
+dst=$1
+eval '{ eval set fnord $_saved_args; }'
+shift
 
-    # Return number of shifted arguments so calling function can shift
-    # appropriate amount.
-    return $[ orig_number_options - $# ]
-}
+for src in ${1+"$@"} ; do
+  case "$fullpath" in
+    t )
+      srcdir=.
+      case "$src" in
+        /* )
+          srcdir=/
+          src=`echo "$src" | sed -e 's/^\/*//'`
+         ;;
+      esac 
+     ;;
+    * )
+      # sed is more portable than `dirname'
+      srcdir=`echo "$src" \
+              | sed -e 's/\/*$//
+                        s/\/[^\/]*$//'`
 
-function do_cpdir ()
-{
- local src="$1"
- local dst="$2"
- local src_dir
+      case "$srcdir" in "$src" )
+        srcdir=. ;;
+      esac
 
-    src_dir=$(dirname "${src}")
-    if [ "z${src_dir}" = "z${src}" ]; then
-       src_dir="."
-    fi
-    src=$(basename "${src}")
+      # same as `basename'
+      src=`echo "$src" \
+           | sed -e 's/\/*$//
+                     s/.*\///'`
+     ;;
+  esac
 
-    (chdir "${src_dir}" && tar ${CPDIR_TAR_INPUT_OPTIONS} -cf - "./${src}") \
-       | (chdir "${dst}" && tar ${verbose} ${CPDIR_TAR_OUTOUT_OPTIONS} -xpf - ) ;
-}
+  ( cd "$srcdir" && tar -cf - "$src" ) \
+   | ( cd "$dst" && tar $verbose -xpf - )
 
-function chdir ()
-{
-    if cd "${1}" 2> /dev/null ; then
-       return 0
-    fi
+done
 
-    reason=$(cd "${1}" 2>&1)
-    reason="${reason#*:}"
-    echo "${progname}: Could not chdir to ${bq}${1}${eq}:${reason}" 1>&2
-    return 1
-}
-
-# Some systems don't seem have a basename(1).
-function basename ()
-{
- local path="$1"
- local suffix="$2"
- local tpath="${path%/}"
-
-    # Strip trailing '/' characters from path (unusual that this should
-    # ever occur, but basename(1) seems to deal with it.)
-    while [ "${tpath}" != "${path}" ]; do
-       tpath="${path}"
-       path="${tpath%/}"
-    done
-
-    path="${path##*/}"       # Strip off pathname
-    echo ${path%${suffix}}   # Also strip off extension, if any.
-}
-
-# Sigh.  Even more systems don't seem to have a dirname(1).
-function dirname ()
-{
- local dir="$1"
- local tdir="${dir%/}"
-
-    # Strip trailing '/' characters from dir (unusual that this should
-    # ever occur, but dirname(1) seems to deal with it.)
-    while [ "${tdir}" != "${dir}" ]; do
-       tdir="${dir}"
-       dir="${tdir%/}"
-    done
-
-    dir="${dir%/*}"
-    echo "${dir:-/}"
-}
-
-main "$@"
-
-#
-# eof
-#
+# cpdir ends here
