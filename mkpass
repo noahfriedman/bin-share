@@ -1,75 +1,258 @@
 #!/bin/sh
 # mkpass --- prompt for cleartext password and echo crypted result
+
+# Copyright (C) 1993, 1994, 1996 Noah S. Friedman
+
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1993-09-26
-# Last modified: 1994-03-24
-# Public domain
 
-umask 077
-stty_settings=`stty -g 2> /dev/null`
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, you can either send email to this
+# program's maintainer or write to: The Free Software Foundation,
+# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
 
-reset_stty='
+# Commentary:
+# Code:
+
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options} {cleartext}
+
+Options are:
+-D, --debug                  Enable debugging.
+-h, --help                   You're looking at it.
+-s, --salt     SALT          Use two-letter SALT to encode cleartext.
+
+If cleartext is not specified on the command line, it will be prompted for
+interactively.  Specifying the cleartext on the command line is less secure
+since someone may be able to see it with the ${bq}ps$eq command.
+"
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+salt=
+passwd=
+
+# Usage: eval "$getopt"; value=$optarg
+# or     optarg_optional=t; eval "$getopt"; value=$optarg
+#
+# This function automatically shifts the positional args as appropriate.
+# The argument to an option is optional if the variable `optarg_optional'
+# is non-empty.  Otherwise, the argument is required and getopt will cause
+# the program to exit on an error.  optarg_optional is reset to be empty
+# after every call to getopt.  The argument (if any) is stored in the
+# variable `optarg'.
+#
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument
+# won't get used if first long option syntax was used.
+#
+# Note: because of broken bourne shells, using --foo=bar syntax can
+# actually screw the quoting of args that end with trailing newlines.
+# Specifically, most shells strip trailing newlines from substituted
+# output, regardless of quoting.
+getopt='
   {
-    case "$stty_settings" in
-      "" ) stty echo 2> /dev/null ;;
-      * )  stty "$stty_settings" 2> /dev/null ;;
+    optarg=
+    case "$1" in
+      --*=* )
+        optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
+        shift
+       ;;
+      * )
+        case ${2+set} in
+          set )
+            optarg="$2"
+            shift
+            shift
+           ;;
+          * )
+            case "$optarg_optional" in
+              "" )
+                case "$1" in
+                  --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
+                  * ) option="$1" ;;
+                esac
+                exec 1>&2
+                echo "$progname: option $bq$option$eq requires argument."
+                echo "$progname: use $bq--help$eq to list option syntax."
+                exit 1
+               ;;
+           esac
+           shift
+         ;;
+        esac
+     ;;
     esac
-  }
-'
+    optarg_optional=
+  }'
 
-trap '{ 
-        exitstat=$?
-
-        eval "$reset_stty"
-        echo 1>&2
-
-        trap "" 1 2 3 15
-        exit $exitstat
-      }' 1 2 3 15
-
-stty -echo 2> /dev/null
-
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
 while : ; do
-  # Must echo to stderr, because in all likelihood stdout is being
-  # subtituted by a shell command to get the resultant ciphertext.  This is
-  # what comes of using an operating system that only has lame numeric
-  # return values.  feh!
-  exec 9>&1 1>&2
+  case $# in 0) break ;; esac
+  case "$1" in
+    -D | --debug | --d* )
+      debug=-d
+      shift
+     ;;
+    -h | --help | --h* )
+      echo "$usage" 1>&2
+      exit 0
+     ;;
+    # Provided as an example of how to process options with arguments
+    -s | --salt* | --s* )
+      eval "$getopt"
+      salt=$optarg
 
-  echo -n "Password:"
-  read passwd
-  echo
-
-  case "$passwd" in ?????????* )
-    echo "Warning: only first 8 characters will be used." ;;
+      # Not sure if '&' and '^' are valid; a few accounts on gnu.ai.mit.edu
+      # use them, but I haven't found instances anywhere else.
+      valid='A-Za-z0-9./'
+      case "$salt" in
+        [$valid][$valid] ) : ;;
+        * )
+          exec 1>&2
+          {
+            echo "$bq$salt$eq: Wrong size or invalid character(s)."
+            echo "Salt must contain exactly 2 characters from the set: $valid"
+          } | sed -e "s/^/$progname: /"
+          exit 1
+         ;;
+      esac
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -? | --* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    -??* )
+      # Split grouped single options into separate args and try again
+      optarg="$1"
+      shift
+      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+      shift
+     ;;
+    * )
+      break
+     ;;
   esac
-
-  echo -n "Password (again):"
-  read passwd1
-  echo
-
-  case "$passwd" in "$passwd1") break ;; esac
-
-  echo
-  echo "Password mismatch; try again."
 done
 
-exec 1>&9 9>&-
-eval "$reset_stty"
+case "$debug" in -d ) set -x ;; esac
 
-perl - << __EOF__
-  srand (time ());
-  @salt_chars = ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", 
-                 "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", 
-                 "U", "V", "W", "X", "Y", "Z",
-                 "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", 
-                 "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", 
-                 "u", "v", "w", "x", "y", "z",
-                 "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", 
-                 ".", "/",);
-  \$s1 = int (rand() * 100000) % (\$#salt_chars + 1);
-  \$s2 = int (rand() * 100000) % (\$#salt_chars + 1);
-  \$salt = "\$salt_chars[\$s1]" . "\$salt_chars[\$s2]";
+case $# in
+  0 )
+    umask 077
+    stty_settings=`stty -g 2> /dev/null`
+
+    reset_stty='
+      {
+        case "$stty_settings" in
+          "" ) stty echo 2> /dev/null ;;
+          * )  stty "$stty_settings" 2> /dev/null ;;
+        esac
+      }
+    '
+
+    trap '{
+            exitstat=$?
+
+            eval "$reset_stty"
+            echo 1>&2
+
+            trap "" 1 2 3 15
+            exit $exitstat
+          }' 1 2 3 15
+
+    stty -echo 2> /dev/null
+
+    while : ; do
+      # Must echo to stderr, because in all likelihood stdout is being
+      # subtituted by a shell command to get the resultant ciphertext.
+      # This is what comes of using an operating system that only has lame
+      # numeric return values.  feh!
+      exec 9>&1 1>&2
+
+      echo -n "Password:"
+      read passwd
+      echo
+
+      case "$passwd" in ?????????* )
+        echo "Warning: only first 8 characters will be used." ;;
+      esac
+
+      echo -n "Password (again):"
+      read passwd1
+      echo
+
+      case "$passwd" in "$passwd1") break ;; esac
+
+      echo
+      echo "Password mismatch; try again."
+    done
+
+    exec 1>&9 9>&-
+    eval "$reset_stty"
+   ;;
+ 1)
+    passwd="$1"
+   ;;
+ *)
+    echo "$usage" 1>&2
+    exit 1
+   ;;
+esac
+
+exec perl - << __EOF__
+  if ("$salt" eq "")
+    {
+      srand (time ());
+      # Not sure if '&' and '^' are valid; a few accounts on gnu.ai.mit.edu
+      # use them, but I haven't found instances anywhere else.
+      @salt_chars = ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J",
+                     "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T",
+                     "U", "V", "W", "X", "Y", "Z",
+                     "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
+                     "k", "l", "m", "n", "o", "p", "q", "r", "s", "t",
+                     "u", "v", "w", "x", "y", "z",
+                     "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+                     ".", "/");
+      \$s1 = int (rand() * 100000) % (\$#salt_chars + 1);
+      \$s2 = int (rand() * 100000) % (\$#salt_chars + 1);
+      \$salt = "\$salt_chars[\$s1]" . "\$salt_chars[\$s2]";
+    }
+  else
+    {
+      \$salt = "$salt";
+    }
   print crypt("$passwd", "\$salt") . "\n";
 __EOF__
 
