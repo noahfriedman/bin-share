@@ -1,0 +1,41 @@
+#! /bin/sh
+# stockquote -- show stock quotes for a company
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 1995-11-10
+# Public domain.
+
+# $Id$
+
+# Commentary:
+
+# The quotes produced by this script are care of Security APL, Inc.
+# There is a 15-20 minute delay on these free quotes.
+
+# Code:
+
+case "$1" in
+  -v ) shift; v=v ;;
+   * ) v= ;;
+esac
+
+server=qs.secapl.com
+port=81
+path='/cgi-bin/qsx'
+query="$1"
+qlen=`echo "....$1" | wc -c`  # Add 5 to arg length using four dots + newline
+
+echo "POST $path HTTP/1.0
+Content-length: $qlen
+Content-type: application/x-www-form-urlencoded
+
+tick=$query
+
+" | tcpconnect -H$v $server $port \
+  | sed -ne '/^<[Pp][Rr][Ee]>/!d
+             :l
+             n
+             /^<\/[Pp][Rr][Ee]>/{q;}
+             p
+             b l
+            '
+# stockquote ends here
