@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-01-19
 
-# $Id: from,v 1.13 1996/03/06 18:44:40 friedman Exp $
+# $Id: from,v 1.14 1996/03/06 18:49:58 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -46,23 +46,46 @@ fi
 usage="Usage: $progname {options} {folder {...}}
 
 Options are:
--c, --columns    COLS        Truncate lines exceeding COLS length on output.
+-C, --count-only             Only count the number of messages that would
+                             be displayed, without displaying any other
+                             information about them.  E.g. $bq-Cu$eq would
+                             print the number of unread messages you have.
+-c, --columns       COLS     Truncate lines exceeding COLS length on output.
                              If COLS=0 or output is not to a terminal, no
                              truncation is done.  The default is
                              the current width of the terminal.
 -D, --debug                  Enable interactive debugging.
+-E, --extract                Print the body of each matched message.
 -e, --envelope               Show message envelope instead of headers.
                              This causes any formatting options (e.g.
                              $bq--columns$eq, $bq--numbered$eq) to be ignored.
--f, --format     FMT         Use FMT as the output format.  The option
+-f, --format        FMT      Use FMT as the output format.  The option
                              $bq--help-format$eq gives instructions for this.
 -h, --help                   You're looking at it.
 -H, --help-format            Get documentation about the format of the FMT
                              argument to $bq--format$eq.
+-L, --limit-extract LINES    Show no more than LINES lines of the beginning
+                             of extracted messages.  If not specified,
+                             there is no limit.
+-M, --match-headers HEADERS  Seach only headers matching the regexp HEADERS
+                             for patterns specified with $bq--match$eq.
+                             This option may be specified multiple times to
+                             add names of headers to search.  By default,
+                             the only header searched is ${bq}From$eq.
+-m, --match         REGEXP   Only print messages in which REGEXP could be
+                             found in the ${bq}From$eq header, or those
+                             specified with $bq--match-headers$eq.  This
+                             option may be specified multiple times.  No -m
+                             arguments means match everything.
 -n, --numbered               Show number of message with respect to the
                              current folder.  See also $bq--help-format$eq.
 -p, --no-parse               Do not do fancy parsing of From and Date fields.
--u, --user       USER        Show headers of USER's spooled messages.
+-U, --user          USER     Show headers of USER's spooled messages.
+-u, --unread-only            Only show information about unread messages
+                             (i.e. those that do not have a ${bq}R$eq in
+                             the Status header field).  This is equivalent
+                             to passing these args to this program:
+                             -M status -m '^[^R]*$'
 "
 
 format_usage="$progname format usage: --format='%{{-}{n}{.m}}[header] ...' ...
@@ -120,10 +143,10 @@ here are some valid format specifiers and the output that results from them.
       ${dq}To %-19.18To %-13.12Date %-.45Subject$dq
       -| To nobody@gnu.ai.mit.  Oct 18 12:22  example
 
-      ${dq}From: %From${bs}nSubject: %Subject${bs}nDate: %Date${bs}n$dq
-      -| From: Noah Friedman
+      ${dq}   From: %From${bs}nSubject: %Subject${bs}n   Date: %Date${bs}n$dq
+      -|    From: Noah Friedman
       -| Subject: example
-      -| Date: Oct 18 12:22
+      -|    Date: Oct 18 12:22
       -|
 
 If you use something like last example format specifier, you may wish to
@@ -135,9 +158,15 @@ truncation) of the From and Date lines.
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
 FROMRC=${FROMRC-$HOME/.fromrc}
+FROM_COUNTP=
+FROM_EXTRACTP=
+FROM_LINELIMIT=
+FROM_RE_HDR=
+FROM_RE_TXT=
 FROM_PARSEP=t
-FROM_NUMBERED=
+FROM_UNREAD_ONLY_P=
 FROM_USER=$USER
+FROM_NUMBERED=
 debug=
 envelopep=
 
@@ -151,7 +180,7 @@ else
   COLUMNS=0
 fi
 
-# Precedence for defs (highest->lowest): options, env, ~/.fromrc, default
+# Precedence for defs (highest->lowest): options, ~/.fromrc, default
 if test -f "$FROMRC"; then
   . "$FROMRC"
 fi
@@ -217,7 +246,11 @@ getopt='
 while : ; do
   case $# in 0) break ;; esac
   case "$1" in
-    -c | --columns* | --c* )
+    -C | --count-only | --cou* )
+      FROM_COUNTP=t
+      shift
+     ;;
+    -c | --columns* | --col* )
       eval "$getopt"
       COLUMNS=$optarg
      ;;
@@ -225,7 +258,11 @@ while : ; do
       debug=-d
       shift
      ;;
-    -e | --envelope | --e* )
+    -E | --extract | --ex* )
+      FROM_EXTRACTP=t
+      shift
+     ;;
+    -e | --envelope | --en* )
       envelopep=t
       shift
      ;;
@@ -249,9 +286,17 @@ while : ; do
       FROM_PARSEP=
       shift
      ;;
-    -u | --user* | --u* )
+    -s | --sender | --s* )
       eval "$getopt"
-      FROM_USER=$optarg
+#FIXME
+     ;;
+    -U | --user* | --us* )
+      eval "$getopt"
+      FROM_USER="$optarg"
+     ;;
+    -u | --unread-only | --un* )
+      FROM_UNREAD_ONLY_P=t
+      shift
      ;;
     -- )     # Stop option processing
       shift
@@ -291,8 +336,16 @@ case $# in
                              } \
                              || { (whoami) 2> /dev/null; }`}}
 
+      spooldirs='
+        /var/mail
+        /var/spool/mail
+        /usr/spool/mail
+        /usr/mail
+        /com/mail
+      '
+
       MAIL=
-      for f in /var/mail /var/spool/mail /usr/spool/mail /usr/mail ; do
+      for f in $spooldirs ; do
         if test -f "$f/$USER" ; then
           MAIL="$f/$USER"
           break
@@ -304,15 +357,26 @@ case $# in
       esac
     fi
 
-    set fnord "$MAIL"
+    set fnord "$MAIL" ${1+"$@"}
     shift
    ;;
 esac
 
-case "$envelopep" in
-  t )
-    exec grep '^From ' ${1+"$@"}
- ;;
+perl="${FROM_PERL-${PERL-perl}}"
+
+# Use quick grep only if no more complicated parsing need be done.
+case "$envelopep:$FROM_EXTRACTP$FROM_MATCHP$FROM_UNREAD_ONLY_P" in
+  't:' )
+    case "$FROM_COUNTP" in
+       '') exec sed -n -e '/^From /p' ${1+"$@"} ;;
+       t )
+         exec perl -e '$! = 0; while (<>) { /^From /o && $n++; }' \
+                   -e '$! && exit $!;' \
+                   -e 'print "n:$n\n";' \
+                   ${1+"$@"}
+        ;;
+    esac
+  ;;
 esac
 
 case "${FROM_FORMAT+set}" in
@@ -328,15 +392,22 @@ case "${FROM_FORMAT+set}" in
    ;;
 esac
 
+case "$FROM_RE_HDR" in
+  '' ) FROM_RE_HDR='^From$' ;;
+esac
+
 FROM_PROGNAME=$progname
 
-export COLUMNS FROM_FORMAT FROM_PARSEP FROM_PROGNAME
+export FROM_PROGNAME
+export FROM_COUNTP FROM_EXTRACTP FROM_PARSEP FROM_UNREAD_ONLY_P
+export FROM_LINELIMIT FROM_RE_HDR FROM_RE_TXT
+export COLUMNS FROM_FORMAT FROM_USER
 
 # By using a here-document to include the source of the perl script (to
 # avoid command line length limits), we usurp the normal stdin the inferior
 # process might have expected.  So dup stdin onto fd 9, and before the
 # inferior process is started, it will be reduped back onto fd 0.
-exec ${FROM_PERL-${PERL-perl}} $debug $includes - ${1+"$@"} 9<&0 <<'__EOF__'
+exec $perl $debug - ${1+"$@"} 9<&0 <<'__EOF__'
 
 &main;
 
@@ -353,6 +424,8 @@ sub main
       exit (1);
     }
 
+  # I think this may not work; perl wants a file handle, not a descriptor
+  # number.  Lame.
   close (9);
 
   &initialize_variables ();
@@ -406,7 +479,9 @@ sub initialize_variables
   # This is perhaps a little too specific, but some MTAs do not
   # quote 'From ' at the beginning of a line in the body, especially
   # when writing to archive files.
-  $re_message_delimiter = '^From [^ ]+ ... ... .. ..:..';
+  # The amount of whitespace between the address and the date seems to vary
+  # on some systems.
+  $re_message_delimiter = '^From[ \t]+[^ \t]+[ \t]+... ... .. ..:..';
 
   # According to RFC822, "The field-name must be composed of printable
   # ASCII characters (i.e. characters that have decimal values between 33
