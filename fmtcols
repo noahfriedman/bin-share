@@ -9,7 +9,7 @@ exec ${PERL-perl} -wSx $0 ${1+"$@"}
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-08-02
 
-# $Id: fmtcols,v 2.11 2001/11/27 17:52:46 friedman Exp $
+# $Id: fmtcols,v 2.12 2001/12/01 19:10:03 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -36,72 +36,32 @@ use strict;
 sub min { return [ sort {   $a <=> $b  } @_ ]->[0]; }
 sub max { return [ sort { -($a <=> $b) } @_ ]->[0]; }
 
-# This function reads blocks of data into a buffer and then calls an
-# anonymous subroutine with a reference to the data.  That subroutine
-# should return the offset of any unexamined data remaining so that it can
-# be prepended to the next block of read data; in this way, data which
-# fails to match a regexp because it was truncated should be successfully
-# matched next time.  (It also may return -1 to indicate discarding all
-# existing data.)
-#
-# Surprisingly, doing repeated global regexp matching on a buffer instead
-# of reading line-at-a-time, eliminates an extra copy and tends to make
-# scanning a little bit faster than using line-at-a-time with <$fh>.
-#
-# Because data is read in blocks, there is no way for the called function
-# to tell when a given block represents eof or not, so when reading text
-# files a line with no newline may either be due to a line split across a
-# block or eof.  To disambiguate this case, a final newline will be added
-# to the data by this function if it is missing.  This means this method of
-# reading data is probably not suitable for binary files.
-sub map_over_file_contents ($@)
+sub openfile ($)
 {
-  my $fn = shift;
+  my $file = shift;
   my $fh = gensym;
-  my $blocksize = 1024 * 1024; # 1mb, but perl only reads 4k max? investigate.
 
-  my $file;
-  foreach $file (@_)
+  if ($file eq "-")
     {
-      if ($file eq "-")
-        {
-          open ($fh, "<&STDIN");
-        }
-      elsif (!sysopen ($fh, $file, 0))
-        {
-          die join (": ", $file, "$!");
-        }
-
-      my $bytesread = $blocksize;
-      my $offset = 0;
-      $_ = "";
-      while (defined $bytesread && $bytesread > 0)
-        {
-          my $len = length;
-          $_ = substr ($_, $offset)
-            if ($offset > 0 && $offset < $len);
-          $_ = "" if ($offset < 0 || $offset >= $len);
-          $bytesread = sysread ($fh, $_, $blocksize, length);
-          # If read returns 0 bytes, we are at the end of the file; append
-          # a final newline if missing.
-          $_ .= "\n" if ($bytesread == 0
-                         && $_ ne "" # check if fn has consumed all data
-                         && substr ($_, -1) ne "\n");
-          $offset = &$fn (\$_) || 0;
-        }
-      close ($fh);
+      open ($fh, "<&STDIN");
     }
+  elsif (!sysopen ($fh, $file, 0))
+    {
+      die join (": ", $file, $!);
+    }
+  return $fh;
 }
 
 sub read_input ($@)
 {
   my $option = shift;
 
-  my $fieldsep   = $option->{fieldsep};
-  my $numfields  = $option->{num_fields};
-  my $rj_numeric = $option->{rj_numeric};
-  my $skip_lines = $option->{skip_lines} || 0;
-  my $ignore_re  = $option->{ignore_re};
+  my $fieldsep     = $option->{fieldsep};
+  my $numfields    = $option->{num_fields};
+  my $rj_numeric   = $option->{rj_numeric};
+  my $skip_lines   = $option->{skip_lines} || 0;
+  my $ignore_re    = $option->{ignore_re};
+  my $skip_lwspace = $option->{skip_lwspace};
   my @line;
   my @maxwidth;
   my @numeric;
@@ -109,30 +69,26 @@ sub read_input ($@)
   $numfields = -1 unless (defined $numfields);
 
   my $lineno = 1;
-  map_over_file_contents
-    sub {
-      my $lastpos = 0;
-      while (${$_[0]} =~ m/(.*)\n/gmo)
+  for my $file (@_)
+    {
+      my $fh = openfile ($file);
+      while (<$fh>)
         {
-          last if ($lastpos == pos ${$_[0]});
-          $lastpos = pos ${$_[0]};
-
-          my $l = $1;
+          chop;
           if ($lineno <= $skip_lines
-              || (defined $ignore_re && $l =~ /$ignore_re/o))
+              || (defined $ignore_re && /$ignore_re/o))
             {
-              push @line, $l;
+              push @line, $_;
               $lineno++;
               next;
             }
 
-          $l =~ s/^\s+//o if $option->{skip_lwspace};
-          my @fields = split (/$fieldsep/o, $l, $numfields);
+          s/^\s+//o if $skip_lwspace;
+          my @fields = split (/$fieldsep/o, $_, $numfields);
           my $i = 0;
 
           push @line, \@fields;
-          my $f;
-          foreach $f (@fields)
+          for my $f (@fields)
             {
               my $l = length $f;
 
@@ -145,13 +101,12 @@ sub read_input ($@)
                   $numeric[$i] = 0
                     unless ($numeric[$i] && $f =~ m/^[-+]?[\d:]+%?$/o);
                 }
-
               $i++;
             }
           $lineno++;
         }
-      return $lastpos;
-    }, @_;
+      close ($fh);
+    }
 
   return { line     => \@line,
            maxwidth => \@maxwidth,
