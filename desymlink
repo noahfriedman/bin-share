@@ -1,0 +1,177 @@
+#! /bin/sh
+# desymlink --- replace symlinks with copy of file pointed to
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1995-09-23
+# Public domain.
+
+# $Id$
+
+# Commentary:
+
+# This script replaces symlinks with the files they point to.
+# It purposely traverses symlinks to find the canonical file so that it may
+# resolve more deeply than the operating system normally does.
+
+# Code:
+
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options} [symlinks]
+
+Options are:
+-D, --debug                  Turn on debugging.
+-h, --help                   You're looking at it.
+-v, --verbose                Be verbose.
+"
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+verbose=
+
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
+    -D | --debug | --d* )
+      debug=-d
+      verbose=-x
+      shift
+     ;;
+    -h | --help | --h )
+      echo "$usage" 1>&2
+      exit 0
+     ;;
+    -v | --verbose | --v* )
+      verbose=-x
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+DESYMLINK_PROGNAME=$progname
+export DESYMLINK_PROGNAME
+
+${PERL-perl} $debug - ${1+"$@"} <<'__EOF__' | sh $verbose
+
+chop ($pwd = `pwd`);
+
+next_path:
+for ($i = 0; $i <= $#ARGV; $i++)
+  {
+   if (! -l $ARGV[$i])
+     {
+       if (! -e $ARGV[$i])
+         {
+           &err ($ARGV[$i], "No such file or directory.");
+         }
+       else
+         {
+           &err ($ARGV[$i], "not a symbolic link.");
+         }
+       next next_path;
+     }
+
+   @p = split (/\//, "$ARGV[$i]");
+   $link_count = 0;
+   for ($j = 0; $j < @p; $j++)
+     {
+      $orig_component = $k = join ("/", @p[0 .. $j]);
+      while ($l = readlink($k))
+        {
+         $k = $l;
+         # Simple way of detecting symlink loops (it unfortunately causes
+         # the system to give up when there are simply too many levels,
+         # even if resolution would eventually occur).  This parameter is
+         # adjustable, of course.  Most unix kernels allow a depth of 8.
+         if ($link_count++ == 32)
+           {
+             &err ($ARGV[$i], "Too many levels of symbolic links.");
+             next next_path;
+           }
+        }
+      if ($k eq $orig_component)
+        {
+         next;
+        }
+      if (substr ($k, 0, 1) eq "/")
+        {
+         # Absolute link.  Trash $p[0]-$p[$j+1] and replace with readlinked
+         # path components.  Set $j to -1 so that next iteration of loop
+         # will check array @p from start.
+         splice (@p, 0, $j + 1, split (/\//, $k));
+         $j = -1;
+        }
+      else
+        {
+         # Insert partial (relative) path component into array in place of
+         # current element $p[$j]
+         splice (@p, $j, 1, split (/\//, $k));
+         $j--;
+        }
+     }
+   $_ = join ("/", @p);
+
+   # Canonicalize pathname.
+   s/^\.$/$pwd/o;                     # Replace single "." with pwd.
+   s/^([^\/])/$pwd\/\1/o;             # Prepend pwd if relative.
+   s/\/\.\//\//og;                    # Remove any occurence of "/./".
+   s/^.*\/\//\//og;                   # Get rid of "//" occurences.
+   # Must do this in a loop to handle overlapping `/' character in
+   # instances of "/../../"
+   while (/\/[^\/][^\/]*\/\.\.\//o)
+     {
+      s/\/[^\/][^\/]*\/\.\.\//\//og;  # Resolve most references to ".."
+     }
+   s/\/[^\/][^\/]*\/\.\.$//o;         # Resolving trailing ".."
+   s/^\/..\//\//go;                   # Eliminate leading "/.."
+
+   if (! -f $_)
+     {
+       &err ($ARGV[$i], "File referenced ($_) is not a plain file.");
+       next next_path;
+     }
+   if (! -r $_)
+     {
+       &err ($ARGV[$i], "File referenced ($_) is not readable.");
+       next next_path;
+     }
+
+   print "rm -f '$ARGV[$i]' && cp '$_' '$ARGV[$i]'\n";
+  }
+
+sub err
+{
+  printf (STDERR join(": ", $ENV{'DESYMLINK_PROGNAME'}, @_) . "\n");
+}
+
+__EOF__
+
+# desymlink ends here
