@@ -1,0 +1,80 @@
+#!/bin/sh
+# have-func --- check for existence of library function
+
+# Copyright (C) 1996 Noah S. Friedman
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1996-09-30
+
+# $Id$
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, you can either send email to this
+# program's maintainer or write to: The Free Software Foundation,
+# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
+
+# Commentary:
+
+# Zero exit status if the named function exists, 1 otherwise.
+# Note: this script may lie if there are unrelated compilation problems.
+
+# Code:
+
+case "$#" in
+  1 ) : ;;
+  2 )
+    progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+    echo "Usage: $progname [function name]" 1>&2
+    exit 1
+   ;;
+esac
+
+func="$1"
+file="functest$$"
+
+trap 'exitstat=$?; rm -f $file.c $file.o $file; exit $exitstat' 0 1 2 3 15
+
+cat > "$file.c" <<__EOF__
+/* System header to define __stub macros and hopefully few prototypes,
+    which can conflict with char $ac_func(); below.  */
+#include <assert.h>
+
+/* Override any gcc2 internal prototype to avoid an error.  */
+/* We use char because int might match the return type of a gcc2
+    builtin and then its argument prototype would still apply.  */
+char $func ();
+
+int main () { t (); return 0; }
+int t ()
+{
+  /* The GNU C library defines this for functions which it implements
+   * to always fail with ENOSYS.  Some functions are actually named
+   * something starting with __ and the normal name is an alias.
+   */
+#if defined (__stub_$func) || defined (__stub___$func)
+  choke me
+#else
+    $func ();
+#endif
+  return 0;
+}
+__EOF__
+
+if ${CC-cc} ${CFLAGS} $file.c -o $file ${LOADLIBES} 2> /dev/null &&
+   test -f "$file"
+then
+  exit 0
+fi
+
+exit 1
+
+# have-func ends here
