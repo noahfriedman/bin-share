@@ -1,0 +1,10 @@
+#!/bin/sh
+# $Id$
+
+for addr in ${1+"$@"}; do
+  if expr "$addr" : '[0-9.][0-9.]*' > /dev/null; then
+    dig -x "$addr" +noall +answer
+  else
+    dig "$addr" any +noall +answer
+  fi
+done | sed -e '/^;/d'
