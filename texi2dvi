@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- smartly produce DVI files from texinfo sources
-# $Id: texi2dvi,v 0.14 1998/06/14 11:00:15 karl Exp $
+# $Id: texi2dvi,v 0.15 1998/06/27 18:18:54 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98 Free Software Foundation, Inc.
 #
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.14 $'
+rcs_revision='$Revision: 0.15 $'
 rcs_version=`set - $rcs_revision; echo $2`
 
 version="$0 (GNU Texinfo 3.12) $rcs_version
@@ -263,11 +263,13 @@ for command_line_filename in $nonopt; do
     cmd="$tex $tex_mode \\input $filename_input"
     $cmd
 
-    # Check if index files changed.
+    # Check if index or other such files changed.
     # 
     definite_index_files=
-    # Get list of new index files.
-    possible_index_files="`eval echo ${filename_noext}.?? ${filename_noext}.aux`"
+    # Get list of new index files.  Include the toc file since it might
+    # be at the beginning now.
+    possible_index_files="`eval echo ${filename_noext}.?? \
+                                 ${filename_noext}.aux ${filename_noext}.toc`" 
     for this_file in ${possible_index_files}; do
        # If file is empty, forget it.
        test -s "${this_file}" || continue
