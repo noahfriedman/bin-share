@@ -1,0 +1,40 @@
+#! /bin/sh
+# xrdb-symbol-value --- get value of an xrdb symbol
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1995-04-05
+# Public domain
+
+# $Id$
+
+# Commentary:
+
+# e.g.: xrdb-symbol-value SERVERHOST
+#        -| nutrimat.gnu.ai.mit.edu
+
+# Code:
+
+case "${XRDB_SYMBOLS+set}" in
+  set ) : ;;
+  * )
+    XRDB_SYMBOLS="`xrdb -symbols`"
+    case "$DISPLAY" in
+      # If display does not contain an explicit screen number (e.g. 0.0),
+      # then there are multiple screens associated with the display and
+      # xrdb -symbols is going to spit out comments.
+      # We really want a way to determine which syms we want since they
+      # may vary from screen to screen, but I just don't know of any
+      # method of deciding which to use.
+      *:*.* ) : ;;
+      * )     XRDB_SYMBOLS="`echo \"$XRDB_SYMBOLS\" | sed -e '/^#/d'`" ;;
+    esac
+   ;;
+esac
+
+echo "$XRDB_SYMBOLS" \
+  | sed -ne 's/[ 	][ 	]*/ /g
+             s/.* -D'"$1"'=//
+             s/ -D.*//
+             p
+             q'
+
+# xrdb-symbol-value ends here
