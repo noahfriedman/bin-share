@@ -1,0 +1,387 @@
+#!/bin/sh
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl     [perl will skip all lines in this file before this line]
+
+# ldap2csv --- dump ldap phonebook to CSV format for palm pilot sync
+
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2000-03-19
+
+# $Id$
+
+# Commentary:
+# Code:
+
+use Mozilla::LDAP::Conn;
+use Mozilla::LDAP::Utils;
+use Getopt::Long;
+use POSIX;
+use strict;
+
+my $default_fmtstr = '"%s"';
+
+# phoneslot indicates preferred presentation order in address book.
+my %phonemap =
+  ({ name      => 'Work',
+     ldapattr  => 'telephonenumber',
+     phoneslot => 0,
+   },
+   { name      => 'Mobile',
+     ldapattr  => 'mobile',
+     phoneslot => 1,
+   },
+   { name      => 'Pager',
+     ldapattr  => 'pager',
+     phoneslot => 2,
+   },
+   { name      => 'Home',
+     ldapattr  => 'homephone',
+     phoneslot => 3,
+   },
+   { name      => 'Fax',
+     ldapattr  => 'facsimiletelephonenumber',
+     phoneslot => 4,
+   },
+   { name      => 'E-mail',
+     ldapattr  => ['mail', 'mailalternateaddress'],
+     phoneslot => 5,
+   });
+
+my @notes =
+  ({ name     => 'mailstop',
+     ldapattr => 'physicaldeliveryofficename',
+   },
+   { name     => 'cube',
+     ldapattr => 'roomnumber',
+   },
+   { name     => 'ou',
+   },
+   { name     => 'division',
+     ldapattr => 'businesscategory',
+   },
+   { name     => 'dept number',
+     ldapattr => 'departmentnumber',
+   },
+   { name     => 'description',
+   },
+   { name     => 'url',
+     ldapattr => 'labeleduri',
+   });
+
+my @pilot_record_format =
+  ({ name     => 'Last Name',
+     ldapattr => { 'sn' => 1,
+                   'cn' => 2,
+                 },
+   },
+   { name     => 'First Name',
+     ldapattr => 'givenname',
+   },
+   { name     => 'Title',
+     ldapattr => 'title',
+   },
+   { name     => 'Company',
+   },
+   { name     => 'Named Field 1 (default: Work)',
+     special  => \%phonemap,
+     fmt      => '"%s";"%s"',
+   },
+   { name     => 'Named Field 2 (default: Home)',
+     special  => \%phonemap,
+     fmt      => '"%s";"%s"',
+   },
+   { name     => 'Named Field 3 (default: Fax)',
+     special  => \%phonemap,
+     fmt      => '"%s";"%s"',
+   },
+   { name     => 'Named Field 4 (default: Other)',
+     special  => \%phonemap,
+     fmt      => '"%s";"%s"',
+   },
+   { name     => 'Named Field 5 (default: E-mail)',
+     special  => \%phonemap,
+     fmt      => '"%s";"%s"',
+   },
+   { name     => 'Address',
+   },
+   { name     => 'City',
+   },
+   { name     => 'State',
+   },
+   { name     => 'Zip',
+   },
+   { name     => 'Country',
+     ldapattr => 'countryname',
+   },
+   { name     => 'Custom 1',
+   },
+   { name     => 'Custom 2',
+   },
+   { name     => 'Custom 3',
+   },
+   { name     => 'Custom 4',
+   },
+   { name     => 'Note',
+     special  => \@notes,
+   },
+  );
+
+my @attr = qw(uid sn cn givenname title);
+push @attr, keys %phonemap;
+push @attr, keys %notes;
+
+# DNs with these values (forced to lowercase for comparison) in the sn
+# attribute are not ordinary users; format specially.
+# Currently value is unimportant; check is merely an existence check.
+my %specialsn =
+  ( 'conference room' => 1,
+    'game'            => 1,
+  );
+
+
+sub discard_entry_p ($)
+{
+  my $entry = shift;
+
+  for my $elt (@{$entry->{uid}})
+    {
+      return 1 if ($elt =~ /^\./o
+                   || $elt =~ /^IUSR/o
+                   || $elt =~ /test$/io);
+    }
+  for my $elt (@{$entry->{cn}})
+    {
+      return 1 if ($elt =~ /^(?:SMS|Accounting)/o);
+    }
+  for my $elt (@{$entry->{sn}})
+    {
+      return 1 if ($elt =~ /^(?:account|administrator)$/io
+                   || $elt eq "zzvirus");
+    }
+  return 0;
+}
+
+sub fixup_elts ($)
+{
+  my $entry = shift;
+
+  # Strip carriage returns and trailing whitespace.
+  for my $key (keys %$entry)
+    {
+      for my $elt (@{$entry->{$key}})
+        {
+          $elt =~ s/\r//go;
+          $elt =~ s/\s+$//go;
+        }
+    }
+
+  # Normalize domestic phone numbers
+  for my $key (keys %phonemap)
+    {
+      my $i = 0;
+      for my $elt (@{$entry->{$key}})
+        {
+          my $lelt = lc ($elt);
+          if ($lelt eq "n/a" || $lelt eq "none")
+            {
+              # Nuke this key from the list.
+              splice @{$entry->{$key}}, $i, 1;
+              $i++;
+              next;
+            }
+          $i++;
+
+          $elt =~ s/cell\s*//io;
+          $elt =~ s/pager\s*//io;
+          $elt =~ s/Main#\s*//o;
+          $elt =~ s/^(\d\d\d)(\d\d\d)(\d\d\d\d)$/($1) $2-$3/o;
+
+          $elt =~ s| (?:and/)?or |\n|go;
+          $elt =~ s//$1/o while ($elt =~ /\((or[^)]+)\)/go);
+          $elt =~ s| *[,/] *|\n|go;
+
+          $elt =~ s//($1) $2-$3$4/o
+            while ($elt =~ /(?:\+1 )?(\d\d\d)[ .-](\d\d\d)[ .-](\d\d\d\d)($|\n)/go);
+        }
+    }
+}
+
+# If an attribute is present more than once, append together separated by a
+# newline.
+# Also quote instances of `"' char to `""'.
+sub flatten_elts ($)
+{
+  my $entry = shift;
+  my %elts;
+
+  while (my ($key, $val) = each %$entry)
+    {
+      my $vcopy = join ("\n", @$val);
+      $vcopy =~ s/"/""/go;
+      next if ($vcopy eq "");  # delete blank attributes
+      $elts{$key} = $vcopy;
+    }
+  return \%elts;
+}
+
+# Present "phone" list (including email address) in preferred order,
+# padding results to 5 entries if there are fewer than that.
+sub order_phones ($)
+{
+  my $entry = shift;
+
+  my @phones;
+  for my $key (sort { $phonemap{$a}->[0] <=> $phonemap{$b}->[0] }
+                    keys %phonemap)
+    {
+      push @phones, [$phonemap{$key}->[1], $entry->{$key}]
+        if (defined $entry->{$key} && $entry->{$key} ne "");
+    }
+
+  my $len = scalar @phones;
+  while ($len < 5)
+    {
+      push @phones, ["Other", ""];
+      $len++;
+    }
+
+  return \@phones;
+}
+
+sub printrec ($)
+{
+  my $elt = shift;
+
+  if (exists $specialsn{lc ($elt->{sn})})
+    {
+      printf '"%s","","%s","",', $elt->{cn} || "", $elt->{sn} || "";
+    }
+  else
+    {
+      printf '"%s","%s","%s","",',
+        $elt->{sn} || "", $elt->{givenname} || "", $elt->{title} || "";
+    }
+
+  # If there are more than 4 types of phone numbers, put all remaining
+  # numbers in the 4th field prefixed with their type name.
+  # Email address is always last and separate.
+  my $phones = order_phones ($elt);
+  my $i = 1;
+  while (scalar @$phones > 0)
+    {
+      if ($i == 4 && scalar @$phones > 2)
+        {
+          my @rest;
+          while ($phones->[0]->[0] ne "E-mail")
+            {
+              push @rest, shift @$phones;
+            }
+          printf '"Other";"%s",',
+            join ("\n", map { join (": ", @$_) } @rest);
+          $i++;
+          next;
+        }
+      printf '"%s";"%s",', @{shift @$phones};
+      $i++;
+    }
+
+  print '"","","","","",'; # addr,city,state,zip,country
+  print '"","","","",'; # custom1,custom2,custom3,custom4
+
+  my @notes;
+  for my $ent (sort { $notes{$a}->[0] <=> $notes{$b}->[0] } keys %notes)
+    {
+      if (defined $elt->{$ent})
+        {
+          $elt->{$ent} =~ s/\n/\n    /go;
+          push @notes, $notes{$ent}->[1] . ":\n    " . $elt->{$ent};
+        }
+    }
+  printf '"%s"', join ("\n\n", @notes);
+  print "\n";
+}
+
+sub dosearch ($$$;$)
+{
+  my ($conn, $ld, $attr, $pattern_prefix) = @_;
+
+  $pattern_prefix = "" unless defined ($pattern_prefix);
+  my $search = sprintf "(uid=%s*)", $pattern_prefix;
+  my $entry = $conn->search ($ld->{root}, $ld->{scope}, $search, 0, @$attr);
+  $conn->printError () if $conn->getErrorCode ();
+
+  while ($entry)
+    {
+      if (discard_entry_p ($entry))
+        {
+          $entry = $conn->nextEntry ();
+          next;
+        }
+
+      fixup_elts ($entry);
+      my $flattened = flatten_elts ($entry);
+      printrec ($flattened);
+      $entry = $conn->nextEntry ();
+    }
+}
+
+
+# For host foobar.whatever.domain.com, return dc=domain,dc=com
+sub ldap_default_binddn
+{
+  my $hostname = [POSIX::uname ()]->[1];
+  my @pieces = split (/\./, $hostname);
+  return undef if (scalar @pieces < 2);
+  my @dn = reverse (pop @pieces, pop @pieces);
+  join (",", map { "dc=" . $_ } @dn);
+}
+
+sub parse_options ()
+{
+  Getopt::Long::config ('bundling', 'autoabbrev');
+  GetOptions ("b|root|base=s",
+              "h|host=s",
+              "D|bind=s",
+              "w|pswd|pass=s",
+              "p|port=s",
+              "s|scope=s",
+              "P|cert=s",
+              "S|small-queries", $main::opt_smallqueries,
+             );
+
+  $main::opt_h ||= "ldap";
+  $main::opt_b ||= ldap_default_binddn ();
+}
+
+sub main
+{
+  parse_options();
+  my %ld = Mozilla::LDAP::Utils::ldapArgs;
+  my $conn = new Mozilla::LDAP::Conn(\%ld);
+  die "Could't connect to LDAP server $ld{host}" unless $conn;
+
+  if ($main::opt_smallqueries)
+    {
+      # Some servers may balk at searching uid=* if the number of matching
+      # records exceeds the maximum allowed query result.
+      for my $c ('a' .. 'z', '0' .. '9')
+        {
+          dosearch ($conn, \%ld, \@attr, $c);
+        }
+    }
+  else
+    {
+      dosearch ($conn, \%ld, \@attr);
+    }
+  $conn->close if $conn;
+}
+
+main ();
+
+
+# local variables:
+# mode: perl
+# eval: (auto-fill-mode 1)
+# end:
+
+# ldap2csv ends here
