@@ -8,7 +8,7 @@ exec ${PERL-perl} -wSx $0 ${1+"$@"}
 # Created: 2003-01-01
 # Public domain
 
-# $Id$
+# $Id: slowcat,v 2.1 2003/01/02 13:02:37 friedman Exp $
 
 # Commentary:
 # Code:
@@ -21,42 +21,33 @@ use Symbol;
 (my $progname = $0) =~ s|.*/||;
 
 my $bits_per_sec  = 9600;
-my $usec_interval = 100;
-
-sub usleep ($)
-{
-  my $usec = shift;
-  my $sec = $usec / 1000;
-  select (undef, undef, undef, $sec);
-}
+# Due to HZ resolution in most kernels, it is unlikely that select will
+# return in a shorter period of time than 10ms.
+my $usec_interval_min = 10000;
+my $usec_interval = $usec_interval_min;
 
 sub slowcat ($$$)
 {
   my ($fh, $bits_per_sec, $usec_interval) = @_;
+  $usec_interval = $usec_interval_min if $usec_interval < $usec_interval_min;
 
   my $bytes_per_sec = $bits_per_sec / 8;
-  my $bytes_per_call = $bytes_per_sec * ($usec_interval / 1000);
+  my $bytes_per_call = 0;
+  my $sleep_interval;
+
+  while ($bytes_per_call < 1
+         || ($bytes_per_call - int ($bytes_per_call) >= .009))
+    {
+      $sleep_interval = $usec_interval++ / 1000000;
+      $bytes_per_call = $bytes_per_sec * $sleep_interval;
+    }
+  $bytes_per_call = int ($bytes_per_call);
 
   while (sysread ($fh, $_, $bytes_per_call))
     {
       syswrite (STDOUT, $_, $bytes_per_call);
-      usleep ($usec_interval);
+      select (undef, undef, undef, $sleep_interval);
     }
-}
-
-# fh may be a filehandle or a reference to an array of handles
-# mode 1 = buffering, 0 = no buffering
-sub set_buffering_mode ($$)
-{
-  my ($fh, $mode) = @_;
-  my $orig = select (ref $fh eq 'ARRAY' ? $fh->[0] : $fh);
-
-  for my $handle (ref $fh eq 'ARRAY' ? @$fh : $fh)
-    {
-      select ($handle);
-      $| = ($mode == 0);
-    }
-  select ($orig);
 }
 
 sub usage (@)
@@ -71,19 +62,12 @@ Options are:
   exit (1);
 }
 
-sub parse_options ()
+sub main ()
 {
   Getopt::Long::config ('bundling', 'autoabbrev');
   GetOptions ("h|help",             sub { usage () },
               "b|bps=i",            \$bits_per_sec,
-              "i|sleep-interval=i", \$usec_interval,
-             );
-}
-
-sub main ()
-{
-  set_buffering_mode (*STDOUT{IO}, 0);
-  parse_options ();
+              "i|sleep-interval=i", \$usec_interval);
 
   unless (@ARGV)
     {
