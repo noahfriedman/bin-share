@@ -1,0 +1,12 @@
+#! /bin/sh
+
+for f in ${1+"$@"}; do
+  case "$f" in
+    *.gz | *.[Zz] ) z=z ;;
+    * )             z=  ;;
+  esac
+
+  ${TAR-tar} -xpv${z}f "$f"
+done
+
+# eof
