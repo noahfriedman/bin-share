@@ -1,0 +1,41 @@
+#! /bin/sh
+# htget --- Get raw HTML from URL
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1995-11-07
+
+# $Id$
+
+# Commentary:
+
+# This script requires the `tcpconnect' program.
+
+# Code:
+
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+bq='`'
+eq="'"
+
+case "$1" in
+  '' )
+    echo "Usage: $progname [url]" 1>&2
+    exit 1
+   ;;
+  http://* ) : ;;
+  http:* )
+    echo "$progname: malformed URL $bq$1$eq." 1>&2
+    exit 1
+   ;;
+  *: )
+    echo "$progname: Can only retrieve URLs of type ${bq}http$eq." 1>&2
+    exit 1
+esac
+
+# Args should be: fnord [host] [port] [file]
+set fnord `echo "$1" | sed -ne 's/^http:\/\///
+                                /^[^/]*:[0-9]/!s/\([^/]*\)/\1:80/
+                                s/\([^:]*\):\([0-9]*\)\(\/.*\)/\1 \2 \3/p
+                               '`
+
+echo "GET $4" | tcpconnect -Hv "$2" "$3"
+
+# htget ends here
