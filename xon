@@ -4,12 +4,12 @@
 # Created: 1993-03-08
 # Public domain
 
-# $Id: xon,v 1.4 1994/10/14 00:17:44 friedman Exp friedman $
+# $Id: xon,v 1.5 1994/11/30 18:39:13 friedman Exp friedman $
 
 # Commentary:
 # Code:
 
-# Name by which this script was invoked. 
+# Name by which this script was invoked.
 fullprogname=$0
 progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 
@@ -24,11 +24,12 @@ Options are:
 -e, --export       VAR       Export current definition of environment
                    V,V1,...  variable VAR on remote host.  If multiple,
                              comma-separated variables are specified,
-                             export the value of each one.  
+                             export the value of each one.
                              This option can also be specified multiple
                              times, once for each variable.
 -h, --help                   You're looking at it.
--l, --login-as     USER      Log in as USER on remote host. 
+-l, --login-as     USER      Log in as USER on remote host.
+-X, --xauth                  Transmit xauth authentication information.
 -x, --xhost-enable XHOST     Use ${bq}xhost$eq to enable X server access
                              for host XHOST.
 "
@@ -64,20 +65,20 @@ getopt='
   {
     optarg=
     case "$1" in
-      --*=* ) 
+      --*=* )
         optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
-        shift 
+        shift
        ;;
-      * ) 
+      * )
         case ${2+set} in
-          set ) 
+          set )
             optarg="$2"
             shift
-            shift 
+            shift
            ;;
-          * ) 
-            case "$optarg_optional" in 
-              "" ) 
+          * )
+            case "$optarg_optional" in
+              "" )
                 case "$1" in
                   --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
                   * ) option="$1" ;;
@@ -102,16 +103,17 @@ getopt='
 debug=
 explicit_display=
 export_vars=
+xauthinfo=
 xhost_enable_host=
 
-# Parse command line arguments. 
+# Parse command line arguments.
 # Make sure that all wildcarded options are long enough to be unambiguous.
 # It's a good idea to document the full long option name in each case.
 # Long options which take arguments will need a `*' appended to the
-# canonical name to match the value appended after the `=' character. 
+# canonical name to match the value appended after the `=' character.
 while : ; do
   case $# in 0) break ;; esac
-  case "$1" in 
+  case "$1" in
     -D | --debug | --de* )
       set -x
       debug=-x
@@ -145,7 +147,11 @@ while : ; do
       echo "$usage" 1>&2
       exit 1
      ;;
-    -x | --xhost-enable* | --x* )
+    -X | --xauth | --xa* )
+      shift
+      xauthinfo="`xauth -q extract - $DISPLAY 2> /dev/null`"
+     ;;
+    -x | --xhost-enable* | --xh* )
       eval "$getopt"
       xhost_enable_host=$optarg
      ;;
@@ -221,7 +227,7 @@ esac
 
           # Try to guess intelligently whether display host should be reset
           # (e.g., if it's a hostname that's not local, then it's probably
-          # accurate and we shouldn't clobber it by setting it to the local host) 
+          # accurate and we shouldn't clobber it by setting it to the local host)
           case "$display_host" in
             unix | loopback | localhost | '' )
               display_host=$hostname
@@ -273,7 +279,7 @@ esac
           eval "$do_xhost"
          ;;
       esac
- 
+
       case "$xhost_msg" in
         win | added ) : ;;
         refused )
@@ -292,12 +298,17 @@ esac
   # Construct the export variable string that gets evaluated in the rsh
   # subshell.
   export_var_string=
-  for var in $export_vars; do
-    # You are not expected to understand this.
-    str=$var=\'`eval echo \"\\$$var\"`\'';'
-    export_var_string="$export_var_string $str"
-  done
-  export_var_string="$export_var_string export $export_vars"
+  case "$export_vars" in
+    '' ) export_var_string= ;;
+    * )
+      for var in $export_vars; do
+        # You are not expected to understand this.
+        str=$var=\'`eval echo \"\\$$var\"`\'';'
+        export_var_string="$export_var_string $str"
+      done
+      export_var_string="$export_var_string export $export_vars"
+     ;;
+  esac
 
   # Standard global places that ought to go in path
   pdirs='
@@ -366,6 +377,10 @@ esac
   # Be sure to close various file descripters so that lusing rshds wont
   # inherit them.  (6, 7, 8, and 9 show up under various operating
   # systems where rshd hasn't been fixed).
+  #
+  # The "xauth remove" is theoretically unnecessary below, but due to a bug
+  # in the initial X11R5 (through at least fix-03) xauth, entries for
+  # MIT-MAGIC-COOKIE-1 get lost if you do merge twice without the remove.
   $rsh "$rhost" -l "$USER" sh $debug <<__EOF__
     $export_var_string
 
@@ -380,24 +395,36 @@ esac
         done
         export PATH
        ;;
-    esac 
+    esac
 
     DISPLAY='$DISPLAY'
     export DISPLAY
 
-    case '$XAUTHORITY' in
+    case '$XUSERFILESEARCHPATH' in
       '' ) : ;;
-      * ) 
-        XAUTHORITY='$XAUTHORITY'
-        export XAUTHORITY
+      * )
+        XUSERFILESEARCHPATH='$XUSERFILESEARCHPATH'
+        export XUSERFILESEARCHPATH
        ;;
     esac
 
-    case '$XUSERFILESEARCHPATH' in
+    case '$XAUTHORITY' in
       '' ) : ;;
-      * ) 
-        XUSERFILESEARCHPATH='$XUSERFILESEARCHPATH'
-        export XUSERFILESEARCHPATH
+      * )
+        if test -f '$XAUTHORITY'; then
+          XAUTHORITY='$XAUTHORITY'
+          export XAUTHORITY
+        fi
+       ;;
+    esac
+
+    case '$xauthinfo' in
+      t )
+        echo '$xauthinfo' |
+         {
+           xauth -q remove $DISPLAY
+           xauth -q merge -
+         }
        ;;
     esac
 
