@@ -4,7 +4,7 @@
 # Created: 1995-08-14
 # Public domain
 
-# $Id: with,v 1.2 1995/08/25 20:38:25 friedman Exp friedman $
+# $Id: with,v 1.3 1995/09/23 22:12:47 friedman Exp friedman $
 
 # Commentary:
 
@@ -287,6 +287,10 @@ sub main
               "/usr/lib/perl"
        );
 
+  # Duped in case we use &notty to close stderr but the program turns out
+  # not to be executable.
+  open (SAVED_STDERR, ">&STDERR");
+
   &get_includes;
 
   &set_name;
@@ -299,11 +303,11 @@ sub main
   &set_uid;
   &set_euid;
   &background;
-  &notty;
   &set_pgrp;
+  &notty;
 
   exec ({$progname} @ARGV);
-  printf (STDERR "$with_progname: $!\n");
+  printf (SAVED_STDERR "$with_progname: $progname: $!\n");
   exit (1);
 }
 
@@ -400,17 +404,16 @@ sub notty
 
       if (defined (&TIOCNOTTY))
         {
-          local ($maxfd) = $^F;
-          local ($i) = 0;
+          # Don't allow any file descriptors, including stdin, stdout, or
+          # stderr to be propagated to children.
+	  $^F = -1;
 
           # exit parent
           fork && exit (0);
 
-          while ($i <= $maxfd)
-            {
-              close ($i);
-              $i = $i + 1;
-            }
+          close (STDERR);
+          close (STDOUT);
+          close (STDIN);
 
           open (FD, "</dev/tty");
           ioctl (FD, &TIOCNOTTY, 0);
