@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- produce DVI files from Texinfo/LaTeX sources.
-# $Id: texi2dvi,v 0.21 1998/12/19 22:37:36 karl Exp $
+# $Id: texi2dvi,v 0.22 1998/12/20 12:54:47 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98 Free Software Foundation, Inc.
 #
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.21 $'
+rcs_revision='$Revision: 0.22 $'
 rcs_version=`set - $rcs_revision; echo $2`
 
 version="texi2dvi (GNU Texinfo 3.12-pretest) $rcs_version
@@ -44,6 +44,8 @@ containing each FILE is searched for included files.  The suffix of FILE
 is used to determine its language (LaTeX or Texinfo).
 
 Options:
+  -@                   Use @input instead of \input; useful if texinfo
+                         is preloaded into TeX.
   -b, --batch          Same as --quiet.
   -c, --clean          Remove all auxiliary files.
   -D, --debug          Turn on shell debugging (set -x).
@@ -68,6 +70,7 @@ general questions and discussion to <help-texinfo@gnu.org>."
 # Initialize variables for option overriding and otherwise.
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
+at_escape=
 batch=
 clean=
 debug=
@@ -116,6 +119,7 @@ while test x"$1" != x"$arg_sep"; do
 
   # This recognizes --bletch as --batch.  So what.
   case "$1" in
+    -@ ) at_escape=t;;
     -b | -q | -s | --b* | --s* | --q*) batch=t; quiet=t;;
     -c | --c*) clean=t;;
     -D | --d*) debug=t;;
@@ -378,13 +382,21 @@ for command_line_filename in "$@"; do
     fi
 
     # Finally, run TeX.
+    if test "$at_escape" = t; then
+      nonstopmode=@nonstopmode
+      input=@input
+    else
+      nonstopmode='\nonstopmode'
+      input='\input'
+    fi
+
     if test "$batch" = t; then
-      tex_mode='\nonstopmode'
+      tex_mode=$nonstopmode
     else
       tex_mode=
     fi
-    $verbose "Running $tex $filename_input ..."
-    cmd="$tex $tex_mode \\input $filename_input"
+    cmd="$tex $tex_mode $input $filename_input"
+    $verbose "Running $cmd ..."
     if $cmd >&5; then :; else
       echo "$0: $tex exited with bad status, quitting." >&2
       echo "$0: see $filename_noext.log for errors." >&2
