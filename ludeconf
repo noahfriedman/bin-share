@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-06-03
 
-# $Id: ludeconf,v 2.7 1999/05/22 16:40:22 friedman Exp $
+# $Id: ludeconf,v 2.8 2000/12/03 10:51:04 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -34,7 +34,7 @@ bq='`'
 eq="'"
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 2.7 $'
+rcs_revision='$Revision: 2.8 $'
 revision=`set fnord $rcs_revision; echo $3`
 
 usage="Usage: $progname {$progname-options} {-- {configure-options}}
@@ -43,6 +43,8 @@ usage="Usage: $progname {$progname-options} {-- {configure-options}}
 $progname options:
 -c, --cc, --with-cc  {CC}    Force use of CC for C compiler.
                              If optional arg CC not specified, use ${bq}gcc$eq.
+--c++, --with-c++    {CXX}   Force use of CXX for C++ compiler.
+                             If optional arg CXX not specified, use ${bq}g++$eq.
 --configure          CONFPRG Run the CONFPRG ${bq}configure$eq program.
                              If not specified, guess location.
 
@@ -181,6 +183,16 @@ while : ; do
          * )  CC="$optarg" ;;
        esac
        export CC
+     ;;
+
+    --c++* | --with-c++* )
+       optarg_optional=t
+       eval "$getopt"
+       case "$optarg" in
+         '' ) CXX=g++      ;;
+         * )  CXX="$optarg" ;;
+       esac
+       export CXX
      ;;
 
     --configure* | --co* )
