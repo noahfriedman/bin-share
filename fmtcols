@@ -9,7 +9,7 @@ exec ${PERL-perl} -wSx $0 ${1+"$@"}
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-08-02
 
-# $Id: fmtcols,v 2.12 2001/12/01 19:10:03 friedman Exp $
+# $Id: fmtcols,v 2.13 2002/05/29 18:46:55 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -56,12 +56,13 @@ sub read_input ($@)
 {
   my $option = shift;
 
-  my $fieldsep     = $option->{fieldsep};
-  my $numfields    = $option->{num_fields};
-  my $rj_numeric   = $option->{rj_numeric};
-  my $skip_lines   = $option->{skip_lines} || 0;
-  my $ignore_re    = $option->{ignore_re};
-  my $skip_lwspace = $option->{skip_lwspace};
+  my $fieldsep       = $option->{fieldsep};
+  my $numfields      = $option->{num_fields};
+  my $rj_numeric     = $option->{rj_numeric};
+  my $skip_lines     = $option->{skip_lines} || 0;
+  my $ignore_re      = $option->{ignore_re};
+  my $skip_lwspace   = $option->{skip_lwspace};
+  my $numeric_regexp = $option->{numeric_regexp};
   my @line;
   my @maxwidth;
   my @numeric;
@@ -99,7 +100,7 @@ sub read_input ($@)
                 {
                   $numeric[$i] = 1 unless (defined $numeric[$i]);
                   $numeric[$i] = 0
-                    unless ($numeric[$i] && $f =~ m/^[-+]?[\d:]+%?$/o);
+                    unless ($numeric[$i] && $f =~ m/$numeric_regexp/o);
                 }
               $i++;
             }
@@ -171,6 +172,7 @@ sub parse_options ()
   my $outsep      = " ";
   my $num_fields;
   my $rj_numeric;
+  my $numeric_regexp = '^[-+]?[\d,.]+%?$';
   my $skip_lines;
   my @ignore_re;
   my $width_limit;
@@ -182,6 +184,7 @@ sub parse_options ()
   GetOptions ("i|ignore-matching=s@",      \@ignore_re,
               "k|skip-lines=i",            \$skip_lines,
               "N|numeric-right-justify:i", \$rj_numeric,
+              "numeric-regexp=s",          \$numeric_regexp,
               "n|num-fields=i",            \$num_fields,
               "m|max-field-width=i",       \$width_limit,
               "r|right-justify=s@",        \@rightcols,
@@ -204,15 +207,16 @@ sub parse_options ()
       $right_justify{$col} = 1;
     }
 
-  return { fieldsep      => $fieldsep,
-           outsep        => $outsep,
-           width_limit   => $width_limit,
-           num_fields    => $num_fields,
-           right_justify => \%right_justify,
-           rj_numeric    => $rj_numeric,
-           skip_lines    => $skip_lines,
-           ignore_re     => $ignore_re,
-           skip_lwspace  => $skip_lwspace,
+  return { fieldsep       => $fieldsep,
+           outsep         => $outsep,
+           width_limit    => $width_limit,
+           num_fields     => $num_fields,
+           right_justify  => \%right_justify,
+           rj_numeric     => $rj_numeric,
+           skip_lines     => $skip_lines,
+           ignore_re      => $ignore_re,
+           skip_lwspace   => $skip_lwspace,
+           numeric_regexp => $numeric_regexp,
          };
 }
 
@@ -230,6 +234,8 @@ Options are:
                                 compliance (use it to skip column headers).
                                 First N lines are still column-aligned unless
                                 \`-skip-lines' option is specified.
+--numeric-regexp       REGEXP   Use this regular expression to match
+                                numeric-only fields.
 -i, --ignore-matching  REGEXP   Do not column-align lines matching REGEXP.
                                 This option may be specified more than once.
 -k, --skip-lines       N        Do not column-align first N lines of input.
