@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.35 2000/01/20 20:27:13 friedman Exp $
+# $Id: from,v 1.36 2000/01/20 21:04:06 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -206,6 +206,15 @@ sub parse_options ()
 sub main ()
 {
   parse_options ();
+
+  # Quit early if we have no files to read
+  if ($#ARGV < 0)
+    {
+      my $default_spool = default_spool_file ($opt_user);
+      push (@ARGV, $default_spool) if (defined $default_spool);
+      exit (0) unless (defined $default_spool);
+    }
+
   initialize_variables ();
   make_format_vector ($opt_format);
 
@@ -219,8 +228,6 @@ sub main ()
       $opt_match_header = join ('', "{MATCH_", uc ($opt_match_header), "}");
       $header_save_p{$opt_match_header} = 1;
     }
-
-  push (@ARGV, default_spool_file ($opt_user)) unless ($#ARGV >= 0);
 
   for my $file (@ARGV)
     {
