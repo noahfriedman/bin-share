@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-09-11
 
-# $Id: emacs-fe,v 1.6 1996/03/07 03:57:12 friedman Exp $
+# $Id: emacs-fe,v 1.7 1996/03/07 04:15:40 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -60,7 +60,7 @@ case "$progname" in
   emacs-fe-print )
     case $# in
       1 ) : ;;
-      * ) 
+      * )
         echo "$progname: Exactly one argument is required." 1>&2
         exit 1
        ;;
@@ -275,20 +275,21 @@ fi
 #PATH=$prefix/$eprefix$version/bin:$PATH
 #export PATH
 
-searchdirs="
-   bin \
-   libexec/$VARIANT/$version/* \
-   lib/$VARIANT/$version/*
-   lib/$VARIANT-$version/*
-   lib/$VARIANT/etc
-   lib/etc
-"
+searchdirs=`exec 2> /dev/null
+            cd $prefix/$eprefix$version \
+            && find bin \
+                    libexec/$VARIANT/$version/* \
+                    lib/$VARIANT/$version/* \
+                    lib/$VARIANT-$version/* \
+                    lib/$VARIANT/etc \
+                    lib/etc \
+                 -type d -print`
 
 for dir in $searchdirs ; do
   for p in $progname-$version $progname ; do
-    if [ -f $prefix/$eprefix$version/$dir/$p ] ; then
-      prog="$prefix/$eprefix$version/$dir/$p"
+    prog="$prefix/$eprefix$version/$dir/$p"
 
+    if test -f "$prog" ; then
       case "${EMACS_FE_PRINT+set}" in
         set )
           echo "$prog"
