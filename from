@@ -1,15 +1,12 @@
-#!/bin/sh
+#! /bin/sh
 # from --- show you who your mail is from
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-01-19
 # Public domain
 
-# $Id: from,v 1.5 1994/12/12 23:07:15 friedman Exp friedman $
+# $Id: from,v 1.6 1995/09/23 22:01:49 friedman Exp $
 
 # Commentary:
-
-# This script requires GNU Awk (gawk) 2.15 or later.
-
 # Code:
 
 # Name by which this script was invoked.
@@ -18,28 +15,35 @@ progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 # To prevent hairy quoting and escaping later.
 bq='`'
 eq="'"
+bs='\'
+dq='"'
 
-usage="Usage: $progname {options} {mail-file}
+# See if "\n" is interpreted by echo as a newline sequence.
+x="`echo 'foo\nbar'`"
+y='foo
+bar'
+if test "$x" = "$y"; then
+  bs='\\'
+fi
+
+usage="Usage: $progname {options} {mail-file {...}}
 
 Options are:
--D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-D, --debug                  Enable interactive debugging.
+-e, --envelope               Show message envelope instead of headers.
 -f, --format     FMT         Use FMT as the output format. The option
                              $bq--help-format$eq gives instructions for this.
--G, --gawk-debug             Show parse tree in gawk while running script.
-                             This requires that gawk be compiled with the
-                             $bq-DDEBUG$eq option, which usually isn't the case.
-                             Thus, this option is separate from $bq--debug$eq.
 -h, --help                   You're looking at it.
 -H, --help-format            Get documentation about the format of the FMT
                              argument to $bq--format$eq.
--P, --no-parse               Do not do fancy parsing of From and Date fields.
+-p, --no-parse               Do not do fancy parsing of From and Date fields.
 -u, --user       USER        Show headers of USER's spooled messages.
--v, --verbose                Be verbose.
 "
 
-format_usage="
+format_usage="$progname format usage: --format='%{{-}{n}{.m}}[header] ...' ...
+
 The FMT specifier to the $bq--format$eq option can contain literal text for
-the output, along with header specifiers in the form of
+the output, along with header specifiers in the form
 
       %{{-}{n}{.m}}Header
 
@@ -60,18 +64,29 @@ For example, given a message with headers of the form
       Date: Tue, 18 Oct 94 12:22:50 CDT
 
 here are some valid format specifiers and the output that results from them.
+($bq-|$eq indicates the results here; it is not actually printed.)
 
-      %From %Subject
-      Noah Friedman  example
+      ${dq}%From %Subject$dq
+      -| Noah Friedman  example
 
-      %-19.18From %-13.12Date %-.45Subject
-      Noah Friedman       Oct 18 12:22  example
+      ${dq}%-19.18From %-13.12Date %-.45Subject$dq
+      -| Noah Friedman       Oct 18 12:22  example
 
-      To %-19To %-13Date %20Subject
-      To nobody@gnu.ai.mit.edu Oct 18 12:22                   example
+      ${dq}To %-19To %-13Date %20Subject$dq
+      -| To nobody@gnu.ai.mit.edu Oct 18 12:22                   example
 
-      To %-19.18To %-13.12Date %-.45Subject
-      To nobody@gnu.ai.mit.  Oct 18 12:22  example
+      ${dq}To %-19.18To %-13.12Date %-.45Subject$dq
+      -| To nobody@gnu.ai.mit.  Oct 18 12:22  example
+
+      ${dq}From: %From${bs}nSubject: %Subject${bs}nDate: %Date${bs}n$dq
+      -| From: Noah Friedman
+      -| Subject: example
+      -| Date: Oct 18 12:22
+      -|
+
+If you use something like last example format specifier, you may wish to
+use the $bq--no-parse$eq option to avoid any parsing (and therefore
+truncation) of the From and Date lines.
 "
 
 # Initialize variables.
@@ -79,8 +94,7 @@ here are some valid format specifiers and the output that results from them.
 # Instead, assign them an empty value.
 FROM_PARSEP=t
 debug=
-gawk_debug=
-verbose=
+envelopep=
 
 # Usage: eval "$getopt"; value=$optarg
 # or     optarg_optional=t; eval "$getopt"; value=$optarg
@@ -143,16 +157,16 @@ while : ; do
   case $# in 0) break ;; esac
   case "$1" in
     -D | --debug | --d* )
-      debug=t
+      debug=-d
+      shift
+     ;;
+    -e | --envelope | --e* )
+      envelopep=t
       shift
      ;;
     -f | --format* | --f* )
       eval "$getopt"
       FROM_FORMAT=$optarg
-     ;;
-    -G | --gawk-debug | --g* )
-      gawk_debug='-W parsedebug'
-      shift
      ;;
     -H | --help-format | --help-* )
       echo "$format_usage" 1>&2
@@ -162,17 +176,13 @@ while : ; do
       echo "$usage" 1>&2
       exit 1
      ;;
-    -P | --no-parse | --n* )
+    -p | --no-parse | --n* )
       FROM_PARSEP=
       shift
      ;;
     -u | --user* | --u* )
       eval "$getopt"
       USER=$optarg
-     ;;
-    -v | --verbose | --v* )
-      verbose=t
-      shift
      ;;
     -- )     # Stop option processing
       shift
@@ -201,7 +211,7 @@ while : ; do
   esac
 done
 
-case "$debug" in t ) set -x ;; esac
+case "$debug" in -d ) set -x ;; esac
 
 case "${FROM_FORMAT+set}" in
   set ) : ;;
@@ -212,7 +222,6 @@ esac
 
 export FROM_FORMAT FROM_PARSEP
 
-
 case $# in
   0 )
     USER=${USER-${LOGNAME-`{ id | sed -ne 's/.*uid=[0-9]*(//
@@ -222,7 +231,7 @@ case $# in
                            || { (whoami) 2> /dev/null; }`}}
 
     for f in /var/mail /var/spool/mail /usr/spool/mail /usr/mail ; do
-      if test -d "$f" ; then
+      if test -f "$f/$USER" ; then
         spoolfile="$f/$USER"
         break
       fi
@@ -233,216 +242,329 @@ case $# in
    ;;
 esac
 
-${GAWK-gawk} $gawk_debug -f - ${1+"$@"} <<'__EOF__'
+case "$envelopep" in
+  t )
+    exec grep '^From ' ${1+"$@"}
+ ;;
+esac
 
-function initialize_variables ()
+FROM_PROGNAME=$progname
+export FROM_PROGNAME
+
+# By using a here-document to include the source of the perl script (to
+# avoid command line length limits), we usurp the normal stdin the inferior
+# process might have expected.  So dup stdin onto fd 9, and before the
+# inferior process is started, it will be reduped back onto fd 0.
+exec perl $debug $includes - ${1+"$@"} 9<&0 <<'__EOF__'
+
+&main;
+
+sub main
 {
-  NULL = "";
-  t = 1;
-  nil = 0;
+  local ($i) = 0;
 
-  re_message_delimiter = "^From .*";
-  re_whitespace = "[ \a\b\f\n\r\t\v]+";
-  re_blank_line = "(^" re_whitespace "$)|(^$)";
-  re_format_modifier = "%[0-9.-]*";
+  $from_progname = &getenv ('FROM_PROGNAME');
 
-  in_message_body_p = nil;
-  if (getenv("FROM_PARSEP") == "t")
-    hack_data = t;
-  else
-    hack_data = nil;
+  # See comments preceding perl invocation for an explanation.
+  if (! open (STDIN, "<&9"))
+    {
+      &err ("cannot recover stdin from fd 9", "$!");
+      exit (1);
+    }
 
-  exit_status = 0;
+  close (9);
+
+  &initialize_variables ();
+  &make_important_header_vector (&getenv ("FROM_FORMAT"));
+
+  $i = 0;
+  foreach $file (@ARGV)
+    {
+      if ($file ne "-" && ! -r $file)
+        {
+          # Set $! appropriately.
+          open (F, "<$file");
+          &err ("$file", "$!.");
+          close (F);
+
+          splice (@ARGV, $i, 1);
+          $exit_status = 1;
+        }
+      $i++;
+    }
+
+  foreach $file (@ARGV)
+    {
+      &process_file ($file);
+    }
+
+  exit ($exit_status);
 }
 
-function cons_important_header_array (format,     fstring, format_modifier, tmp)
+sub err
 {
-  i = 0;
-  fstring = format;
-  if (match(fstring, "^[^%]*"))
-    important_header_array["prefix"] = substr(fstring, RSTART, RLENGTH);
+  printf (STDERR join(": ", $from_progname, @_) . "\n");
+}
 
-  while (match(fstring, re_format_modifier "[^%]*"))
+sub getenv
+{
+  local ($v) = @_;
+
+  if (defined ($ENV{$v}))
     {
-      i++;
-      format_modifier = "";
-      tmp = substr(fstring, RSTART, RLENGTH);
-      fstring = substr (fstring, RSTART + RLENGTH);
-      if (match(tmp, re_format_modifier))
+      return $ENV{$v};
+    }
+  return '';
+}
+
+sub initialize_variables
+{
+  $t = 1;
+  $nil = 0;
+
+  # This enables multi-line pattern matching on a string in perl.
+  $* = 1;
+
+  # This is perhaps a little too specific, but some MTAs do not
+  # quote 'From ' at the beginning of a line in the body, especially
+  # when writing to archive files.
+  $re_message_delimiter = '^From [^ ]+ ... ... .. ..:..';
+  $re_whitespace = '[ \a\b\f\n\r\t\v]+';
+  # According to RFC822, "The field-name must be composed of printable
+  # ASCII characters (i.e. characters that have decimal values between 33
+  # and 126, except colon)", i.e. any chars except ctl chars, space, or colon.
+  $re_header_name = '[][!"#$%&\'()*+,-./0-9;<=>?@A-Z\\^_`a-z{|}~]+';
+  $re_blank_line = '(^' . $re_whitespace . '$)|(^$)';
+  $re_format_modifier = '%[0-9.-]*';
+
+  $in_message_body_p = $nil;
+
+  $hack_header_function{'FROM'} = 'hack_From_data';
+  $hack_header_function{'DATE'} = 'hack_Date_data';
+
+  if (&getenv ("FROM_PARSEP") eq "t")
+    {
+      $hack_data = $t;
+    }
+  else
+    {
+      $hack_data = $nil;
+    }
+
+  undef (%important_header_vector);
+  undef (@important_header_order);
+
+  $exit_status = 0;
+}
+
+sub make_important_header_vector
+{
+  local ($format) = @_;
+  local ($fstring, $modifier, $tmp, $i);
+  local ($re_token) = "$re_format_modifier" . "[^%]*";
+
+  $fstring = $format;
+  $i = 0;
+  $fstring = $format;
+  $important_header_vector{'prefix'} = '';
+  if ($fstring =~ /^[^%]*/o)
+    {
+      $important_header_vector{'prefix'} = $&;
+    }
+
+  while ($fstring =~ /$re_token/o)
+    {
+      $i++;
+      $modifier = "";
+      $tmp = $&;
+      $fstring = $';
+
+      if ($tmp =~ /$re_format_modifier/o)
         {
-          format_modifier = substr(tmp, RSTART, RLENGTH);
-          tmp = substr(tmp, RSTART + RLENGTH);
-          if (match(tmp, re_whitespace))
+          $modifier = $&;
+          $tmp = $';
+          if ($tmp =~ /$re_header_name/o)
             {
-              trailing_whitespace = substr(tmp, RSTART);
-              tmp = substr(tmp, 0, RSTART - 1);
+              $tmp = $&;
+              $trailing_whitespace = $';
             }
           else
-            trailing_whitespace = "";
+            {
+              $trailing_whitespace = "";
+            }
         }
-      important_header_array[tmp] = format_modifier "s" trailing_whitespace;
-      important_header_order[i] = tmp;
+      # Make header name all upper case to distinguish from extraneous data
+      # like the `prefix' element.
+      $tmp = "\U$tmp";
+      $important_header_vector{$tmp} = $modifier . "s" . $trailing_whitespace;
+      $important_header_order[$i] = $tmp;
     }
 }
 
-function add_header (line, header_array,    header, data)
+sub process_file
 {
-  if (match(line, "^[^ :]*:") == 0)
-    return;
-  header = substr(line, RSTART, RLENGTH - 1);
+  local ($file) = @_;
+  local (%headers);
 
-  if (header in important_header_array)
+  if (! open (F, "<$file"))
     {
-      data = substr (line, RSTART + RLENGTH + 1);
-      if (hack_data && header == "From")
-        data = hack_From_data(data);
-      if (hack_data && header == "Date")
-        data = hack_Date_data(data);
-      header_array[header] = data;
+      &err ("open", $file, "$!");
+      return;
+    }
+
+  while (<F>)
+    {
+      chop $_;
+
+      # If we hit an RFC822 message delimiter, clean up in preparation for
+      # getting info about the next message.
+      if ($_ =~ /$re_message_delimiter/o)
+        {
+          undef (%headers);
+          $in_message_body_p = $nil;
+          next;
+        }
+
+      # If we're not in the message body, and we come upon a blank line,
+      # we're at the end of the headers for this message.
+      if ( $_ =~ /$re_blank_line/o && ! $in_message_body_p )
+        {
+          &print_headers (%headers);
+          $in_message_body_p = $t;
+          next;
+        }
+
+      if ( $in_message_body_p )
+        {
+          next;
+        }
+
+      &add_header ($_, 'headers');
+    }
+  close (F);
+}
+
+sub add_header
+{
+  local ($line, $header_vector_name) = @_;
+  local ($header, $data);
+
+  if (! ($line =~ /^[^ :]*: /o))
+    {
+      return;
+    }
+
+  $header = "\U$&";
+  # Get rid of trailing `: ';
+  substr ($header, -2) = '';
+
+  if (defined ($important_header_vector{$header}))
+    {
+      $data = $';
+      if ($hack_data && defined ($hack_header_function{$header}))
+        {
+          local ($fn) = $hack_header_function{$header};
+          $data = &$fn ($data);
+        }
+
+      eval "\$$header_vector_name" . "{\$header} = \$data";
     }
 }
 
 # Try to extract real name from From: line when possible
-function hack_From_data (data)
+sub hack_From_data
 {
+  local ($data) = @_;
+
   # From: foobar@host (real name)
   # From: "real name" <foobar@host>
-  if (match(data, "\\([^)]+\\)|\"[^\"]+\""))
+  if ($data =~ /\([^)]+\)|(\"[^\"]+\")/o)
     {
-      data = substr(data, RSTART + 1, RLENGTH - 2);
-      return data;
+      $data = $&;
+      # Delete leading and trailing name delimiters (quotes or parens)
+      substr ($data, 0, 1) = '';
+      substr ($data, -1) = '';
+      return $data;
     }
+
   # From: "" <foobar@host>
-  if (match(data, "\"\"[^<]*<[^>]*>"))
+  if ($data =~ /\"\"[^<]*<[^>]*>/o)
     {
-      match(data, "<[^>]*>");
-      data = substr(data, RSTART + 1, RLENGTH - 2);
-      return data;
+      $data =~ /"<[^>]*>"/;
+      $data = $&;
+      substr($data, 0, 1) = '';
+      substr($data, -1) = '';
+      return $data;
     }
+
   # From: real name <foobar@host>
-  if (match(data, "^[^<]+"))
+  if ($data =~ /^[^<]+/o)
     {
-      data = substr(data, RSTART, RLENGTH);
-      return data;
+      $data = $&;
+      chop $data;
+      return $data;
     }
-  return data;
+
+  return $data;
 }
 
 # Prettify date
-function hack_Date_data (data,   fields, time)
+sub hack_Date_data
 {
-  num_fields = split(data, fields, re_whitespace);
+  local ($data) = @_;
+  local (@fields, $time, $maxfield, $n);
+
+  @fields = split(/$re_whitespace/o, $data);
+  $maxfield = $#fields;
+
   # Some dates don't have the name of the day of the week at the
   # beginning or the timezone at the end.
-  n = 0;
-  if (num_fields == 5 || num_fields == 4) n = -1;
-  split(fields[n + 5], time, ":");
-  return sprintf("%s %-2s %2s:%-2s", fields[n + 3], fields[n + 2], time[1], time[2]);
+  $n = 0;
+  if ($maxfield == 4 || $maxfield == 3)
+    {
+      $n = -1;
+    }
+  @time = split (/:/, $fields[$n + 4]);
+
+  return sprintf("%s %-2.2d %2.2d:%-2.2d",
+                 $fields[$n + 2],
+                 $fields[$n + 1],
+                 $time[0],
+                 $time[1]);
 }
 
-function delete_array (array,   array_index)
+sub print_headers
 {
-  for (array_index in array)
-    delete array[array_index];
-}
+  local (%header_vector) = @_;
+  local ($format, $header, $i);
 
-function array_length (a,      l, i)
-{
-  l = 0;
-  for (i in a)
-    l++;
-  return l;
-}
+  $i = 1;
+  printf ("%s", $important_header_vector{'prefix'});
 
-function print_headers (header_array,    format, header, i)
-{
-  i = 1;
-  printf("%s", important_header_array["prefix"]);
   while (1)
     {
-      if (!(i in important_header_order))
+      if (! (defined ($important_header_order[$i])))
         {
-          print "";
+          print "\n";
           return;
         }
-      header = important_header_order[i];
-      printf(important_header_array[header], header_array[header]);
-      i++;
-    }
-}
+      $header = $important_header_order[$i];
 
-function file_readable_p (file,     string, status)
-{
-  string = "test -r " file;
-  status = system(string);
-  close(string);
-  if (status == 0)
-    return 1;
-  return 0;
-}
-
-function getenv (var)
-{
-  if (var in ENVIRON)
-    return ENVIRON[var];
-  return NULL;
-}
-
-function putenv (var, value)
-{
-  ENVIRON[var] = value;
-}
-
-BEGIN {
-  initialize_variables();
-  cons_important_header_array(getenv("FROM_FORMAT"));
-
-  delete ARGV[0];
-  for (i in ARGV)
-    {
-      if (! (ARGV[i] == "-" || file_readable_p(ARGV[i])))
+      $format = $important_header_vector{$header};
+      if ($format =~ /\\/o)
         {
-          printf("from: cannot read file `%s'\n", ARGV[i]) > "/dev/stderr";
-          delete ARGV[i];
-          exit_status = 1;
+          eval "\$format = \"$important_header_vector{$header}\"";
         }
+
+      printf ($format, $header_vector{$header});
+      $i++;
     }
-  if (array_length(ARGV) == 0) exit exit_status;
-}
-
-{
-  # If we hit an RFC822 message delimiter, clean up in preparation for
-  # getting info about the next message.
-  if ( $0 ~ re_message_delimiter )
-    {
-      delete_array(headers);
-      in_message_body_p = nil;
-      next;
-    }
-
-  # If we're not in the message body, and we come upon a blank line,
-  # we're at the end of the headers for this message.
-  if ( $0 ~ re_blank_line && ! in_message_body_p )
-    {
-      print_headers(headers);
-      in_message_body_p = t;
-      next;
-    }
-
-  if ( in_message_body_p )
-    next;
-
-  add_header($0, headers);
-}
-
-END {
-  exit exit_status;
 }
 
 __EOF__
 
 # local variables:
-# mode: awk
+# mode: perl
 # eval: (auto-fill-mode 1)
 # end:
 
