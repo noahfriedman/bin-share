@@ -1,6 +1,6 @@
-#!/usr/local/gnu/bin/bash
+#!/bin/sh
 # ns, 14-Aug-91 Noah Friedman <friedman@prep.ai.mit.edu>
-# Last updated 30-Sep-93
+# $Id$
 #
 # A front end for nslookup(1) to provide more access to the interactive
 # features on the command line.  It also does some smart manipulation of
@@ -15,6 +15,13 @@
 #
 # Public domain.
 #
+# TODO: write this in v7 sh.
+
+# Feed this script to bash if sh is not already bash in disguise.
+case "${BASH_VERSION+set}" in
+  set ) : ;;
+  * ) exec ${BASH-bash} $0 ${1+"$@"} ;;
+esac
 
 function usage ()
 {
@@ -28,19 +35,19 @@ Usage: ${progname} {-D} {-q querytype} {-s server} [-t tty]|[host|ipaddr] ...
 
    Arguments in [] are required.  Those in {} are optional.
 
-   default querytype is "${querytype}" 
+   default querytype is "${querytype}"
 
    querytype can be one of: ANY CNAME HINFO MX NS PTR SOA
    recordtype can be one of: a d h m s t
 
    if -t option is specified, the remote host specified in /etc/utmp for
    that tty will be looked up.  Note that this doesn't work well since most
-   hostnames are longer than the 16 char limit in utmp. 
+   hostnames are longer than the 16 char limit in utmp.
 
    For a good time, type "man nslookup"
 
 EOF
-    exit 1  
+    exit 1
 }
 
 function main ()
@@ -55,7 +62,7 @@ function main ()
     exit 0
 }
 
-# Change your default server (if you want to) by changing the 
+# Change your default server (if you want to) by changing the
 # variable ``name_server''.  You can also change the default query type.
 function initialize_variables ()
 {
@@ -75,13 +82,13 @@ function parse_command_args ()
  local tty_arg
 
     # unset option variables to make sure they weren't accidentally
-    # exported 
+    # exported
     unset debug
 
     # If you add new commands be sure to change the wildcards below to make
     # sure they are unambiguous (i.e. only match one possible long option)
     # Be sure to show at least one instance of the full long option name to
-    # document what the long option is canonically called. 
+    # document what the long option is canonically called.
     while [ $# -gt 0 ]; do
        case z$1 in
           z-D | z--debug | z--d* )
@@ -131,7 +138,7 @@ function parse_command_args ()
 #    Long option syntax is `--foo=bar' or `--foo bar'.  3rd argument ARG
 #    won't get used if first long option syntax was used.  If 4 arg
 #    OPTIONAL is non-empty, option isn't required to have an argument; if
-#    the argument is missing, VARIABLE is set to the empty value. 
+#    the argument is missing, VARIABLE is set to the empty value.
 # Returns number of positions caller should shift
 function get_option_argument ()
 {
@@ -197,7 +204,7 @@ function get_hostlist_hosts ()
        list="${hostlist}"
     fi
 
-    echo "${list}"    
+    echo "${list}"
 }
 
 function reverse ()
@@ -218,7 +225,7 @@ function do_nslookup ()
 {
  local set_name_server_str=""
  local host_str=""
- 
+
     if [ -n "${recordtype}" ]; then
        ls_str="ls -${recordtype} "
        ns_output_regexp="^ .*"
@@ -233,7 +240,7 @@ function do_nslookup ()
     for host in $* ; do
        host_str="${host_str}\n${ls_str}${host}"
     done
-      
+
     ns_string="${set_name_server_str}set q=${querytype}${host_str}"
 
     echo -e "${ns_string}" | nslookup 2>&1 | egrep "${ns_output_regexp}"
