@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2000-01-14
 
-# $Id: gnuedit,v 1.2 2000/01/28 04:07:18 friedman Exp $
+# $Id: gnuedit,v 1.3 2000/01/28 17:13:09 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@
 
 # Code:
 
-exec ${PERL-perl} -wx "$0" ${1+"$@"}
+exec ${PERL-perl} -wSx "$0" ${1+"$@"}
 #!perl
 
 use 5.003;
@@ -253,8 +253,11 @@ sub spawn (@)
 # Return the directory name where file resides.
 sub file_directory ($)
 {
-  return "." unless (index ($_[0], "/") >= $[);
-  $_[0] =~ s|/[^/]*$||o;
+  # modify a copy of the argument.  Editing $_[0] directly would affect the
+  # original value.
+  my $file = shift;
+  return "." unless (index ($file, "/") >= $[);
+  $file =~ s|/[^/]*$||o;
 }
 
 # This function assumes process is running as root at can change uids
