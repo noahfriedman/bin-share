@@ -1,246 +1,226 @@
-#!/usr/local/gnubin/bash
-# ns, 14-Aug-91 Noah Friedman <friedman@prep.ai.mit.edu>
-# Last updated 30-Sep-93
-#
-# A front end for nslookup(1) to provide more access to the interactive
-# features on the command line.  It also does some smart manipulation of
-# arguments (like automatically twiddling IP addresses when doing PTR
-# queries).  I don't have time to document all the bugs^H^H^H^Hfeatures.  I
-# suggest you read through the script here, and read the manual page for
-# nslookup if you haven't already.
-#
-# Old versions of bash may not be able to parse this script.  I've only
-# tested it under 1.09 and later.  Also, it requires you to have a working
-# nslookup.
-#
-# Public domain.
-#
+#!/bin/sh
+# ns --- front end for nslookup
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1991-08-14
+# Last modified: 1994-03-15
+# Public domain
 
-function usage ()
-{
-    if [ $# -gt 0 ]; then
-       echo -e "${progname}: $*\n" 1>&2
-    fi
+# Commentary:
 
-    cat 1>&2 <<EOF
-Usage: ${progname} {-D} {-q querytype} {-s server} [-t tty]|[host|ipaddr] ...
-       ${progname} [-ls recordtype] [-s server] [domain] ...
+# Not finished yet.
 
-   Arguments in [] are required.  Those in {} are optional.
+# Code:
 
-   default querytype is "${querytype}" 
+# Name by which this script was invoked. 
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 
-   querytype can be one of: ANY CNAME HINFO MX NS PTR SOA
-   recordtype can be one of: a d h m s t
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
 
-   if -t option is specified, the remote host specified in /etc/utmp for
-   that tty will be looked up.  Note that this doesn't work well since most
-   hostnames are longer than the 16 char limit in utmp. 
+usage="Usage: $progname {options} [host|ipaddr]
 
-   For a good time, type "man nslookup"
+Options are:
+-D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-h, --help                   You're looking at it.
+-l, -ls, --list RTYPE        Any of: a d h m s t
+-q, --querytype QTYPE        Any of: ANY CNAME HINFO MX NS PTR SOA
+-s, --server    SERVER       Use SERVER as the default nameserver.
+-t, --tty       TTY          Resolve host found in utmp for tty's ${bq}rhost$eq
+                             field.  (This doesn't work well since most
+                             hostnames exceed the 16 char limit in utmp.)
+-v, --verbose                Be verbose.
+"
 
-EOF
-    exit 1  
-}
-
-function main ()
-{
-    initialize_variables "$@"
-    test $# -gt 0 || usage
-    parse_command_args "$@"
-
-    test -n "${debug+set}" && set -x
-
-    do_nslookup "$(get_hosts)"
-    exit 0
-}
-
-# Change your default server (if you want to) by changing the 
-# variable ``name_server''.  You can also change the default query type.
-function initialize_variables ()
-{
-    progname="${0##*/}"       # equivalent to "basename $0"
-    name_server=""
-    querytype="PTR"
-
-    bq="\`"  # To prevent hairy quoting and escaping later.
-    eq="'"
-
-    unset hostlist ttys ls_str recordtype
-}
-
-function parse_command_args ()
-{
- local orig_number_options=$#
- local tty_arg
-
-    # unset option variables to make sure they weren't accidentally
-    # exported 
-    unset debug
-
-    # If you add new commands be sure to change the wildcards below to make
-    # sure they are unambiguous (i.e. only match one possible long option)
-    # Be sure to show at least one instance of the full long option name to
-    # document what the long option is canonically called. 
-    while [ $# -gt 0 ]; do
-       case z$1 in
-          z-D | z--debug | z--d* )
-             debug=t
-             shift
-            ;;
-          z-h | z--help | z--h* )
-             usage
-            ;;
-          z-ls | z--list* | z--l* )
-             get_option_argument recordtype "$1" "$2"
-             shift $?
-             recordtype="$(echo ${recordtype} | tr '[A-Z]' '[a-z]')"
-             querytype="ANY"  # to prevent reverse-PTRing address
-            ;;
-          z-q | z--querytype* | z--q* )
-             get_option_argument querytype "$1" "$2"
-             shift $?
-             querytype="$(echo ${querytype} | tr '[a-z]' '[A-Z]')"
-            ;;
-          z-s | z--server* | z--s* )
-             get_option_argument name_server "$1" "$2"
-             shift $?
-            ;;
-          z-t | z--tty* | z--t* )
-             get_option_argument tty_arg "$1" "$2"
-             shift $?
-             ttys="${ttys} $(echo ${tty_arg} | sed 's/\/dev\///')"
-            ;;
-          z-* )
-             usage "${bq}${1}${eq} is not a valid option."
-            ;;
-          *)
-             hostlist="${hostlist} $1"
-             shift
-            ;;
-       esac
+# Clever way to save arguments whilst preserving quoting.
+# Note that only one set of args can be saved at a time.
+# Usage: eval "$save_current_args"
+#        eval "$restore_saved_args"
+save_current_args='
+  {
+    _saved_args=
+    while : ; do
+      case $# in 0 ) break ;; esac
+      eval _saved_args$#=\$1
+      _saved_args="$_saved_args \"\$_saved_args$#\""
+      shift
     done
+    eval "$restore_saved_args"
+  }'
+restore_saved_args='
+  {
+    eval '\''{ eval set fnord $_saved_args ; }'\''
+    shift 
+  }'
 
-    # Return number of shifted arguments so calling function can shift
-    # appropriate amount.
-    return $[ orig_number_options - $# ]
-}
-
-# Usage: get_option_argument VARIABLE OPTION ARG {OPTIONAL}
-#    where VARIABLE is shell variable that will be set to the value ARG.
-#    Long option syntax is `--foo=bar' or `--foo bar'.  3rd argument ARG
-#    won't get used if first long option syntax was used.  If 4 arg
-#    OPTIONAL is non-empty, option isn't required to have an argument; if
-#    the argument is missing, VARIABLE is set to the empty value. 
-# Returns number of positions caller should shift
-function get_option_argument ()
-{
- local variable="$1"
- local option="$2"
- local arg="$3"
- local arg_optional="$4"
-
-    # All long options must be at least 3 characters long (--o*), whereas
-    # short options are only two chars (-o) and arguments are always
-    # separate.
-    if [ ${#option} -ge 3 -a "z${option#*=}" != "z${option}" ]; then
-       arg="${option#*=}"  # Strip off anything before and including `=' char
-       eval ${variable}=\'"${arg}"\'
-       return 1
-    else
-       if [ -z "${arg}" -a -z "${arg_optional}" ]; then
-          usage "option ${bq}${option}${eq} requires argument."
-       fi
-       eval ${variable}=\'"${arg}"\'
-       return 2
-    fi
-}
-
-function get_hosts ()
-{
- local h1="$(get_tty_hosts)"
- local h2="$(get_hostlist_hosts)"
-
-    echo ${h1} ${h2}
-}
-
-function get_tty_hosts ()
-{
- local tty
- local list=""
- local ptr_cmd=":"
-
-    if [ "${querytype}" = "PTR" -o "${querytype}" = "SOA" ]; then
-        ptr_cmd='addr="$(reverse ${addr})"'
-    fi
-
-    for tty in ${ttys} ; do
-       addr="$(who | fgrep ${tty} \
-                   | sed -n '1{s/^[^(]*(*\([^):]*\)[):].*/\1/;s/[^@]*@//;p;}')"
-       eval ${ptr_cmd}     # I should be shot for doing this.
-
-       list="${list} ${addr}"
-    done
-
-    echo "${list}"
-}
-
-function get_hostlist_hosts ()
-{
- local list=""
-
-    if [ "${querytype}" = "PTR" -o "${querytype}" = "SOA" ]; then
-       for host in ${hostlist} ; do
-          list="${list} $(reverse ${host})"
-       done
-    else
-       list="${hostlist}"
-    fi
-
-    echo "${list}"    
-}
-
-function reverse ()
-{
- local IFS="."
- local addr=""
- local arg=""
-
-    set -- $1
-    for arg in "$@" ; do
-       addr="${arg}.${addr}"
-    done
-
-    echo "${addr}in-addr.arpa"
-}
-
-function do_nslookup ()
-{
- local set_name_server_str=""
- local host_str=""
- 
-    if [ -n "${recordtype}" ]; then
-       ls_str="ls -${recordtype} "
-       ns_output_regexp="^ .*"
-    else
-       ns_output_regexp="[Aa]uthoritative|=|(\*\*\*)"
-    fi
-
-    if [ -n "${name_server}" ]; then
-       set_name_server_str="server ${name_server}\n"
-    fi
-
-    for host in $* ; do
-       host_str="${host_str}\n${ls_str}${host}"
-    done
-      
-    ns_string="${set_name_server_str}set q=${querytype}${host_str}"
-
-    echo -e "${ns_string}" | nslookup 2>&1 | egrep "${ns_output_regexp}"
-}
-
-main "$@"
-
+# Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
 #
-# eof
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument ARG
+# won't get used if first long option syntax was used. 
+# If 3rd argument OPTIONAL is set, then 2nd may be empty without resulting
+# in an error (i.e. option argument is optional)
 #
+# Returns number of positions caller should shift.
+# If retval = 3, caller should exit.
+get_option_argument='
+  {
+    option="$1" arg="$2" arg_optional="$3" shift_num=2
+    case "$option" in
+      --*=* )
+        arg=`echo $option | sed -e "s/^[^=]*=//"` 
+        shift_num=1
+       ;;
+    esac
+    case "$arg" in
+      "" )
+        case "$arg_optional" in
+          "" )
+            case "$option" in 
+              --*=* ) option=`echo $option | sed -e "s/=.*//"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$usage" 1>&2
+            exit 3
+           ;;
+        esac
+        exit 1
+       ;;  
+    esac
+    echo "$arg"
+    exit $shift_num
+  }'
+
+# Some bourne shells don't allow a numeric argument to `shift'.
+# Usage: eval "shift_num=n; $shift_n_times"
+shift_n_times='
+  {
+    while : ; do
+      case "$shift_num" in 0 | "" ) break ;; esac
+      shift_num=`expr $shift_num - 1`
+      shift
+    done
+  }'
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+hostlist=
+ls_str=
+ns_output_regexp='[Aa]uthoritative|=|(\*\*\*)'
+ns_server_str=
+server=
+querytype=
+recordtype=
+ttys=
+verbose=
+
+# Parse command line arguments. 
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character. 
+while test $# != 0; do
+  case "$1" in 
+    -D | --debug | --d* )
+      debug=t
+      shift
+     ;;
+    -h | --help | --h )
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -l | -ls | --list* | --l* )
+      recordtype=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+
+      case "$recordtype" in *[A-Z]* )
+        sedconv='y/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/'
+        recordtype=`echo "$recordtype" | sed -e "$sedconv"`
+       ;;
+      esac
+
+      ls_str="ls -$recordtype "
+      ns_output_regexp='^ .*'
+     ;;
+    -q | --querytype* | --q* )
+      querytype=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+
+      case "$querytype" in *[a-z]* )
+        sedconv='y/abcdefghijklmnopqrstuvwxyz/ABCDEFGHIJKLMNOPQRSTUVWXYZ/'
+        querytype=`echo "$querytype" | sed -e "$sedconv"`
+       ;;
+      esac
+     ;;
+    -s | --server* | --s* )
+      server=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+
+      # This string, when set, needs a newline at the end.
+      ns_server_str="server $server
+"
+     ;;
+    -t | --tty* | --t* )
+      tty=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+
+      case "$tty" in /dev/* )
+        tty=`echo $tty | sed -e 's/\/dev\///'` ;;
+      esac
+      addr=`who \
+            | fgrep $tty \
+            | sed -ne '1{
+                         s/.*(//
+                         s/[:)].*//
+                         s/[^@]*@//
+                         p
+                        }'`
+      case "$addr" in
+        '' ) echo "$progname: warning: No remote host in utmp for $tty" 1>&2 ;;
+        * ) hostlist="$hostlist $addr" ;;
+      esac
+     ;;
+    -v | --verbose | --v* )
+      verbose=t
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    --*=* )
+      arg=`echo $1 | sed -e 's/=.*//'`
+      echo "$progname: unknown option $bq$arg$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -* )
+      echo "$progname: unknown option $bq$1$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+case "$debug" in t ) set -x ;; esac
+
+hostlist="$hostlist $*"
+
+munged_hostlist=
+for host in $hostlist ; do
+  
+done
+
+# ns ends here
