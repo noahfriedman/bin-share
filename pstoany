@@ -1,5 +1,5 @@
 #!/bin/sh
-# pstogif --- generate GIF images from PostScript images using netpbm tools
+# pstogif --- convert PostScript images to GIF
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1994-10-17
 # Public domain.
@@ -7,7 +7,17 @@
 # $Id$
 
 # Commentary:
+
+# This program uses Ghostscript to convert postscript files to gif format.
+# If ghostscript was not installed with support for writing gif-format
+# files directly, other intermediary formats can be used instead, such as
+# ppm, pgm, pbm, etc.  In that case, the `pbmplus' or `netpbm' utilities
+# need to be in your path so this program can access them.
+
 # Code:
+
+# This string is expanded by RCS automatically when this file is checked out.
+rcs_revision='$Revision$'
 
 # Name by which this script was invoked.
 progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
@@ -16,20 +26,104 @@ progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 bq='`'
 eq="'"
 
-usage="Usage: $progname {options}
+# normal font resolution in dots per inch
+defres=72
+xres=$defres
+yres=$defres
+
+# Magnification step
+xmag=1
+ymag=1
+
+format=gif8
+
+revision=`set fnord $rcs_revision; echo $3`
+
+usage="Usage: $progname {options} file1.ps {file2.ps {...}}
+(Version $revision)
 
 Options are:
 -D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
                              Implies --verbose.
+-f, --force                  Overwrite existing .gif or other intermediary
+                             format files without notification.  By
+                             default, this program refuses to overwrite any
+                             existing files.
 -h, --help                   You're looking at it.
--v, --verbose                Allow verbose output from inferior processes.
+-i, --intermediary-format    Specify FMT as the ${bq}device$eq (i.e. output
+                      FMT    format) for Ghostscript.  Currently recognized
+                             formats include: gif8 gifmono ppm ppmraw
+                             The default is $bq$format$eq.
+-m, --magnify         STEP   Magnify x and y sizes by a factor of STEP.
+                             Default is xmag=$xmag, ymag=$ymag
+-q, --quiet                  Do not report progress during conversion.
+-r, --resolution      RES    Input image resolution for both x and y
+                             coordinates, in dots per inch.  You probably
+                             never need to adjust this.
+                             Default is xres=$xres, yres=$yres
+-V, --version                Show version number of this program & exit.
+-v, --verbose                Report progress.  This is the default.
+-X, --x-resolution    XRES   Like $bq--resolution$eq, but only change x value.
+-x, --x-magnification XSTEP  Like $bq--magnify$eq, but only change x factor.
+-Y, --y-resolution    YRES   Like $bq--resolution$eq, but only change y value.
+-y, --y-magnification YSTEP  Like $bq--magnify$eq, but only change y factor.
 "
+
+# Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
+#
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument ARG
+# won't get used if first long option syntax was used.
+# If 3rd argument OPTIONAL is set, then 2nd may be empty without resulting
+# in an error (i.e. option argument is optional)
+#
+# Returns number of positions caller should shift.
+# If retval = 3, caller should exit.
+get_option_argument='
+  {
+    option="$1" arg="$2" arg_optional="$3" shift_num=2
+    case "$option" in
+      --*=* )
+        arg=`echo $option | sed -e "s/^[^=]*=//"`
+        shift_num=1
+       ;;
+    esac
+    case "$arg" in
+      "" )
+        case "$arg_optional" in
+          "" )
+            case "$option" in
+              --*=* ) option=`echo $option | sed -e "s/=.*//"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$usage" 1>&2
+            exit 3
+           ;;
+        esac
+        exit 1
+       ;;
+    esac
+    echo "$arg"
+    exit $shift_num
+  }'
+
+# Some bourne shells don't allow a numeric argument to `shift'.
+# Usage: eval "shift_num=n; $shift_n_times"
+shift_n_times='
+  {
+    while : ; do
+      case "$shift_num" in 0 | "" ) break ;; esac
+      shift_num=`expr $shift_num - 1`
+      shift
+    done
+  }'
 
 # Initialize variables.
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
 debug=
-verbose=
+force=
+verbose=t
+gs_quiet=
 
 # Parse command line arguments.
 # Make sure that all wildcarded options are long enough to be unambiguous.
@@ -41,16 +135,79 @@ while : ; do
   case "$1" in
     -D | --debug | --d* )
       debug=t
-      verbose=-verbose
+      verbose=t
+      gs_quiet=
+      shift
+     ;;
+    -f | --force | --f* )
+      force=t
       shift
      ;;
     -h | --help | --h )
       echo "$usage" 1>&2
-      exit 1
+      exit 0
      ;;
-    -v | --verbose | --v* )
-      verbose=-verbose
+    -i | --intermediary-format* | --i* )
+      format=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -m | --magnification* | --magnify* | --magstep* | --m* )
+      mag=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+
+      xmag=$mag
+      ymag=$mag
+     ;;
+    -q | --quiet | --q* )
+      verbose=
+      gs_quiet=-q
       shift
+     ;;
+    -r | --resolution* | --re* )
+      res=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+
+      xres=$res
+      yres=$res
+     ;;
+    -V | --version | --vers* )
+      echo "$progname version $revision"
+      exit 0
+     ;;
+    -v | --verbose | --verb* )
+      verbose=t
+      gs_quiet=
+      shift
+     ;;
+    -X | --x-resolution* | --x-r* )
+      xres=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -Y | --y-resolution* | --y-r* )
+      yres=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -x | --x-magnification* | --x-magnify* | --x-magstep* | --x-m* )
+      xmag=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -y | --y-magnification* | --y-magnify* | --y-magstep* | --y-m* )
+      ymag=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
      ;;
     -- )     # Stop option processing
       shift
@@ -75,35 +232,156 @@ done
 case "$debug" in t ) set -x ;; esac
 case "$verbose" in '' ) exec 1> /dev/null ;; esac
 
-for psfile in ${1+"$@"}; do
-   echo "$progname: converting $psfile"
+bcinit='scale=4
+'
 
-   pstopnm $verbose \
-           -ppm \
-           -nocrop \
-           -xborder 0 \
-           -yborder 0 \
-           "$psfile"
+case "$format" in
+  gif8 | gifmono | ppm | ppmraw ) : ;;
+  * )
+    echo "$progname: unknown intermediary format $bq$format$eq." 1>&2
+    exit 1
+   ;;
+esac
 
-   file_basename=`basename $psfile .ps`
+file_exists_hint_given_p=
 
-   set fnord "$file_basename"*.ppm
-   shift
+for file in ${1+"$@"}; do
+  basename=`echo "$file" \
+             | sed -e 's/\/*$//
+                       s/.*\///
+                       s/\..*//'`
 
-   case $# in
-     1) 
-       newname=`echo "$1" | sed -e 's/001\.ppm$/.ppm/'`
-       mv "$1" "$newname"
-       set fnord "$newname"
-       shift
-      ;;
-   esac
+  case "$force" in
+    t ) : ;;
+    * )
+      set fnord `ls -1d "$basename"*".$format" "$basename.gif" 2> /dev/null`
+      shift
+      case $# in
+        0 ) : ;;
+        * )
+          echo "$progname: skipping conversion of $bq$file$eq" 1>&2
 
-   for f in ${1+"$@"}; do
-     gif=`basename $f .ppm`.gif
-     ppmtogif "$f" > "$gif" && rm -f "$f"
-     echo "$progname: created $gif"
-   done
+          case "$file_exists_hint_given_p" in
+            t ) : ;;
+            * )
+              file_exists_hint_given_p=t
+              sed -e "s/^/$progname: /" 1>&2 <<__EOF__
+The following files in the current directory might get overwritten
+as a result of running this program.  If desired, rename or remove
+them, or just use the $bq-f$eq ($bq--force$eq) option.
+__EOF__
+             ;;
+          esac
+
+          echo
+          ls -lsd "$basename"*".$format" "$basename.gif" 2> /dev/null
+          echo
+          continue
+         ;;
+      esac
+     ;;
+  esac
+
+  echo "$progname: converting $file"
+
+  # Get the bounding box coordinates.
+  # If the first bounding box instructions say "(atend)", then search to
+  # the end of the file for the last occurenceof a bounding box.
+  set fnord `sed -ne '
+               /^%%BoundingBox:/{
+                 /(atend)/!{
+                   p
+                   q
+                 }
+                 b l
+               }
+               d
+               :l
+               /^%%BoundingBox:/h
+               $b e
+               n
+               b l
+               :e
+               x
+               p
+               q
+             ' "$file"`
+
+  case $# in
+    1 )
+      echo "$progname: warning: no BoundingBox found in $bq$arg$eq" 1>&2
+      # Guess.  Assume image area fits in a 8.5x11 sheet.
+      llx=0
+      lly=0
+      urx=`echo "$bcinit ($xres * 8.5)" | bc`
+      ury=`echo "$bcinit ($yres * 11)"  | bc`
+      echo "$progname: warning: guessing %%BoundingBox $llx $lly $urx $ury" 1>&2
+     ;;
+    * )
+      # Args hopefully now: fnord %%BoundingBox llx lly urx ury
+      llx=$3; urx=$5
+      lly=$4; ury=$6
+     ;;
+  esac
+  shift $#
+
+  xsize=`echo "$bcinit ($urx - $llx) * $xmag" \
+          | bc \
+          | sed -e 's/\..*//'`
+  ysize=`echo "$bcinit ($ury - $lly) * $ymag" \
+          | bc \
+          | sed -e 's/\..*//'`
+
+  xres=`echo "$bcinit ($xres * $xmag)" | bc`
+  yres=`echo "$bcinit ($yres * $ymag)" | bc`
+
+  echo $progname: gs -sDEVICE=${format} \
+                     -sOutputFile="$basename%03d.$format" \
+                     -g${xsize}x${ysize} \
+                     -r${xres}x${yres} \
+                     $gs_quiet "$file"
+
+  echo "$llx neg $lly neg translate" \
+   | gs -sDEVICE=${format} \
+        -sOutputFile="$basename%03d.$format" \
+        -g${xsize}x${ysize} \
+        -r${xres}x${yres} \
+        $gs_quiet - "$file"
+
+  set fnord `ls -1d "$basename"*".$format" 2> /dev/null`
+  shift
+
+  case $# in
+    0 )
+      echo "$progname: No $basename.$format files were created!" 1>&2
+      continue
+     ;;
+    1 )
+      newname=`echo "$1" | sed -e "s/001\.$format\$/.$format/"`
+      mv "$1" "$newname"
+      set fnord "$newname"
+      shift
+     ;;
+  esac
+
+  case "$format" in
+    gif* )
+      for f in ${1+"$@"}; do
+       gif=`echo "$f" | sed -e "s/\.$format\$/.gif/"`
+       mv "$f" "$gif" \
+        && echo "$progname: created $gif"
+      done
+     ;;
+    ppm* )
+      for f in ${1+"$@"}; do
+       gif=`echo "$f" | sed -e "s/\.$format\$/.gif/"`
+       echo "$progname: running ppmtogif on $bq$f$eq"
+       ppmtogif "$f" > "$gif" \
+        && rm -f "$f" \
+        && echo "$progname: created $gif"
+      done
+     ;;
+  esac
 done
 
 # pstogif ends here
