@@ -1,0 +1,241 @@
+#!/bin/sh
+exec ${PERL-perl} -wSx $0 ${1+"$@"}
+#!perl
+
+# rlock --- acquire locked checkout of RCS-controlled file
+
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2001-11-18
+# Public domain
+
+# $Id: rlock,v 2.1 2001/12/04 12:24:43 friedman Exp $
+
+# Commentary:
+
+# This program encapsulates the task of checking out an RCS-controlled file
+# with an exclusive lock.  The exit status from this script can be used by
+# the caller to determine whether the lock was successfully acquired.
+
+# Note that a lock will not be considered to be acquired if the working
+# file is already writable, even if it is writable by the same uid as the
+# caller of this script (another process might have the lock).
+
+# Code:
+
+use Getopt::Long;
+use Symbol;
+use strict;
+
+my $verbose = 0;
+
+
+package RCS;
+
+my $progname = $0;
+$progname =~ s|.*/||;
+
+sub new
+{
+  my $class = shift;
+  my $self = (scalar @_ == 1) ? { %{shift()} } : { @_ };
+  bless ($self, (ref ($class) || $class));
+  return $self;
+}
+
+sub verbose
+{
+  my ($self, $value) = @_;
+  $self->{verbose} = $value if (defined $value);
+  return $self->{verbose};
+}
+
+sub info
+{
+  my $self = shift;
+  return undef unless $self->verbose;
+  print join (": ", $progname, @_), "\n";
+  return undef;
+}
+
+sub error
+{
+  my $self = shift;
+  print STDERR join (": ", $progname, @_), "\n";
+  return undef;
+}
+
+sub message
+{
+  my $self = shift;
+  return undef unless $self->verbose;
+  my $prefix = shift;
+  my $msg = join (" ", @_);
+  $msg =~ s/^/$prefix: /mg;
+  $msg =~ s/^([^:]+: )\1/$1/mg;
+  print $msg;
+}
+
+sub is_rcs_controlled
+{
+  my $self = shift;
+  return 1 if (-f $self->{filename} . ",v");
+
+  my $dirname = $self->{filename};
+  my $basename = $self->{filename};
+
+
+        if os.path.exists (self.filename + ",v"):
+            return 1
+        dirname  = os.path.dirname  (self.filename) or "."
+        basename = os.path.basename (self.filename)
+        if os.path.exists (os.path.join (dirname, "RCS", basename + ",v")):
+            return 1
+        return 0
+
+
+sub spawn
+{
+  my $self = shift;
+  my ($orh, $owh) = (gensym, gensym);
+  pipe ($orh, $owh);
+
+  my $pid = fork;
+  if ($pid == 0)
+    {
+      open (STDIN,  "</dev/null");
+      open (STDOUT, ">&=" . fileno ($owh));
+      open (STDERR, ">&=" . fileno ($owh));
+      close ($orh);
+      close ($owh);
+      exec (@_) || 0; # boolean avoids warning about unreachable statements
+      $self->errormsg ("exec", $_[0], $!);
+      exit (1);
+    }
+  else
+    {
+      close ($owh);
+      my $result = join ("", <$orh>);
+      wait;
+      $result .= join ("", <$orh>);
+      my $exitstat = $? >> 8;
+      close ($orh);
+      $self->message ($_[0], $result);
+      return $exitstat;
+    }
+}
+
+sub co
+{
+  my $self = shift;
+  spawn ("co", @_, $self->{filename});
+}
+
+sub ci
+{
+  my $self = shift;
+  spawn ("ci", @_, $self->{filename});
+}
+
+sub revert
+{
+  my $self = shift;
+  $self->info ($self->{filename}, "reverting RCS lock");
+  unlink ($self->{filename});
+  $self->co ("-M");
+  $self->ci ("-u");
+}
+
+sub commit
+{
+  my ($self, $message) = @_;
+  $message = "(No description)" unless (defined $message);
+  $self->ci ("-u", "-d", "-m" . $message);
+  $self->{locked} = 0;
+}
+
+sub lock ($$)
+{
+  my $self = shift;
+
+  my $result;
+  my $try = 0;
+  while (1)
+    {
+      $result = co ($file);
+      if ($result == 0)
+        {
+          verbose ($file, "RCS lock obtained successfully");
+          return $result;
+        }
+
+      last if (++$try >= $option->{retry_count});
+      verbose ("Waiting $option->{retry_interval} seconds...");
+      sleep ($option->{retry_interval});
+    }
+  verbose ($file, "RCS lock could not be obtained") if ($result != 0);
+  return $result;
+}
+
+
+package main;
+
+my $progname = $0;
+$progname =~ s|.*/||;
+
+sub parse_options ()
+{
+  my %option = ( verbose        => 0,
+                 retry_count    => 3,
+                 retry_interval => 10,
+               );
+
+  Getopt::Long::config ('bundling', 'autoabbrev');
+  GetOptions ("v|verbose",          \$option{verbose},
+              "c|retry-count=i",    \$option{retry_count},
+              "i|retry-interval=i", \$option{retry_interval},
+              "h|help",             \&usage);
+
+  return \%option;
+}
+
+sub usage (@)
+{
+  errmsg (@_) if (@_);
+  print STDERR "Usage: $progname {options} file\n
+Options are:
+-h, --help                      You're looking at it.
+
+-v, --verbose                   Display output from RCS \`co' command.
+
+-c, --retry-count    COUNT      If file is already locked, wait for a time and
+                                try again no more than COUNT times until lock
+                                succeeds.  Default is 3 times.
+
+-i, --retry-interval SEC        If file is already locked, wait SEC seconds
+                                and try again.  Default is 10 seconds.
+
+Program exits with a status of 0 (success) if file was successfully locked.
+Program exits with a status of 1 (error) if lock could not be obtained
+on file.\n";
+  exit (1);
+}
+
+sub main ()
+{
+  my $option = parse_options ();
+  $verbose = $option->{verbose};
+
+  usage ("Filename argument required") unless (@ARGV);
+
+  my $result = rlock ($option, $ARGV[0]);
+  exit ($result);
+}
+
+main ();
+
+# local variables:
+# mode: perl
+# eval: (auto-fill-mode 1)
+# end:
+
+# rlock ends here
