@@ -1,0 +1,23 @@
+#!/bin/sh
+# $Id$
+
+volid=$1
+shift
+
+# Don't include -J (joliet) since that's incompatible with -dvd-video
+exec mkisofs         \
+    -v -v            \
+    -r               \
+    -dvd-video       \
+    -A ''            \
+    -abstract ''     \
+    -biblio ''       \
+    -copyright ''    \
+    -p ''            \
+    -publisher ''    \
+    -sysid ''        \
+    -V "$volid"      \
+    -volset "$volid" \
+    "$@"
+
+# mkdvd ends here
