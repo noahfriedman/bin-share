@@ -1,0 +1,32 @@
+#!/bin/sh
+# smtp --- kludgy hack to connect to smtp servers by abbreviated hostname
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1995-04-15
+# Public domain
+
+# $Id$
+
+case "$1" in
+  aeneas )             h=aeneas.mit.edu            ;;
+  athena )             h=athena.mit.edu            ;;
+  ccwf )               h=ccwf.cc.utexas.edu        ;;
+  cli )                h=cli.cli.com               ;;
+  cyclic | totoro )    h=cyclic.com                ;;
+  es | rc )            h=hawkwind.utcs.toronto.edu ;;
+  floss )              h=floss.cyclic.com          ;;
+  frob | baal )        h=frob.com                  ;;
+  gnu | albert)        h=albert.gnu.ai.mit.edu     ;;
+  lcs | mintaka )      h=mintaka.lcs.mit.edu       ;;
+  mc )                 h=mc.lcs.mit.edu            ;;
+  media )              h=media.mit.edu             ;;
+  prep | ai | life )   h=life.ai.mit.edu           ;;
+  osu | cis )          h=cis.ohio-state.edu        ;;
+  splode )             h=splode.mame.mu.oz.au      ;;
+  * )
+    echo "smtp: $1: unknown host." 1>&2
+    exit 1
+esac
+
+exec tcpconnect $h smtp
+
+# smtp ends here
