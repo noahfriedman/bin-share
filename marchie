@@ -4,7 +4,7 @@
 # Created: 1995-06-12
 # Public domain
 
-# $Id: marchie,v 1.2 1995/08/24 14:14:37 friedman Exp $
+# $Id: marchie,v 1.3 1996/07/05 16:08:01 friedman Exp $
 
 # Commentary:
 
@@ -15,10 +15,14 @@
 #
 # e.g.:     1729 ftp://prep.ai.mit.edu/pub/gnu/README
 
-# Other reasonably fast archie servers:
+# Reasonably fast archie servers:
+#       archie.rutgers.edu
+#       archie.unl.edu
 #       archie.doc.ic.ac.uk
-#       archie.unit.no
 #       archie.au
+#       archie.unit.no   (has been gone since mid 1995, it seems)
+#
+# Also try: http://ftpsearch.unit.no/ftpsearch
 
 # Code:
 
