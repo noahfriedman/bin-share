@@ -1,11 +1,11 @@
 #!/bin/sh
 # incgrep --- search all header files in known include directories for pattern
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1996-01-29
 
-# Copyright (C) 1995, 1996 Noah S. Friedman
+# Copyright (C) 1995, 1996, 2004 Noah S. Friedman
 
-# $Id: incgrep,v 2.2 1996/02/20 20:36:07 friedman Exp $
+# $Id: incgrep,v 2.3 1996/03/03 22:54:01 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,11 +24,12 @@
 
 # Commentary:
 
-# This script works better if you have GCC version 2 and GNU `find'.
+# This script works better if you have GCC version 2+ and GNU `find'.
 
 # Code:
 
 cc=${CC-gcc}
+cpp=cpp
 
 includes='
   /usr/local/gnu/include
@@ -40,34 +41,51 @@ if ($cc -v) > /dev/null 2>&1; then
   version=`gcc -v 2>&1 \
             | sed -ne '/gcc version/!d
                        s/gcc version  *//
-                       s/^2\..*/2/
                        p
                       '`
   case "$version" in
-    2 )
+    2.95.* | 3.* )
+      cpp=`$cc -print-prog-name=cpp`
+     ;;
+    2.* )
       ccdir=`$cc -print-libgcc-file-name | sed -e 's/\/[^/]*$//'`
       cpp=$ccdir/cpp
-
-      includes=`$cpp -v 2>&1 < /dev/null \
-                  | sed -ne '/#include <...> search starts here:/!d
-                             n
-                             :l
-                             /^End of search list./!{
-                               p
-                               n
-                               b l
-                             }'`
      ;;
   esac
+
+  case $1 in
+    -lang-* )
+      lang=`echo "$1" | sed -e 's/^-lang-//'`
+      cpp="$cpp -x $lang"
+      shift
+     ;;
+  esac
+
+  includes=`$cpp -v 2>&1 < /dev/null \
+              | sed -ne '/#include <...> search starts here:/!d
+                         n
+                         :l
+                         /^End of search list./!{
+                           p
+                           n
+                           b l
+                         }'`
 fi
 
+follow=
 if (find --version) > /dev/null 2>&1 ; then
    follow=-follow
 else
-   follow=
+   case `(uname -s) 2> /dev/null` in
+     FreeBSD ) follow=-follow ;;
+   esac
 fi
 
-find $includes $follow -name '*.h' -print 2> /dev/null \
- | xargs grep ${1+"$@"}
+{
+  case $lang in
+    c++ ) find $includes $follow -type f -print ;;
+    * )   find $includes $follow -name '*.h' -print ;;
+  esac
+} 2> /dev/null | xargs grep ${1+"$@"}
 
 # incgrep ends here.
