@@ -1,0 +1,109 @@
+#!/bin/sh
+# pstogif --- generate GIF images from PostScript images using netpbm tools
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1994-10-17
+# Public domain.
+
+# $Id$
+
+# Commentary:
+# Code:
+
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options}
+
+Options are:
+-D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+                             Implies --verbose.
+-h, --help                   You're looking at it.
+-v, --verbose                Allow verbose output from inferior processes.
+"
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+verbose=
+
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
+    -D | --debug | --d* )
+      debug=t
+      verbose=-verbose
+      shift
+     ;;
+    -h | --help | --h )
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -v | --verbose | --v* )
+      verbose=-verbose
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+case "$debug" in t ) set -x ;; esac
+case "$verbose" in '' ) exec 1> /dev/null ;; esac
+
+for psfile in ${1+"$@"}; do
+   echo "$progname: converting $psfile"
+
+   pstopnm $verbose \
+           -ppm \
+           -nocrop \
+           -xborder 0 \
+           -yborder 0 \
+           "$psfile"
+
+   file_basename=`basename $psfile .ps`
+
+   set fnord "$file_basename"*.ppm
+   shift
+
+   case $# in
+     1) 
+       newname=`echo "$1" | sed -e 's/001\.ppm$/.ppm/'`
+       mv "$1" "$newname"
+       set fnord "$newname"
+       shift
+      ;;
+   esac
+
+   for f in ${1+"$@"}; do
+     gif=`basename $f .ppm`.gif
+     ppmtogif "$f" > "$gif" && rm -f "$f"
+     echo "$progname: created $gif"
+   done
+done
+
+# pstogif ends here
