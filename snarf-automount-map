@@ -4,19 +4,21 @@
 # Created: 1996-11-05
 # Public domain
 
-# $Id$
+# $Id: snarf-automount-map,v 2.1 1996/11/06 05:20:13 friedman Exp $
 
 # Commentary:
 
 # Usage: snarf-automount-map [auto.master]
 # You can set the env var SNARF_RSH_CMD_PREFIX if you need to rsh to
 # another host to ypcat the maps.
+# The env var SNARF_YPCAT_FLAGS can be used to specify additional flags to
+# ypcat (e.g. `-d domainname' to specify a particular NIS domain.)
 
 # This script assumes you are using NIS2 (nee YP), not NIS+.
 
 # Code:
 
-$cmd = "$ENV{SNARF_RSH_CMD_PREFIX} ypcat -k";
+$cmd = "$ENV{SNARF_RSH_CMD_PREFIX} ypcat -k $ENV{SNARF_YPCAT_FLAGS}";
 
 &main ($ARGV[0]);
 
