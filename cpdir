@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/usr/local/bin/bash
 # cpdir, 14-Aug-91 Noah Friedman <friedman@prep.ai.mit.edu>
-# Last modified 10-Feb-93
+# Last modified 07-May-93
 #
 #    Copies directory tree preserving time, ownership, and other attributes
 # of files.  Does not dereference symbolic links. 
@@ -107,8 +107,8 @@ function do_cpdir ()
     fi
     src=$(basename "${src}")
 
-    (chdir "${src_dir}" && tar -cf - "./${src}") \
-       | (chdir "${dst}" && tar ${verbose} -xpf - ) ;
+    (chdir "${src_dir}" && tar ${CPDIR_TAR_INPUT_OPTIONS} -cf - "./${src}") \
+       | (chdir "${dst}" && tar ${verbose} ${CPDIR_TAR_OUTOUT_OPTIONS} -xpf - ) ;
 }
 
 function chdir ()
