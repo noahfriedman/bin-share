@@ -1,12 +1,12 @@
 #!/bin/sh
 # xon --- run remote X application
 
-# Copyright (C) 1993, 1995, 1999 Noah S. Friedman
+# Copyright (C) 1993, 95, 99, 2002 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1993-03-08
 
-# $Id: xon,v 1.9 1999/10/10 02:26:00 friedman Exp $
+# $Id: xon,v 1.10 1999/10/12 08:11:17 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -174,7 +174,7 @@ while : ; do
      ;;
     -X | --xauth | --xa* )
       shift
-      xauthinfo="`xauth -q extract - $DISPLAY 2> /dev/null`"
+      xauthinfo=t
      ;;
     -x | --xhost-enable* | --xh* )
       eval "$getopt"
@@ -470,9 +470,8 @@ shift
         /* | ./* ) : ;;
         * )
           for dir in `echo $pdirs $xdirs` ; do
-            if test -f "\$dir/$1" ; then
+            if test -f "\$dir/$1" || test -f "\$dir/xauth"; then
               PATH="\$PATH:\$dir"
-              break
             fi
           done
           export PATH
@@ -502,12 +501,9 @@ shift
 
       case '$xauthinfo' in
         t )
-          echo '$xauthinfo' |
-           {
-             xauth -q remove $remote_display
-             xauth -q merge -
-           }
-         ;;
+         xauth -q remove $remote_display
+         echo '`xauth -q nextract - $DISPLAY 2> /dev/null`' | xauth -q nmerge -
+        ;;
       esac
 
       set fnord `for arg in ${1+"$@"} ; do
