@@ -1,0 +1,89 @@
+#!/bin/bash
+# waitfor, 08-Aug-91 Noah Friedman <friedman@ai.mit.edu>
+# 
+#    Notifies invoker when specified user logs onto any of the specified
+# hosts.  This script will automatically background itself.  There's no
+# need to call it with a "&" operator. 
+#
+# Public domain.
+#
+
+umask 022
+progname="$(basename $0)"
+
+if [ $# -eq 0 ]; then
+   echo "Usage: ${progname} [user] {host1} {host2} {...}"
+   echo "   If no hosts are specified, current host is assumed."
+   exit 1
+fi
+
+# Check to see if this is a daemonized process.
+case z$1 in
+   z-d) daemon=t; shift ;;
+   *)   unset daemon ;;
+esac 
+
+# If this is not a daemonized process, invoke one and exit. 
+if [ ! "${daemon}" ]; then
+   ($0 -d "$@") &
+   exit 0
+fi
+
+rm="rm -f"
+g="$(echo -e \\7)"  # BEL
+
+# If the localhost you're likely to run this on cannot send mail itself,
+# specify a host that can.
+#mail_host=uunet.uu.net
+
+sleep_interval="10"
+hostname="$(hostname)"
+target_user="$1" ; shift
+whoami="$(whoami)"
+outfile="/tmp/waitfor.$$"
+tty="$(tty)"
+target_hosts="$@"
+
+# We've already shifted username out of args.
+if [ $# -eq 0 ]; then
+   target_hosts="${hostname}"
+fi
+
+${rm} ${outfile}
+touch ${outfile}
+
+while [ \( ! -s "${outfile}" \) -a -O "${tty}" ]; do
+  sleep ${sleep_interval}
+  rusers -l ${target_hosts} | egrep "^${target_user}" > ${outfile} 2>&1
+done
+
+if [ -O "${tty}" ]; then
+  echo ""
+  echo "---------------------------------------"
+  echo "${g}${g}Message from ${progname}:"
+  echo ""
+  echo "${target_user} has logged in!"
+  echo ""
+  cat ${outfile}
+  echo "---------------------------------------"
+else
+   telnet_host="${mail_host:-${hostname}}"
+   telnet ${telnet_host} 25 > /dev/null 2>&1 <<EOF
+mail from: ${progname}
+rcpt to: ${whoami}@${hostname}
+data
+To: ${whoami}
+Subject: ${progname} terminated
+Precedence: junk
+You left a "${prog} ${uname}" command running on ${hostname}.
+It has been terminated.
+.
+quit
+EOF
+
+fi
+
+${rm} ${outfile}
+exit 0
+
+# eof

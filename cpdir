@@ -1,10 +1,12 @@
 #!/bin/bash
-# ftolower -- convert uppercase filenames entirely to lowercase. 
-# 29-Feb-92 Noah Friedman <friedman@prep.ai.mit.edu>
+# cpdir, 14-Aug-91 Noah Friedman <friedman@prep.ai.mit.edu>
 # Last modified 10-Feb-93
 #
-# Requires bash version 1.12 or later to work properly. 
+#    Copies directory tree preserving time, ownership, and other attributes
+# of files.  Does not dereference symbolic links. 
 #
+# Requires bash version 1.12 or later to work properly. 
+# 
 # Public domain.
 #
 
@@ -15,32 +17,37 @@ function usage ()
     fi
 
     cat 1>&2 <<EOF
-Usage: ${progname} {-D|--debug} {-v} {-i} {-f} [file1] {file2} {...}
-       ${progname} {--verbose} {--inquery} {--force} [file1] {file2} {...}
-EOF
+Usage: ${progname} {-D|--debug} {-v|--verbose} [src1] {src2} {...} [dstdir]
 
-   exit 1
+   e.g. "${progname} /home/fsf/friedman /home/gp"
+         => /home/fsf/friedman --> /home/gp/friedman
+
+EOF
+    exit 1
 }
 
 function main ()
 {
-    progname=$(basename "$0")
-
-    initialize_variables;
+    initialize_variables "$@"
     parse_command_args "$@"
     shift $?
 
     test -n "${debug+set}" && set -x
 
-    [ $# -eq 0 ] && usage
+    srcs="$*"
+    shift $[ $# - 1 ];
+    dst="$1"
 
-    for file in "$@" ; do
-       mv_tolower "${file}"
+    for src in ${srcs%${dst}} ; do
+       do_cpdir "${src}" "${dst}"
     done
+
+    exit 0
 }
 
 function initialize_variables ()
 {
+    progname="${0##*/}"
     bq="\`"  # To prevent hairy quoting and escaping later.
     eq="'"
 }
@@ -51,7 +58,7 @@ function parse_command_args ()
 
     # unset option variables to make sure they weren't accidentally
     # exported 
-    unset debug verbose mv_flags
+    unset verbose debug
 
     # If you add new commands be sure to change the wildcards below to make
     # sure they are unambiguous (i.e. only match one possible long option)
@@ -60,23 +67,15 @@ function parse_command_args ()
     while [ $# -gt 0 ]; do
        case z$1 in
           z-D | z--debug | z--d* )
-             debug=t
+             debug="t"
+             shift
+            ;;
+          z-v | z--verbose | z--v* )
+             verbose="-v"
              shift
             ;;
           z-h* | z--help | z--h* )
              usage
-            ;;
-          z-v | z--verbose | z--v* )
-             verbose=t
-             shift
-            ;;
-          z-i | z--inquery | z--i* )
-             mv_flags="-i"
-             shift
-            ;;
-          z-f | z--force | z--f* )
-             mv_flags="-f"
-             shift
             ;;
           z-- )
              shift
@@ -96,22 +95,35 @@ function parse_command_args ()
     return $[ orig_number_options - $# ]
 }
 
-function dirname ()
+function do_cpdir ()
 {
- local dir="$1"
- local tdir="${dir%/}"
+ local src="$1"
+ local dst="$2"
+ local src_dir
 
-    # Strip trailing '/' characters from dir (unusual that this should
-    # ever occur, but dirname(1) seems to deal with it.)
-    while [ "${tdir}" != "${dir}" ]; do
-       tdir="${dir}"
-       dir="${tdir%/}"
-    done
+    src_dir=$(dirname "${src}")
+    if [ "z${src_dir}" = "z${src}" ]; then
+       src_dir="."
+    fi
+    src=$(basename "${src}")
 
-    dir="${dir%/*}"
-    echo "${dir:-/}"
+    (chdir "${src_dir}" && tar -cf - "./${src}") \
+       | (chdir "${dst}" && tar ${verbose} -xpf - ) ;
 }
 
+function chdir ()
+{
+    if cd "${1}" 2> /dev/null ; then
+       return 0
+    fi
+
+    reason=$(cd "${1}" 2>&1)
+    reason="${reason#*:}"
+    echo "${progname}: Could not chdir to ${bq}${1}${eq}:${reason}" 1>&2
+    return 1
+}
+
+# Some systems don't seem have a basename(1).
 function basename ()
 {
  local path="$1"
@@ -129,28 +141,25 @@ function basename ()
     echo ${path%${suffix}}   # Also strip off extension, if any.
 }
 
-function mv_tolower ()
+# Sigh.  Even more systems don't seem to have a dirname(1).
+function dirname ()
 {
- local oldname="$1"
- local dirname=$(dirname "${oldname}")
- local basename=$(basename "${oldname}")
- local new_basename=$(echo "${basename}" | tr '[A-Z]' '[a-z]')
+ local dir="$1"
+ local tdir="${dir%/}"
 
-    if [ "z${basename}" = "z${oldname}" ]; then
-       newname="${new_basename}"
-    else
-       newname="${dirname}/${new_basename}"
-    fi
+    # Strip trailing '/' characters from dir (unusual that this should
+    # ever occur, but dirname(1) seems to deal with it.)
+    while [ "${tdir}" != "${dir}" ]; do
+       tdir="${dir}"
+       dir="${tdir%/}"
+    done
 
-    if [ "z${newname}" = "z${oldname}" ]; then
-       echo "${progname}: file ${bq}${newname}${eq} is already lower case." 1>&2
-       return 1
-    fi
-
-    test -n "${verbose}" && echo "${oldname} -> ${newname}"
-    mv ${mv_flags} "${oldname}" "${newname}"
+    dir="${dir%/*}"
+    echo "${dir:-/}"
 }
 
 main "$@"
 
+#
 # eof
+#
