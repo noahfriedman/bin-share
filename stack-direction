@@ -1,0 +1,39 @@
+#!/bin/sh
+# stack-direction -- determine direction of stack growth
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2002-10-09
+# Public domain.
+
+# $Id$
+
+# Commentary:
+
+# This program determines whether the stack grows from lower
+# addresses to higher addresses, or vice-versa.
+
+# The C compiler is called by this shell script.  The environment variable
+# `CC' and `CFLAGS' are used to determine exactly what compiler and args to
+# use.  `cc' is the default.
+
+# Code:
+
+cd /tmp || exit 1
+file="stackdir$$"
+trap 'rm -f "$file" "${file}".[acos]' 0 1 2 3 15
+
+{
+  echo 'sub (char *a) { char b; exit (&b < a); }'
+  echo 'main () { char a; sub (&a); }'
+} > "${file}.c"
+
+${CC-cc} $CFLAGS "${file}.c" -o "./$file" || exit 1
+
+./"$file"
+
+case $? in
+   0) echo "up"      ;;
+   1) echo "down"    ;;
+   *) echo "unknown" ;;
+esac
+
+# eof
