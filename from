@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.26 1998/04/09 10:30:47 friedman Exp $
+# $Id: from,v 1.27 1998/08/21 00:32:54 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -437,6 +437,7 @@ export FROM_PROGNAME COLUMNS
 export FROM_ALL_HEADERS_P FROM_COUNTP FROM_EXTRACTP FROM_FIRSTLINEP
 export FROM_PARSEP FROM_UNREAD_ONLY_P FROM_LINELIMIT FROM_MATCH_HEADER
 export FROM_MATCH_REGEXP FROM_FORMAT FROM_USER
+export MAIL POPPASS
 
 # By using a here-document to include the source of the perl script (to
 # avoid command line length limits), we usurp the normal stdin the inferior
