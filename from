@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.33 2000/01/10 20:57:34 friedman Exp $
+# $Id: from,v 1.34 2000/01/20 20:09:09 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -163,11 +163,9 @@ sub parse_options ()
 
   # if stdout is not a tty, then disable truncation (user may explicitly
   # enables it later by use of the --columns option).
-  # (Also, if running in an emacs shell, print the whole line since the
-  # user can easily toggle truncate-lines in the buffer.)
   # Decrement number of columns by 1 since output in last column causes
   # wraparound on many (most?) terminals.
-  $opt_columns = (-t STDOUT && $ENV{TERM} ne 'emacs'
+  $opt_columns = (-t STDOUT
                   ? ((defined $ENV{COLUMNS}) ? $ENV{COLUMNS} - 1 : 79)
                   : 0);
   $opt_user = default_user ();
