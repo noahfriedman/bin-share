@@ -1,11 +1,28 @@
 #!/bin/sh
 # el2elc --- byte-compile emacs lisp files
 
+# Copyright (C) 1994 Noah S. Friedman
+
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Maintainer: friedman@prep.ai.mit.edu
-# Created: 1990-01-01
-# Last modified: 1994-03-15
-# Public domain
+# Created: 1994-03-15
+
+# $Id$
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, you can either send email to this
+# program's maintainer or write to: The Free Software Foundation,
+# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
 
 # Commentary:
 # Code:
@@ -23,7 +40,7 @@ Options are:
 -D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
 -h, --help                   You're looking at it.
 -i, --ignore-errors          Continue compiling files in spite of previous
-                             errors.  
+                             errors.
 -l, --load       LFILE       Load elisp code in LFILE before
                              byte-compiling.  Repeated instances of this
                              option will load multiple files.
@@ -203,19 +220,19 @@ cat > "$tmpdir/$progname.el" << __EOF__
 (defun el2elc-load-init-files (&rest files)
   (or files (setq files el2elc-load-file-list))
   (mapcar
-   (function (lambda (file) 
+   (function (lambda (file)
                (load file el2elc-verbose)))
    files))
 
 (defun el2elc (&rest files)
   (or files (setq files el2elc-byte-compile-file-list))
   (let ((current-directory (expand-file-name default-directory)))
-    (cond 
+    (cond
      (el2elc-source-directory-p
       (mapcar 'el2elc-byte-compile-file files))
      (t
       (mapcar
-       (function 
+       (function
         (lambda (file)
           (el2elc-ignore-errors
             (setq file (expand-file-name file))
