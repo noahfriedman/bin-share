@@ -4,59 +4,47 @@
 # Created: 1995-04-15
 # Public domain
 
-# $Id: smtp,v 1.10 1999/09/15 01:23:28 friedman Exp $
+# $Id: smtp,v 1.11 1999/12/06 06:08:27 friedman Exp $
 
-# Recognize some abbreviations for frequently-referenced hosts
-case "$1" in
-  aeneas )             h=aeneas.mit.edu            ;;
-  ai | life )          h=life.ai.mit.edu           ;;
-  ai-swiss | zurich )  h=zurich.ai.mit.edu         ;;
-  athena )             h=athena.mit.edu            ;;
-  ccwf )               h=ccwf.cc.utexas.edu        ;;
-  cyclic          )    h=cyclic.com                ;;
-  es | rc )            h=hawkwind.utcs.toronto.edu ;;
-  eterna )             h=splode.eterna.com.au      ;;
-  frob | baal )        h=frob.com                  ;;
-  gnu | prep )         h=mail.gnu.org              ;;
-  lcs | mintaka )      h=mintaka.lcs.mit.edu       ;;
-  mc )                 h=mc.lcs.mit.edu            ;;
-  media )              h=media.mit.edu             ;;
-  osu | cis )          h=cis.ohio-state.edu        ;;
-  piglet )             h=piglet.splode.com         ;;
-  red-bean )           h=red-bean.com              ;;
-  * )                  h="$1"                      ;;
-esac
-
-case "$h" in
+case $1 in
   # Skip mx resolution for some names.
   localhost ) : ;;
   * )
-    # Look up MX record for host, if any.
-    # Note that we only look at the first MX record for a host.
-    # If there are others and the connection request to the primary fails,
-    # this script will not presently contact secondary MXers.
-    mx=`dig "$h" mx \
+    mx=`dig "$1" mx \
           | sed -n -e '
              /^;; ANSWER/{
                :l
                n
                /^;;/q
-               /^'"$h"'\..*MX/!b l
+               /^'"$1"'\..*MX/!b l
                s/.*MX[ 	]*//
                s/\.$//
                p
                b l
              }' \
           | sort -n \
-          | sed -e '1!d' -e 's/.*[ 	]//'`
+          | sed -e 's/.*[ 	]//'`
 
-    case "$mx" in
-      '' ) :     ;;
-      *  ) h=$mx ;;
+    case `echo $mx` in
+      '' )
+        exec tcpconnect -v "$1" "${2-smtp}"
+       ;;
+      *' '* )
+        for addr in $mx; do
+           tcpconnect -v "$addr" "${2-smtp}"
+           e=$?
+           case $e in
+             2 ) : ;; # means connection refused
+             * ) exit $e ;;
+           esac
+        done
+        exit $e
+       ;;
+      * )
+        exec tcpconnect -v "$mx" "${2-smtp}"
+       ;;
     esac
    ;;
 esac
-
-exec tcpconnect -v "$h" ${2-smtp}
 
 # smtp ends here
