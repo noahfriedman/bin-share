@@ -4,7 +4,7 @@
 # Created: 1995-04-15
 # Public domain
 
-# $Id: tcpconnect,v 1.3 1995/09/01 21:56:45 friedman Exp friedman $
+# $Id: tcpconnect,v 1.4 1995/09/01 22:01:21 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -133,7 +133,7 @@ while : ; do
       shift
       break
      ;;
-    -* )
+    -? | --* )
       case "$1" in
         --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
         * )     arg="$1" ;;
@@ -142,6 +142,13 @@ while : ; do
       echo "$progname: unknown or ambiguous option $bq$arg$eq"
       echo "$progname: Use $bq--help$eq for a list of options."
       exit 1
+     ;;
+    -??* )
+      # Split grouped single options into separate args and try again
+      optarg="$1"
+      shift
+      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+      shift
      ;;
     * )
       break
