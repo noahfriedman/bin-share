@@ -1,12 +1,12 @@
 #! /bin/sh
 # with --- run program with special properties
 
-# Copyright (C) 1995 Noah S. Friedman
+# Copyright (C) 1995, 2000 Noah S. Friedman
 
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-08-14
 
-# $Id: with,v 1.7 1996/03/03 23:03:57 friedman Exp $
+# $Id: with,v 1.8 1996/03/21 05:21:47 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,27 +30,243 @@
 
 # Code:
 
-# Name by which this script was invoked.
-progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl		  [perl will skip all lines in this file before this line]
 
-# To prevent hairy quoting and escaping later.
-bq='`'
-eq="'"
+use Getopt::Long;
+use Fcntl;
+use Symbol;
 
-usage="Usage: $progname {options} [command {args...}]
+use strict;
+no strict "vars";
 
+sub err (;@)
+{
+  my $fh = (ref ($_[0]) ? shift : *STDERR{IO});
+  print $fh join (": ", $progname, @_), "\n";
+  exit (1);
+}
+
+sub require_soft ($)
+{
+  my $f = shift;
+  for my $dir (@INC)
+    {
+      return require "$f" if (-f "$dir/$f");
+    }
+  return undef;
+}
+
+sub get_includes ()
+{
+  push (@INC, @$opt_include,
+              "$ENV{HOME}/lib/perl",
+              "$ENV{HOME}/lib/perl/include")
+    if (defined $opt_include);
+
+  if ($opt_groups)
+    {
+      require_soft ("syscall.ph");
+    }
+
+  if ($opt_notty)
+    {
+      # Look for &TIOCNOTTY
+      require_soft ("sys/ttycom.ph");
+      require_soft ("sys/termios.ph");
+      require_soft ("sys/ttold.ph");
+      require_soft ("sys/ioctl.ph");
+    }
+}
+
+sub numberp ($)
+{
+  return (defined $_[0] && $_[0] =~ /^-?\d+$/o) ? 1 : 0;
+}
+
+sub group2gid ($)
+{
+  my $g = shift;
+  return $g if (numberp ($g));
+  my $gid = getgrnam ($g);
+  return $gid if (defined $gid && numberp ($gid));
+  err ($g, "no such group");
+}
+
+sub user2uid ($)
+{
+  my $u = shift;
+  return $u if (numberp ($u));
+  my $uid = getpwnam ($u);
+  return $uid if (defined $uid && numberp ($uid));
+  err ($u, "no such user");
+}
+
+sub background
+{
+  fork && exit (0);
+}
+
+sub notty
+{
+  # Don't allow any file descriptors, including stdin, stdout, or
+  # stderr to be propagated to children.
+  $^F = -1;
+
+  # exit parent
+  fork && exit (0);
+
+  # Duped in case we've closed stderr but can't exec anything.
+  my $saved_stderr = gensym;
+  open ($saved_stderr, ">&STDERR");
+
+  close (STDERR);
+  close (STDOUT);
+  close (STDIN);
+
+  my $fh = gensym;
+  open ($fh, "</dev/tty");
+  ioctl ($fh, &TIOCNOTTY, 0);
+  close ($fh);
+
+  return $saved_stderr;
+}
+
+sub set_cwd ($)
+{
+  my $d = shift;
+  chdir ($d) || err ("chdir", $d, $!);
+}
+
+sub set_egid ($)
+{
+  my $sgid = group2gid (shift);
+  my $egid = $) + 0;
+
+  $) = $sgid;
+  err ($sgid, "cannot set egid", $!) if ($) == $egid && $egid != $sgid);
+}
+
+sub set_gid ($)
+{
+  my $sgid = group2gid (shift);
+  my $rgid = $( + 0;
+  my $egid = $) + 0;
+
+  $( = $sgid;
+  $) = $sgid;
+  err ($sgid, "cannot set rgid", $!) if ($( == $rgid && $rgid != $sgid);
+  err ($sgid, "cannot set egid", $!) if ($) == $egid && $egid != $sgid);
+}
+
+sub big_endian_p ()
+{
+  my $x = 1;
+  my @y = unpack ("c2", pack ("i", $x));
+  return ($y[0] == 1) ? 0 : 1;
+}
+
+# This function is more complex than it ought to be, all because
+# perl does not export the setgroups function.  Oh, it exports the
+# getgroups function by making $( and $) return multiple values (in the
+# form of a space-separated string) but you cannot set the group list by
+# assigning those variables.  Let's hear it for symmetry and consistency!
+# In any case, there is no portable way to determine what size gid_t is, so
+# we must guess.
+sub set_groups ($)
+{
+  my @glist = sort { $a <=> $b } map { group2gid ($_) } split (/[ ,]/, shift);
+
+  my $expected = join (" ", $(+0, sort { -($a <=> $b) } @glist);
+  my @p = (big_endian_p() ? ("n", "N", "i") : ("v", "V", "i"));
+
+  for my $c (@p)
+    {
+      err ("setgroups", $!)
+        if (syscall (&SYS_setgroups, @glist+0, pack ("$c*", @glist)) == -1);
+      return if ("$(" eq $expected);
+    }
+  err ("setgroups", "Could not determine gid_t");
+}
+
+sub set_pgrp ($)
+{
+  setpgrp ($$, shift) || err ("setpgrp", $!);
+}
+
+sub set_priority
+{
+  my $prio = shift () + 0;
+  setpriority (0, 0, $prio) || err ("setpriority", $prio, $!);
+}
+
+sub set_root
+{
+  my $d = shift;
+  chroot ($d) || err ("chroot", $d, $!);
+}
+
+sub set_euid
+{
+  my $suid = user2uid (shift);
+  my $euid = $>;
+
+  $> = $suid;
+  err ($suid, "cannot set euid", $!) if ($> == $euid && $euid != $suid);
+}
+
+sub set_uid
+{
+  my $suid = user2uid (shift);
+  my $ruid = $<;
+  my $euid = $>;
+
+  $< = $suid;
+  $> = $suid;
+  err ($suid, "cannot set ruid", $!) if ($< == $ruid && $ruid != $suid);
+  err ($suid, "cannot set euid", $!) if ($> == $euid && $euid != $suid);
+}
+
+sub parse_options ()
+{
+  $progname = $0;
+  $progname =~ s|.*/||;
+
+  Getopt::Long::config ('bundling', 'autoabbrev', 'require_order');
+  GetOptions ("h|help",          \&usage,
+              "b|bg|background", \$opt_bg,
+              "c|cwd=s",         \$opt_cwd,
+              "d|display=s",     \$ENV{DISPLAY},
+              "H|home=s",        \$ENV{HOME},
+              "G|egid=s",        \$opt_egid,
+              "g|gid=s",         \$opt_gid,
+              "I|include=s@",    \@opt_include,
+              "l|groups=s",      \$opt_groups,
+              "m|umask=s",       \$opt_umask,
+              "N|no-tty|notty",  \$opt_notty,
+              "n|name=s",        \$opt_name,
+              "P|priority=i",    \$opt_priority,
+              "p|pgrp=i",        \$opt_pgrp,
+              "r|root=s",        \$opt_root,
+              "U|euid=s",        \$opt_euid,
+              "u|uid=s",         \$opt_uid);
+}
+
+sub usage ()
+{
+  print "Usage: $progname {options} [command {args...}]\n
 Options are:
 -b, --background      Run process in background.
 -c, --cwd       DIR   Run with DIR as the current working directory.
                       This directory is relative to the root directory as
-                      specified by ${bq}--root$eq, or $bq/$eq.
+                      specified by \`--root', or \`/'.
 -D, --debug           Turn on interactive debugging in perl.
 -d, --display   DISP  Run with DISP as the X server display.
--G, --egid      EGID  Set ${bq}effective$eq group ID.
--g, --gid       GID   Set both ${bq}real$eq and ${bq}effective$eq group ID.
+-G, --egid      EGID  Set \`effective' group ID.
+-g, --gid       GID   Set both \`real' and \`effective' group ID.
 -H, --home      HOME  Set \$HOME.
 -h, --help            You're looking at it.
--I, --include   DIR   Include DIR in @INC path for perl.
+-I, --include   DIR   Include DIR in \@INC path for perl.
                       This option may be specified multiple times to append
                       search paths to perl.
 -l, --groups    GLIST Set group list to comma-separated GLIST.
@@ -62,616 +278,47 @@ Options are:
                       the process.
 -P, --priority  NICE  Set scheduling priority to NICE (-20 to 20).
 -p, --pgrp      PGRP  Set process group.
--r, --root      ROOT  Set root directory (via ${bq}chroot$eq syscall) to ROOT.
--U, --euid      EUID  Set ${bq}effective$eq user ID.
--u, --uid       UID   Set both ${bq}real$eq and ${bq}effective$eq user ID.
-"
-
-# Initialize variables.
-# Don't use `unset' since old bourne shells don't have this command.
-# Instead, assign them an empty value.
-debug=
-includes=
-WITH_BG=
-WITH_CWD=
-WITH_EGID=
-WITH_EUID=
-WITH_GID=
-WITH_GROUPS=
-WITH_NAME=
-WITH_NOTTY=
-WITH_PRIORITY=
-WITH_PGRP=
-WITH_ROOT=
-WITH_UID=
-
-# Usage: eval "$getopt"; value=$optarg
-# or     optarg_optional=t; eval "$getopt"; value=$optarg
-#
-# This function automatically shifts the positional args as appropriate.
-# The argument to an option is optional if the variable `optarg_optional'
-# is non-empty.  Otherwise, the argument is required and getopt will cause
-# the program to exit on an error.  optarg_optional is reset to be empty
-# after every call to getopt.  The argument (if any) is stored in the
-# variable `optarg'.
-#
-# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument
-# won't get used if first long option syntax was used.
-#
-# Note: because of broken bourne shells, using --foo=bar syntax can
-# actually screw the quoting of args that end with trailing newlines.
-# Specifically, most shells strip trailing newlines from substituted
-# output, regardless of quoting.
-getopt='
-  {
-    optarg=
-    case "$1" in
-      --*=* )
-        optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
-        shift
-       ;;
-      * )
-        case ${2+set} in
-          set )
-            optarg="$2"
-            shift
-            shift
-           ;;
-          * )
-            case "$optarg_optional" in
-              "" )
-                case "$1" in
-                  --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
-                  * ) option="$1" ;;
-                esac
-                exec 1>&2
-                echo "$progname: option $bq$option$eq requires argument."
-                echo "$progname: use $bq--help$eq to list option syntax."
-                exit 1
-               ;;
-           esac
-           shift
-         ;;
-        esac
-     ;;
-    esac
-    optarg_optional=
-  }'
-
-# Parse command line arguments.
-# Make sure that all wildcarded options are long enough to be unambiguous.
-# It's a good idea to document the full long option name in each case.
-# Long options which take arguments will need a `*' appended to the
-# canonical name to match the value appended after the `=' character.
-while : ; do
-  case $# in 0) break ;; esac
-  case "$1" in
-    -b | --bg | --background | --b* )
-      shift
-      WITH_BG=t
-      export WITH_BG
-     ;;
-    -c | --cwd* )
-      eval "$getopt"
-      WITH_CWD="$optarg"
-      export WITH_CWD
-     ;;
-    -D | --debug | --de* )
-      debug=-d
-      shift
-      set -x
-     ;;
-    -d | --display* | --di* )
-      eval "$getopt"
-      DISPLAY="$optarg"
-      export DISPLAY
-     ;;
-    -H | --home* | --ho* )
-      eval "$getopt"
-      HOME="$optarg"
-      export HOME
-     ;;
-    -h | --help | --he* )
-      echo "$usage" 1>&2
-      exit 0
-     ;;
-    -G | --egid* | --eg* )
-      eval "$getopt"
-      WITH_EGID="$optarg"
-      export WITH_EGID
-     ;;
-    -g | --gid* | --gi* )
-      eval "$getopt"
-      WITH_GID="$optarg"
-      export WITH_GID
-     ;;
-    -I | --include* | --i* )
-      eval "$getopt"
-      includes="$includes -I$optarg"
-     ;;
-    -l | --groups* | --gr* )
-      eval "$getopt"
-      WITH_GROUPS="$optarg"
-      export WITH_GROUPS
-     ;;
-    -m | --umask* | --um* )
-      eval "$getopt"
-      umask "$optarg"
-     ;;
-    -N | --no-tty | --notty | --no* )
-      WITH_NOTTY=t
-      export WITH_NOTTY
-      shift
-     ;;
-    -n | --name* | --na* )
-      eval "$getopt"
-      WITH_NAME="$optarg"
-      export WITH_NAME
-     ;;
-    -P | --priority* | --pr* )
-      eval "$getopt"
-      WITH_PRIORITY="$optarg"
-      export WITH_PRIORITY
-     ;;
-    -p | --pgrp* | --pg* )
-      eval "$getopt"
-      WITH_PGRP="$optarg"
-      export WITH_PGRP
-     ;;
-    -r | --root* | --r* )
-      eval "$getopt"
-      WITH_ROOT="$optarg"
-      export WITH_ROOT
-     ;;
-    -U | --euid* | --eu* )
-      eval "$getopt"
-      WITH_EUID="$optarg"
-      export WITH_EUID
-     ;;
-    -u | --uid* | --ui* )
-      eval "$getopt"
-      WITH_UID="$optarg"
-      export WITH_UID
-     ;;
-    -- )     # Stop option processing
-      shift
-      break
-     ;;
-    -? | --* )
-      case "$1" in
-        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
-        * )     arg="$1" ;;
-      esac
-      exec 1>&2
-      echo "$progname: unknown or ambiguous option $bq$arg$eq"
-      echo "$progname: Use $bq--help$eq for a list of options."
-      exit 1
-     ;;
-    -??* )
-      # Split grouped single options into separate args and try again
-      optarg="$1"
-      shift
-      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
-      shift
-     ;;
-    * )
-      break
-     ;;
-  esac
-done
-
-case $# in
-  0 )
-    echo "$usage" 1>&2
-    exit 1
-   ;;
-esac
-
-# Don't go to the expense of invoking perl if there is no need.
-case "${WITH_BG}${WITH_CWD}${WITH_EGID}${WITH_EUID}${WITH_GID}${WITH_GROUPS}${WITH_NAME}${WITH_NOTTY}${WITH_PRIORITY}${WITH_PGRP}${WITH_ROOT}${WITH_UID}" in
-  '' ) exec ${1+"$@"} ;;
-esac
-
-WITH_PROGNAME="$progname"
-export WITH_PROGNAME
-
-# Sigh.  If we happen to be running setuid, perl refuses to read scripts
-# from stdin, so use a tempfile instead.  What a waste, and all in the same
-# of "security".
-WITH_SCRIPTFILE="${TMPDIR-/tmp}/$progname$$"
-export WITH_SCRIPTFILE
-
-trap 'exitstat=$?
-    rm -f "$WITH_SCRIPTFILE"
-    trap "" 0 1 2 3 15
-    exit $exitstat
-   ' 0 1 2 3 15
-
-cat > "$WITH_SCRIPTFILE" <<'__EOF__'
-
-&main;
-
-sub main
-{
-  $with_progname = &getenv ('WITH_PROGNAME');
-  &unsetenv ('WITH_PROGNAME');
-
-  # Delete the temporary scriptfile, as a way of cleaning up after the
-  # shell invocation.
-  if (&envp ('WITH_SCRIPTFILE'))
-    {
-      local ($file) = &getenv ('WITH_SCRIPTFILE');
-
-      &unsetenv ('WITH_SCRIPTFILE');
-      unlink ($file);
-    }
-
-  # Push some include dirs which are pretty standard, just in case.
-  # Perl5 does not usually install .ph files.
-  $home = &getenv ('HOME');
-  push (@INC, "$home/lib/perl",
-              "$home/lib/perl/include",
-              "/usr/local/gnu/lib/perl",
-              "/usr/local/gnu/lib/perl/include",
-              "/usr/local/lib/perl",
-              "/usr/local/lib/perl/include",
-              "/usr/lib/perl",
-              "/usr/lib/perl/include"
-       );
-
-  # Duped in case we use &notty to close stderr but the program turns out
-  # not to be executable.
-  open (SAVED_STDERR, ">&STDERR");
-
-  &get_includes;
-
-  &set_name;
-  &set_gid;
-  &set_egid;
-  &set_groups;
-  &set_root;
-  &set_cwd;
-  &set_priority;
-  &set_uid;
-  &set_euid;
-  &background;
-  &set_pgrp;
-  &notty;
-
-  exec ({$progname} @ARGV);
-  printf (SAVED_STDERR "$with_progname: $progname: $!\n");
+-r, --root      ROOT  Set root directory (via \`chroot' syscall) to ROOT.
+-U, --euid      EUID  Set \`effective' user ID.
+-u, --uid       UID   Set both \`real' and \`effective' user ID.\n";
   exit (1);
 }
 
-sub envp
+sub main ()
 {
-  local ($var) = @_;
+  parse_options ();
+  usage () unless ($#ARGV >= 0);
 
-  if (defined ($ENV{$var}) && $ENV{$var} ne '')
+
+  get_includes ();
+
+  umask (oct ($opt_umask))     if (defined $opt_umask);
+  set_gid ($opt_gid)           if (defined $opt_gid);
+  set_egid ($opt_egid)         if (defined $opt_egid);
+  set_groups ($opt_groups)     if (defined $opt_groups);
+  set_root ($opt_root)         if (defined $opt_root);
+  set_cwd ($opt_cwd)           if (defined $opt_cwd);
+  set_priority ($opt_priority) if (defined $opt_priority);
+  set_uid ($opt_uid)           if (defined $opt_uid);
+  set_euid ($opt_euid)         if (defined $opt_euid);
+  background ()                if (defined $opt_bg && !defined $opt_notty);
+  set_pgrp ($opt_pgrp)         if (defined $opt_pgrp);
+  my $stderr = ($opt_notty? notty () : *STDERR{IO});
+
+  my $runprog = $ARGV[0];
+  if ($opt_name)
     {
-      return 1;
+      shift   @ARGV;
+      unshift @ARGV, $opt_name;
     }
-  return 0;
+  exec ($runprog @ARGV) || err ($stderr, "exec", $runprog, $!);
 }
 
-# This automatically "untaints" any values returned from the environment.
-# This only matters when running setuid.
-sub getenv
-{
-  local ($var) = @_;
+main ();
 
-  if (&envp ($var))
-    {
-      local ($taintval) = $ENV{$var};
-      local ($val);
-
-
-      $taintval =~ /^(.*)$/;
-      $val = $1;                  # $1 is always untainted
-      return $val;
-    }
-  return '';
-}
-
-sub unsetenv
-{
-  local ($var) = @_;
-  delete $ENV{$var};
-}
-
-sub err
-{
-  printf ("$with_progname: %s.  Abort.\n", @_);
-  exit (1);
-}
-
-sub my_require
-{
-  local ($f) = @_;
-
-  foreach $dir (@INC)
-    {
-      if (-f "$dir/$f")
-        {
-          require "$f";
-          return "$f";
-        }
-    }
-  return 0;
-}
-
-# These files are included if it seems they will be needed later, in order
-# to avoid possible problems searching for them after having done a chroot.
-sub get_includes
-{
-  if (&envp ('WITH_GROUPS'))
-    {
-      &my_require ("syscall.ph");
-    }
-
-  if (&envp ('WITH_NOTTY'))
-    {
-      # Look for &TIOCNOTTY
-      &my_require ("sys/ttycom.ph");
-      &my_require ("sys/termios.ph");
-      &my_require ("sys/ttold.ph");
-      &my_require ("sys/ioctl.ph");
-    }
-}
-
-sub group2gid
-{
-  local ($g) = @_;
-  if ($g =~ /^[0-9][0-9]*$/) { return $g; }
-  local ($name, $pw, $gid, $members) = getgrnam ($g);
-  if ($gid =~ /^[0-9][0-9]*$/) { return $gid; }
-  &err ("$g: no such group");
-}
-
-sub user2uid
-{
-  local ($u) = @_;
-  if ($u =~ /^[0-9][0-9]*$/) { return $u; }
-  local ($name, $pw, $uid) = getpwnam ($u);
-  if ($uid =~ /^[0-9][0-9]*$/) { return $uid; }
-  &err ("$u: no such user");
-}
-
-sub background
-{
-  if (&envp ('WITH_BG'))
-    {
-      &unsetenv ('WITH_BG');
-
-      # Don't fork here if we are planning to detach from tty later anyway;
-      # notty does that.
-      if (! &envp ('WITH_NOTTY'))
-        {
-          # exit parent
-          fork && exit (0);
-        }
-    }
-}
-
-sub notty
-{
-  if (&envp ('WITH_NOTTY'))
-    {
-      &unsetenv ('WITH_NOTTY');
-
-      if (defined (&TIOCNOTTY))
-        {
-          # Don't allow any file descriptors, including stdin, stdout, or
-          # stderr to be propagated to children.
-	  $^F = -1;
-
-          # exit parent
-          fork && exit (0);
-
-          close (STDERR);
-          close (STDOUT);
-          close (STDIN);
-
-          open (FD, "</dev/tty");
-          ioctl (FD, &TIOCNOTTY, 0);
-          close (FD);
-        }
-      else
-        {
-          &err ("cannot find TIOCNOTTY ioctl definition");
-        }
-    }
-}
-
-sub set_cwd
-{
-  if (&envp ('WITH_CWD'))
-    {
-      local ($d) = &getenv ('WITH_CWD');
-
-      &unsetenv ('WITH_CWD');
-      $! = 0;
-      chdir ($d);
-      if ($! != 0)
-        {
-          &err ("chdir: $d: $!");
-        }
-    }
-}
-
-sub set_egid
-{
-  if (&envp ('WITH_EGID'))
-    {
-      local ($egid) = $) + 0;
-      local ($sgid) = &group2gid (&getenv ('WITH_EGID'));
-
-      &unsetenv ('WITH_EGID');
-
-      $) = $sgid;
-
-      if ($) == $egid && $egid != $sgid)
-        {
-          &err ("cannot set egid to $sgid: $!");
-        }
-    }
-}
-
-sub set_gid
-{
-  if (&envp ('WITH_GID'))
-    {
-      local ($rgid) = $( + 0;
-      local ($egid) = $) + 0;
-      local ($sgid) = &group2gid (&getenv ('WITH_GID'));
-
-      &unsetenv ('WITH_GID');
-
-      $( = $sgid;
-      $) = $sgid;
-
-      if ($( == $rgid && $rgid != $sgid)
-        {
-          &err ("cannot set rgid to $sgid: $!");
-        }
-      if ($) == $egid && $egid != $sgid)
-        {
-          &err ("cannot set egid to $sgid: $!");
-        }
-    }
-}
-
-sub set_groups
-{
-  if (&envp ('WITH_GROUPS'))
-    {
-      local (@groups) = split ('[ ,]', &getenv ('WITH_GROUPS'));
-      local ($i) = 0;
-
-      &unsetenv ('WITH_GROUPS');
-
-      if (defined (&SYS_setgroups))
-        {
-          for ($i = 0; $i <= $#groups; $i++)
-            {
-              $groups[$i] = &group2gid ($groups[$i]);
-            }
-
-          $! = 0;
-          syscall(&SYS_setgroups, @groups + 0, pack("i*", @groups));
-          if ($! != 0)
-            {
-              &err ("setgroups: $!");
-            }
-        }
-      else
-        {
-          &err ("cannot find definition for SYS_setgroups");
-        }
-    }
-}
-
-sub set_name
-{
-  if (&envp ('WITH_NAME'))
-    {
-      local ($name) = &getenv ('WITH_NAME');
-      &unsetenv ('WITH_NAME');
-      $progname = $ARGV[0];
-      $ARGV[0] = $name;
-    }
-  else
-    {
-      $progname = $ARGV[0];
-    }
-}
-
-sub set_pgrp
-{
-  if (&envp ('WITH_PGRP'))
-    {
-      setpgrp ($$, &getenv ('WITH_PGRP'));
-      &unsetenv ('WITH_PGRP');
-    }
-}
-
-sub set_priority
-{
-  if (&envp ('WITH_PRIORITY'))
-    {
-      local ($p) = &getenv ('WITH_PRIORITY') + 0;
-
-      $! = 0;
-      setpriority (0, 0, $p);
-      if ($! != 0)
-        {
-          &err ("setpriority: $p: $!");
-        }
-    }
-}
-
-sub set_root
-{
-  if (&envp ('WITH_ROOT'))
-    {
-      local ($d) = &getenv ('WITH_ROOT');
-      &unsetenv ('WITH_ROOT');
-
-      $! = 0;
-      chroot ($d);
-      if ($! != 0)
-        {
-          &err ("chroot: $d: $!");
-        }
-    }
-}
-
-sub set_euid
-{
-  if (&envp ('WITH_EUID'))
-    {
-      local ($euid) = $>;
-      local ($suid) = &user2uid (&getenv ('WITH_EUID'));
-
-      &unsetenv ('WITH_EUID');
-
-      $> = $suid;
-
-      if ($> == $euid && $euid != $suid)
-        {
-          &err ("cannot set euid to $suid: $!");
-        }
-    }
-}
-
-sub set_uid
-{
-  if (&envp ('WITH_UID'))
-    {
-      local ($ruid) = $<;
-      local ($euid) = $>;
-      local ($suid) = &user2uid (&getenv ('WITH_UID'));
-
-      &unsetenv ('WITH_UID');
-
-      $< = $suid;
-      $> = $suid;
-
-      if ($< == $ruid && $ruid != $suid)
-        {
-          &err ("cannot set ruid to $suid: $!");
-        }
-      if ($> == $euid && $euid != $suid)
-        {
-          &err ("cannot set euid to $suid: $!");
-        }
-    }
-}
-
-__EOF__
-
-case $? in
-  0 ) exec ${PERL-perl} $debug $includes "$WITH_SCRIPTFILE" ${1+"$@"} ;;
-esac
+# local variables:
+# mode: perl
+# eval: (auto-fill-mode 1)
+# end:
 
 # with ends here
