@@ -1,0 +1,104 @@
+#!/bin/sh
+
+# Front-end shell script for GNU GCL, used to
+# manage multiple versions of GCL.
+#
+# Strategy: Install this script as "$GNUTOP/bin/gcl" .  This is what
+# users should normally execute to run "gcl" .
+# Give each version of GCL a separate hierarchy under
+# $GCLTOP, with the name "gcl-NN.NN" where NN.NN is the version number.
+# This script looks at what versions are available, and selects a version,
+# currently $OLDEST .  However,
+# users can specify their own choice to force the selection of a
+# particular version by setting the environment
+# variable GCLVERSION to have a value which is the version number of the
+# GCL that they want to use (just the numeric value),
+# or to specify either the NEWEST or OLDEST
+# versions.
+#
+
+PROGNAME=`basename $0`	# name of this program
+if [ "$GCLTOP" = "" ] ; then
+	GCLTOP=/cli/project/gcl	# root of the GCL installed tree
+fi
+if [ "$GPREFIX" = "" ] ; then
+	GPREFIX="gcl-"	# prefix name of the top
+				# of all GCL hierarchies
+fi
+
+if [ ! -d $GCLTOP ] ; then
+	echo "Cannot find root of GCL tree."
+	exit 1
+fi
+
+# Find out which versions are available on the system and sort them
+# in numeric order
+AVAILVERSIONS=`ls -1d $GCLTOP/$GPREFIX*/unixport/saved_$PROGNAME 2>&1 | \
+	egrep -i -v 'no match|no such|not found' | \
+	sed -e "s;$GCLTOP/$GPREFIX;;g" -e "s;/unixport/saved_$PROGNAME;;g" | \
+	awk -F. '{printf "%d.%03d\n", $1, $2}' |
+	sort -n | \
+	awk -F. '{printf "%d.%d\n", $1, $2}'`
+
+if [ "$AVAILVERSIONS" = "" ] ; then
+	echo "No version of $PROGNAME found in $GCLTOP."
+	exit 1
+fi
+
+OLDEST=`echo "$AVAILVERSIONS" | tr ' ' '\012' | head -1`
+NEWEST=`echo "$AVAILVERSIONS" | tr ' ' '\012' | tail -1`
+
+# The environment variable GCLVERSION can have a value which specifies
+# a version number, OR it can contain the values "NEWEST" or "OLDEST" to
+# specify the newest or oldest version which was found.
+#
+# This next line makes GCLVERSION be case-insensitive
+#GCLVERSION=`echo "$GCLVERSION" | tr '[a-z]' '[A-Z]'`
+#
+case "$GCLVERSION" in
+	OLDEST)
+		GCLVERSION="$OLDEST"
+		;;
+	NEWEST)
+		GCLVERSION="$NEWEST"
+		;;
+	"")
+		GCLVERSION="$OLDEST"
+		;;
+	*)
+		if [ ! -d $GCLTOP/$GPREFIX$GCLVERSION ] ;  then
+			echo "Cannot find requested version $GCLVERSION."
+			unset GCLVERSION	# so the error message
+						# below will be used
+		fi
+		;;
+esac
+
+# If we don't have a value by now for GCLVERSION, then give up.
+if [ "$GCLVERSION" = "" ] ; then
+	echo "Cannot determine which $PROGNAME version to use."
+	echo -n "Available versions are: "
+	echo $AVAILVERSIONS
+	exit 1
+fi
+
+# Set up the MANPATH so that the man pages for this version
+# are searched first
+if [ -d $GCLTOP/$GPREFIX$GCLVERSION/man ] ; then
+	MANPATH=$GCLTOP/$GPREFIX$GCLVERSION/man:$MANPATH
+	export MANPATH
+fi
+
+if [ -f $GCLTOP/$GPREFIX$GCLVERSION/unixport/saved_$PROGNAME ] ; then
+	PATH=$GCLTOP/$GPREFIX$GCLVERSION/unixport:$PATH
+	export PATH
+#####	exec $PROGNAME $*
+	exec $GCLTOP/$GPREFIX$GCLVERSION/unixport/saved_$PROGNAME -dir $GCLTOP/$GPREFIX$GCLVERSION/unixport/ $@
+else
+	echo "Cannot find $GCLTOP/$GPREFIX$GCLVERSION/unixport/saved_$PROGNAME"
+	exit 1
+fi
+
+# If we get here then we have real problems.  Give up.
+echo "Exec failure on $GCLTOP/$GPREFIX$GCLVERSION/unixport/saved_$PROGNAME"
+exit 1
