@@ -6,6 +6,8 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1993-09-26
 
+# $Id$
+
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; either version 2, or (at your option)
@@ -172,6 +174,12 @@ case "$debug" in -d ) set -x ;; esac
 case $# in
   0 )
     if test -t 0 ; then
+      foo=`echo -n test`
+      case "$foo" in
+        "-n test" ) n=   c='\c' ;;
+        * )         n=-n c=     ;;
+      esac
+
       umask 077
       stty_settings=`stty -g 2> /dev/null`
 
@@ -203,7 +211,7 @@ case $# in
         # numeric return values.  feh!
         exec 9>&1 1>&2
 
-        echo -n "Password:"
+        echo $n "Password:$c"
         read passwd
         echo
 
@@ -211,7 +219,7 @@ case $# in
           echo "Warning: only first 8 characters will be used." ;;
         esac
 
-        echo -n "Password (again):"
+        echo $n "Password (again):$c"
         read passwd1
         echo
 
@@ -236,31 +244,19 @@ case $# in
    ;;
 esac
 
-exec perl - << __EOF__
-  if ('$salt' eq '')
-    {
-      srand (time ());
-      # Not sure if '&' and '^' are valid; a few accounts on gnu.ai.mit.edu
-      # use them, but I haven't found instances anywhere else.
-      @salt_chars = ('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
-                     'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
-                     'U', 'V', 'W', 'X', 'Y', 'Z',
-                     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j',
-                     'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't',
-                     'u', 'v', 'w', 'x', 'y', 'z',
-                     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-                     '.', '/');
-      \$s1 = int (rand() * 100000) % (\$#salt_chars + 1);
-      \$s2 = int (rand() * 100000) % (\$#salt_chars + 1);
-      \$salt = "\$salt_chars[\$s1]" . "\$salt_chars[\$s2]";
-    }
-  else
-    {
-      \$salt = '$salt';
-    }
-  print crypt('$passwd', "\$salt") . "\n";
-__EOF__
-
-:
+{
+  echo "$passwd"
+  echo "$salt"
+} | perl -e '
+  $p = <>; chop $p; $s = <>; chop $s;
+  if ("$s" eq "") {
+    srand (time ());
+    $sc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789./";
+    sub x { substr ($sc, int (rand () * 100000) % (length ($sc) + 1), 1); }
+    $s  = &x . &x;
+  }
+  print crypt($p, $s);
+'
+echo
 
 # mkpass ends here
