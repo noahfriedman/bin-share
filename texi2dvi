@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- smartly produce DVI files from texinfo sources
-# $Id: texi2dvi,v 0.17 1998/07/05 12:17:43 karl Exp $
+# $Id: texi2dvi,v 0.18 1998/07/31 19:20:20 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98 Free Software Foundation, Inc.
 #
@@ -26,10 +26,11 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.17 $'
+rcs_revision='$Revision: 0.18 $'
 rcs_version=`set - $rcs_revision; echo $2`
 
 version="$0 (GNU Texinfo 3.12) $rcs_version
+
 Copyright (C) 1998 Free Software Foundation, Inc.
 There is NO warranty.  You may redistribute this software
 under the terms of the GNU General Public License.
@@ -37,6 +38,7 @@ For more information about these matters, see the files named COPYING.
 "
 
 usage="Usage: $0 [OPTION]... FILE...
+
 Run each Texinfo FILE through TeX in turn until all cross-references are
 resolved, building all indices.  Expand macros with makeinfo before
 running TeX.  The directory containing each FILE is searched for
@@ -55,7 +57,8 @@ Options:
 The values of the TEX, TEXINDEX, and MAKEINFO environment variables are
 used to run those commands, if they are set.
 
-Email bug reports to bug-texinfo@gnu.org."
+Email bug reports to bug-texinfo@gnu.org,
+general questions and discussion to help-texinfo@gnu.org."
 
 # Initialize variables for option overriding and otherwise.
 # Don't use `unset' since old bourne shells don't have this command.
