@@ -4,7 +4,7 @@
 # Created: 1992-01-19
 # Public domain
 
-# $Id: from,v 1.7 1995/10/16 03:11:14 friedman Exp friedman $
+# $Id: from,v 1.8 1995/10/16 23:35:15 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -260,7 +260,7 @@ export FROM_FORMAT FROM_PARSEP FROM_PROGNAME
 # avoid command line length limits), we usurp the normal stdin the inferior
 # process might have expected.  So dup stdin onto fd 9, and before the
 # inferior process is started, it will be reduped back onto fd 0.
-exec perl $debug $includes - ${1+"$@"} 9<&0 <<'__EOF__'
+exec ${FROM_PERL-${PERL-perl}} $debug $includes - ${1+"$@"} 9<&0 <<'__EOF__'
 
 &main;
 
