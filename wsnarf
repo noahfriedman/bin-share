@@ -1,13 +1,12 @@
 #! /bin/sh
 
-# $Id$
+# $Id: wsnarf,v 1.1 1998/02/13 11:27:53 friedman Exp $
 
 exec wget \
   --header='User-Agent: Mozilla/4.04 [en] (X11; I; Linux 2.0.33 i586)' \
   \
   --convert-links \
   --force-html \
-  --ignore-length \
   --server-response \
   --timestamping \
   --wait=0 \
