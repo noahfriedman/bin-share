@@ -1,12 +1,151 @@
-#!/bin/sh
+#! /bin/sh
+# sayto --- front end for `write' to send messages atomically
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1993-10-05
+# Public domain
+
+# $Id$
+
+# Commentary:
+# Code:
+
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+bq='`'
+eq="'"
+
+# Ed is the standard text editor.
+stdeditor=ed
+
+usage="Usage: $progname {options} [user] {tty}
+
+Options are:
+-D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-e, --edit                   Invoke editor to edit message before sending.
+                             The editor is specified by the environment
+                             variable ${bq}$EDITOR$eq, otherwise the
+                             program ${bq}$stdeditor$eq is used.
+-h, --help                   You're looking at it.
+-q, --quiet                  Do not print confirmation about messages sent.
+"
+
+debug=
+edit=
+verbose=t
+
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
+    -D | --debug | --d* )
+      debug=t
+      shift
+     ;;
+    -e | --edit | -e* )
+      edit=t
+      shift
+     ;;
+    -h | --help | --h )
+      echo "$usage" 1>&2
+      exit 0
+     ;;
+    -q | --quiet | --q* )
+      verbose=
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+case "$debug" in t ) set -x ;; esac
+
+case $# in
+  0 ) echo "$usage" 1>&2; exit 1 ;;
+esac
 
 umask 077
-progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 file="/tmp/$progname$$"
+nodelete=
 
-trap 'rm -f "$file"' 1 2 3 15
+write=${SAYTOWRITE-write}
 
-cat > "$file" && write ${1+"$@"} < "$file"
-rm -f "$file"
+trap 'case "$nodelete" in
+        t ) : ;;
+        * ) rm -f "$file" ;;
+      esac
+      trap "" 0 1 3 15
+      exit ${exitstat-0}
+     ' 0 1 3 15
 
-# eof
+trap 'echo "[Interrupted.  No message sent.]" 1>&3
+      exitstat=130
+      exit $exitstat
+     ' 2
+
+case "$verbose" in
+  t ) exec 3>&1 ;;
+  * ) exec 3> /dev/null ;;
+esac
+
+if (> "$file") 2> /dev/null; then
+  case "$edit" in
+    t )
+      echo "[Editing message with $bq${EDITOR-$stdeditor}$eq...]" 1>&3
+      ${EDITOR-ed} $file
+      exitstat=$?
+     ;;
+    * )
+      echo "[Enter message, ending with C-d on a new line when finished, or C-c to abort.]" 1>&3
+      cat > "$file"
+      exitstat=$?
+     ;;
+  esac
+
+  case $exitstat in
+    0 )
+      if test -s "$file"; then
+        :
+      else
+        echo "[Sending empty message.  Hope that's ok.]" 1>&3
+      fi
+
+      if $write ${1+"$@"} < "$file"; then
+        echo "[Message sent using $bq$write$eq.]" 1>&3
+      else
+        nodelete=t
+        exec 1>&2
+        echo "*** $progname: $bq$write$eq exited non-successfully."
+        echo "*** $progname: You may retrieve your message from the file $file"
+        exit 1
+      fi
+     ;;
+    * )
+      exec 1>&2
+      echo "*** $progname: message entry program exited non-successfully."
+      echo "*** $progname: No message sent.  Sorry."
+      exit $exitstat
+     ;;
+  esac
+else
+  exitstat=$?
+  exec 1>&2
+  echo "*** $progname: Could not create temporary file $bq$file$eq; aborting."
+  exit $exitstat
+fi
+
+# sayto ends here
