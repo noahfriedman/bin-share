@@ -4,7 +4,7 @@
 # Created: 1995-06-23
 # Public domain.
 
-# $Id$
+# $Id: mkhomelinks,v 1.1 1995/06/23 21:50:47 friedman Exp friedman $
 
 $tophome = "/home";
 
@@ -30,7 +30,7 @@ while (@pwent = getpwent ())
               {
                 # Create symlink to home directory.
                 unlink ($symlink);
-                symlink ($symlink, $home);
+                symlink ($home, $symlink);
               }
           }
         else
@@ -46,6 +46,13 @@ sub invalid_user_p
 {
   local ($user, $pw, $uid, $gid, $quota, $comment, $gcos, $home, $shell)
     = @pwent;
+
+  # Special exception for the following accounts.
+  if ($user eq "www"
+      || $user eq "ftp")
+    {
+      return 0;
+    }
 
   if ($pw =~ /[*]/          # * is never a valid char in ciphertext
       || $pw =~ /nologin/
