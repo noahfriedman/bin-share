@@ -4,12 +4,12 @@
 # Created: 1994-10-25
 # Public domain.
 
-# $Id: yemacs,v 1.4 1995/09/06 21:18:25 friedman Exp friedman $
+# $Id: yemacs,v 1.5 1995/09/07 00:33:23 friedman Exp friedman $
 
 # Commentary:
 # Code:
 
-prefix=/usr/local/src/gnu/emacs/19dev/build
+prefix=/var/project/emacs/build
 config=${MACHTYPE-sparc-sun-sunos4.1.3}
 toolkit=lucid
 
