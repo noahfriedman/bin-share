@@ -4,7 +4,7 @@
 # Created: 1992-02-10
 # Public domain
 
-# $Id: rotate-log,v 1.8 1995/10/03 05:17:05 friedman Exp friedman $
+# $Id: rotate-log,v 1.9 1995/10/03 22:20:18 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -297,7 +297,7 @@ for log in ${1+"$@"} ; do
         logsize=`wc -c $basename | sed -e 's/^ *//;s/ .*//'`
         if test "$logsize" -lt "$size_threshold"; then
           if test ".$verbose" = '.t'; then
-            echo "$progname: $basename: size=$logsize less than threshold=$size_threshold; not rotating."
+            echo "$progname: $log: size=$logsize less than threshold=$size_threshold; not rotating."
           fi
           continue
         fi
@@ -351,7 +351,7 @@ for log in ${1+"$@"} ; do
   esac
 
   case "$verbose" in t )
-    echo "Created $basename" ;;
+    echo "Created $log" ;;
   esac
 done
 
