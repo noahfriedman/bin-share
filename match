@@ -1,61 +1,154 @@
-#!/bin/sh
-# 
-# A horrible attempt to match some of the functionality of ypmatch
-# since the FSF machines don't use yp.
-#
+#! /bin/sh
+# match --- emulate nis/ypmatch
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1993-02-03
 # Public domain.
-#
 
-if [ $# -lt 2 ]; then
-   echo "Usage: match [name] [database]"
+# $Id$
+
+# Commentary:
+
+# A horrible attempt to emulate some of the functionality of ypmatch
+# since many machines don't use nis.
+
+# Code:
+
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options} [key] [database]
+
+Options are:
+-D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-h, --help                   You're looking at it.
+"
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
+    -D | --debug | --d* )
+      debug=t
+      shift
+     ;;
+    -h | --help | --h )
+      echo "$usage" 1>&2
+      exit 0
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+case "$debug" in t ) set -x ;; esac
+
+if test $# -ne 2 ; then
+   echo "$usage" 1>&2
    exit 1
 fi
 
-name=$1
-dbase=$2
+name="$1"
+dbase="$2"
 
-# First determine regexp to use
-case ${dbase} in 
-   passwd.byuid | uid )    regexp="^[^:]*:[^:]*:${name}:" ;;
-   passwd*|group*|aliases) regexp="^${name}:" 	;; 
-   *)			   regexp="${name}" 	;; # e.g. hosts
-esac
-   
-# Now determine filename
-case ${dbase} in 
-   aliases) 		filename="/com/mailer/${dbase}" ;;
-   passwd.gate)		filename="/usr/local/adm/${dbase}" ;;
-   uid | passwd.byuid ) filename="/etc/passwd" ;;
-   *)       		filename="/etc/${dbase}" ;;
+# First rewrite any shorthand database names
+case "$dbase" in
+  gid  ) dbase=group.bygid  ;;
+  gr   ) dbase=group        ;;
+  host ) dbase=hosts        ;;
+  pw   ) dbase=passwd       ;;
+  uid  ) dbase=passwd.byuid ;;
 esac
 
-if [ ${dbase} != "aliases" ]; then
-   exec egrep "${regexp}" "${filename}"
-else
-   egrep "${regexp}" "${filename}"
-   if [ $? -eq 0 ]; then
-      exit 0
-   fi
-
-   # If alias wasn't in aliases database, try looking up alias as a
-   # username and search for a .forward file. 
-   passwd_entry="`grep \"^${name}:\" /etc/passwd`"
-   if [ $? -eq 0 ]; then
-      oIFS="${IFS}"
-      IFS=":"
-      set - ${passwd_entry}
-      IFS="${oIFS}"
-      if [ "z$6" != "z" ]; then
-         if [ -r "${6}/.forward" ]; then
-            echo "${name}: `cat ${6}/.forward`"
-            exit 0
-         fi
-      fi
-   fi
+# First try NIS; if the record is there, quit.
+if { nismatch "$name" "$dbase" \
+     || ypmatch "$name" "$dbase"
+   } 2> /dev/null
+then
+  exit $?
 fi
 
-exit 1
+# First determine regexp to use
+case "$dbase" in
+   passwd.byuid | uid | group.bygid | gid )
+                               regexp="^[^:]*:[^:]*:$name:" ;;
+   passwd* |group* | aliases ) regexp="^$name:"             ;;
+   *)			       regexp="$name"               ;; # e.g. hosts
+esac
 
-#
-# eof
-#
+# Now determine filename
+filename=
+case "$dbase" in
+   aliases )
+     # Path to search for aliases file
+     aliases=/com/mailer:/etc/yp/src:/etc/yp:/var/yp:/etc/mail:/etc:/usr/lib
+
+     for d in `IFS=':'; set fnord $aliases; shift; echo ${1+"$@"}`; do
+       if test -f "$d/aliases"; then
+         filename="$d/aliases"
+         break
+       fi
+     done
+    ;;
+   passwd.gate )        filename="/usr/local/adm/$dbase" ;;
+   uid | passwd.byuid ) filename="/etc/passwd" ;;
+   gid | group.bygid )  filename="/etc/group"  ;;
+   *)       		filename="/etc/$dbase" ;;
+esac
+
+if egrep "$regexp" "$filename" 2> /dev/null ; then
+  exit $?
+else
+  case "$dbase" in
+    aliases )
+      # If alias wasn't in aliases database, try looking up alias as a
+      # username and search for a .forward file.
+      home=`{ grep "^$name:" /etc/passwd 2> /dev/null \
+              || ypmatch "$name" passwd  2> /dev/null
+            } \
+            | sed -e 's/^[^:]*:[^:]*:[^:]*:[^:]*:[^:]*://' -e 's/:.*//'`
+
+      if test -r "$home/.forward" ; then
+        echo "$name:" `sed -ne 'H
+                                ${
+                                  s/^\n//
+                                  s/\n/,/g
+                                  p
+                                }' "$home/.forward"`
+        exit 0
+      else
+        exit 1
+      fi
+     ;;
+    * ) exit $? ;;
+  esac
+fi
+
+# match ends here
