@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1991-08-14
 
-# $Id: cpdir,v 1.6 1996/03/03 22:47:38 friedman Exp $
+# $Id: cpdir,v 1.7 1996/03/06 15:15:22 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -37,6 +37,7 @@ usage="Usage: $progname {options} srcdir {srcdir2 ...} dstdir
 
 Options are:
 -D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-d, --dereference            Dereference symlinks when copying.
 -f, --full-path              Copy entire src directory component.
 -h, --help                   You're looking at it.
 -q, --quiet                  Do not print filenames as they're copied.
@@ -54,6 +55,7 @@ Example: ${progname} /home/fsf/friedman /home/gp
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
 debug=
+deref=
 verbose=v
 fullpath=
 
@@ -66,6 +68,10 @@ while test $# != 0; do
   case "$1" in
     -D | --debug | --d* )
       debug=t
+      shift
+     ;;
+    -d | --dereference | --der* )
+      deref=h
       shift
      ;;
     -f | --full-path | --f* )
@@ -154,11 +160,11 @@ for src in ${1+"$@"} ; do
   esac
 
   if test -d "$dst" ; then
-    ( cd "$srcdir" && tar cf - "$src" ) \
+    ( cd "$srcdir" && tar c${deref}f - "$src" ) \
      | ( cd "$dst" && tar xp${verbose}f - )
   else
     mkdir "$dst"
-    ( cd "$srcdir/$src" && tar cf - . ) \
+    ( cd "$srcdir/$src" && tar c${deref}f - . ) \
      | ( cd "$dst" && tar xp${verbose}f - )
   fi
 done
