@@ -1,12 +1,12 @@
 #!/bin/sh
 # xon --- run remote X application
 
-# Copyright (C) 1993, 1995 Noah S. Friedman
+# Copyright (C) 1993, 1995, 1999 Noah S. Friedman
 
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1993-03-08
 
-# $Id: xon,v 1.7 1995/09/23 22:13:12 friedman Exp $
+# $Id: xon,v 1.8 1996/03/03 23:05:21 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -46,6 +46,8 @@ Options are:
                              times, once for each variable.
 -h, --help                   You're looking at it.
 -l, --login-as     USER      Log in as USER on remote host.
+-r, --rsh          RSHCMD    Use RSHCMD to connect to remote host.
+                             Defaults to remsh or rsh depending on system.
 -X, --xauth                  Transmit xauth authentication information.
 -x, --xhost-enable XHOST     Use ${bq}xhost$eq to enable X server access
                              for host XHOST.
@@ -118,8 +120,10 @@ getopt='
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
 debug=
+close_stdfds=t
 explicit_display=
 export_vars=
+rshcmd=
 xauthinfo=
 xhost_enable_host=
 
@@ -163,6 +167,10 @@ while : ; do
     -h | --help | --h )
       echo "$usage" 1>&2
       exit 1
+     ;;
+    -r | --rsh* | --r* )
+      eval "$getopt"
+      rshcmd="$optarg"
      ;;
     -X | --xauth | --xa* )
       shift
@@ -215,18 +223,32 @@ export USER
 rhost=$1
 shift
 
-hostname=`hostname 2> /dev/null`
-case "$hostname" in
-  *.* ) ;;
-  * )
-    # Note that if this is done the result could be incorrect.
-    # "domainname" is actually supposed to return the NIS domain rather
-    # than the domain of the host, but many system administrators
-    # configure systems incorrectly.  If `hostname' doesn't return the
-    # fully-qualified domain name, gripe at your sysadmin today!
-    hostname=$hostname.`domainname 2> /dev/null`
-   ;;
-esac
+{
+  hostname=`hostname 2> /dev/null`
+  case "$hostname" in
+    *.* ) : ;;
+    * )
+      # Try to use DNS to resolve the hostname.
+      if (perl -v > /dev/null) 2> /dev/null; then
+        name=`perl -e '($name) = gethostbyname ($ARGV[0]);
+                       print "$name\n";' "$hostname"`
+        case "$name" in
+          *.* ) hostname="$name" ;;
+        esac
+      else
+        # Note that if this is done the result could be incorrect.
+        # "domainname" is actually supposed to return the NIS domain rather
+        # than the domain of the host, but many system administrators
+        # configure systems incorrectly.  If `hostname' doesn't return the
+        # fully-qualified domain name, gripe at your sysadmin today!
+        domainname=`(dnsdomainname) 2> /dev/null || domainname`
+        hostname="$hostname.$domainname"
+      fi
+     ;;
+  esac
+
+  hostname_unqualified=`echo "$hostname" | sed -e 's/\..*//'`
+}
 
 # canonicalize DISPLAY if not explicitly declared on the command line
 {
@@ -244,17 +266,29 @@ esac
           display_number=`echo "$DISPLAY" | sed -e 's/.*://'`
           display_host=`echo "$DISPLAY" | sed -e 's/:[^:]*//'`
 
-          # This will only happen if there's no display number in the first place.
+          # This will only happen if there's no display number in the first
+          # place.
           case "$display_number" in "$display_host" )
             display_number=0.0 ;;
           esac
 
           # Try to guess intelligently whether display host should be reset
           # (e.g., if it's a hostname that's not local, then it's probably
-          # accurate and we shouldn't clobber it by setting it to the local host)
+          # accurate and we shouldn't clobber it by setting it to the local
+          # host)
           case "$display_host" in
-            unix | loopback | localhost | '' )
-              display_host=$hostname
+            unix | loopback | localhost | '' ) display_host=$hostname ;;
+            $hostname_unqualified )            display_host=$hostname ;;
+            *.* ) : ;;
+            * )
+              # Try to use DNS to resolve the FQDN.
+              if (perl -v > /dev/null) 2> /dev/null; then
+                name=`perl -e '($name) = gethostbyname ($ARGV[0]);
+                               print "$name\n";' "$display_host"`
+                case "$name" in
+                  *.* ) display_host="$name" ;;
+                esac
+              fi
              ;;
           esac
 
@@ -336,6 +370,8 @@ esac
 
   # Standard global places that ought to go in path
   pdirs='
+    /opt/lude/bin
+    /opt/local/bin
     /usr/local/gnu/bin
     /usr/local/gnubin
     /usr/local/gnu
@@ -378,6 +414,7 @@ esac
     /usr/local/bin/X11
     /usr/openwin/bin
     /usr/openwin/share/bin
+    /usr/dt/bin
     /usr/X386/bin
     /usr/x386/bin
     /usr/XFree86/bin/X11
@@ -389,14 +426,22 @@ esac
     /usr/lpp/Xamples/bin
   '
 
-  # Use remsh instead of rsh if the former exists
-  rsh=rsh
-  for d in `echo $PATH | sed -e 's/^:/.:/;s/::/:.:/g;s/:$/:./;s/:/ /g'` ; do
-    if test -f "$d/remsh" ; then
+  case "$rshcmd" in
+    '' )
+      # Use rsh instead of remsh if the former exists
       rsh=remsh
-      break
-    fi
-  done
+      for d in `echo $PATH | sed -e 's/^:/.:/;s/::/:.:/g;s/:$/:./;s/:/ /g'`
+      do
+        if test -f "$d/rsh" ; then
+          rsh=rsh
+          break
+        fi
+      done
+     ;;
+    * ) rsh="$rshcmd" ;;
+  esac
+
+  remote_display=\${DISPLAY-\"$DISPLAY\"}
 
   # Be sure to close various file descripters so that lusing rshds wont
   # inherit them.  (6, 7, 8, and 9 show up under various operating
@@ -405,70 +450,87 @@ esac
   # The "xauth remove" is theoretically unnecessary below, but due to a bug
   # in the initial X11R5 (through at least fix-03) xauth, entries for
   # MIT-MAGIC-COOKIE-1 get lost if you do merge twice without the remove.
-  $rsh "$rhost" -l "$USER" sh $debug <<__EOF__
-    $export_var_string
+  {
+    # This must be in a separate test because the test below runs in a
+    # subshell, and changes in that environment won't affect this process.
+    case "$rshcmd" in
+      ssh-x11 ) close_stdfds= ;;
+    esac
 
-    case "$1" in
-      /* | ./* ) : ;;
-      * )
-        for dir in `echo $pdirs $xdirs` ; do
-          if test -f "\$dir/$1" ; then
-            PATH="\$PATH:\$dir"
-            break
+    {
+      case "$rshcmd" in
+        ssh-x11 ) exec ssh -o 'ForwardX11 yes' -l "$USER" "$rhost" sh $debug ;;
+        ssh | */ssh ) exec $rsh -x -l "$USER" "$rhost" sh $debug ;;
+        * )           exec $rsh    -l "$USER" "$rhost" sh $debug ;;
+      esac
+    } <<__EOF__
+      $export_var_string
+
+      case "$1" in
+        /* | ./* ) : ;;
+        * )
+          for dir in `echo $pdirs $xdirs` ; do
+            if test -f "\$dir/$1" ; then
+              PATH="\$PATH:\$dir"
+              break
+            fi
+          done
+          export PATH
+         ;;
+      esac
+
+      DISPLAY=$remote_display
+      export DISPLAY
+
+      case '$XUSERFILESEARCHPATH' in
+        '' ) : ;;
+        * )
+          XUSERFILESEARCHPATH='$XUSERFILESEARCHPATH'
+          export XUSERFILESEARCHPATH
+         ;;
+      esac
+
+      case '$XAUTHORITY' in
+        '' ) : ;;
+        * )
+          if test -f '$XAUTHORITY'; then
+            XAUTHORITY='$XAUTHORITY'
+            export XAUTHORITY
           fi
-        done
-        export PATH
-       ;;
-    esac
+         ;;
+      esac
 
-    DISPLAY='$DISPLAY'
-    export DISPLAY
+      case '$xauthinfo' in
+        t )
+          echo '$xauthinfo' |
+           {
+             xauth -q remove $remote_display
+             xauth -q merge -
+           }
+         ;;
+      esac
 
-    case '$XUSERFILESEARCHPATH' in
-      '' ) : ;;
-      * )
-        XUSERFILESEARCHPATH='$XUSERFILESEARCHPATH'
-        export XUSERFILESEARCHPATH
-       ;;
-    esac
+      set fnord `for arg in ${1+"$@"} ; do
+                   echo ":$arg"
+                 done \
+                 | sed -ne 's/^://
+                            s/\\\\/\\\\\\\/g
+                            s/'\''/'\''\\\\\\'\'\''/g
+                            s/^/'\''/
+                            s/$/'\''/
+                            H
+                            ${x
+                              s/\n/ /g
+                              p
+                             }'`
 
-    case '$XAUTHORITY' in
-      '' ) : ;;
-      * )
-        if test -f '$XAUTHORITY'; then
-          XAUTHORITY='$XAUTHORITY'
-          export XAUTHORITY
-        fi
-       ;;
-    esac
-
-    case '$xauthinfo' in
-      t )
-        echo '$xauthinfo' |
-         {
-           xauth -q remove $DISPLAY
-           xauth -q merge -
-         }
-       ;;
-    esac
-
-    set fnord `for arg in ${1+"$@"} ; do
-                 echo ":$arg"
-               done \
-               | sed -ne 's/^://
-                          s/\\\\/\\\\\\\/g
-                          s/'\''/'\''\\\\\\'\'\''/g
-                          s/^/'\''/
-                          s/$/'\''/
-                          H
-                          ${x
-                            s/\n/ /g
-                            p
-                           }'`
-
-    shift
-    \${1+"\$@"} >/dev/null 2>&1 9>&- 8>&- 7>&- 6>&- </dev/null &
+      shift
+      case "$close_stdfds" in
+        t ) exec > /dev/null 2>&1 ;;
+      esac
+      \${1+"\$@"} 9>&- 8>&- 7>&- 6>&- < /dev/null &
 __EOF__
+    } &
 }
 
 # xon ends here
