@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- smartly produce DVI files from texinfo sources
-# $Id: texi2dvi,v 0.13 1998/06/13 14:45:24 karl Exp $
+# $Id: texi2dvi,v 0.14 1998/06/14 11:00:15 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98 Free Software Foundation, Inc.
 #
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.13 $'
+rcs_revision='$Revision: 0.14 $'
 rcs_version=`set - $rcs_revision; echo $2`
 
 version="$0 (GNU Texinfo 3.12) $rcs_version
@@ -43,14 +43,14 @@ running TeX.  The directory containing each FILE is searched for
 included files.
 
 Options:
--b, --batch          No interaction (\nonstopmode in TeX).
--c, --clean          Remove all auxiliary files.
--D, --debug          Turn on shell debugging (set -x).
--I DIR               Search DIR for Texinfo files.
--t, --texinfo CMD    Insert CMD after @setfilename in copy of input file.
---verbose            Report on what is done.
--h, --help           Display this help and exit successfully.
--v, --version        Display version information and exit successfully.
+  -b, --batch          No interaction (\nonstopmode in TeX).
+  -c, --clean          Remove all auxiliary files.
+  -D, --debug          Turn on shell debugging (set -x).
+  -I DIR               Search DIR for Texinfo files.
+  -t, --texinfo CMD    Insert CMD after @setfilename in copy of input file.
+  --verbose            Report on what is done.
+  -h, --help           Display this help and exit successfully.
+  -v, --version        Display version information and exit successfully.
 
 The values of the TEX, TEXINDEX, and MAKEINFO environment variables are
 used to run those commands, if they are set.
