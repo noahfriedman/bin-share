@@ -8,7 +8,7 @@ exec ${PERL-perl} -Swx $0 ${1+"$@"}
 # Created: 1995-09-07
 # Public domain
 
-# $Id: run-next,v 1.7 2000/08/10 10:02:42 friedman Exp $
+# $Id: run-next,v 1.8 2000/08/24 09:49:49 friedman Exp $
 
 # Commentary:
 
@@ -32,9 +32,11 @@ use 5.003;
 use strict;
 use Getopt::Long;
 
-(my $progname = $0) =~ s|.*/||;
+my $progname = $0;
+$progname =~ s|.*/||;
+
 my $opt_print = 0;
-my $opt_skip = 0;
+my $opt_skip = 1;
 
 sub usage
 {
@@ -81,12 +83,7 @@ sub main
   foreach $dir (split (/:/, $ENV{PATH}))
     {
       $dir = "." if ($dir eq "");
-
-      if (!$found_progdir && $dir eq $progdir)
-        {
-          $found_progdir = 1;
-          next;
-        }
+      $found_progdir = 1 if (!$found_progdir && $dir eq $progdir);
       next unless ($found_progdir);
       next if (exists $progdirs{$dir});
       my $f = join ("/", $dir, $prog);
@@ -98,12 +95,15 @@ sub main
     }
 
   err (1, $progdir, "directory not in PATH") unless ($found_progdir);
+  err (1, $prog, "program not in PATH")
+    unless (defined $progdir || scalar keys %progdirs > 0);
   err (1, $prog, "program not in any directories after \`$progdir' in PATH")
-    if (scalar keys %progdirs == 0);
+    if (defined $progdir && scalar keys %progdirs == 0);
   if ($seen <= $opt_skip)
     {
-      err (0, $prog, sprintf ("program does not appear in %d places, only %d:",
-                              $opt_skip+1, $seen));
+      err (0, $prog, sprintf ("only %d instances of program in path; "
+                              . "cannot skip more than %d:",
+                              $seen, $seen-1));
       map { err (0, "  " . join ("/", $_, $prog)) }
           sort { $progdirs{$a} <=> $progdirs{$b} } keys %progdirs;
       exit (1);
