@@ -1,0 +1,114 @@
+#! /bin/sh
+exec ${PERL-perl} -wSx $0 ${1+"$@"}
+#!perl
+
+# dirsort --- sort directory entries
+
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2002-01-26
+# Public domain
+
+# $Id$
+
+# Commentary:
+# Code:
+
+use Symbol;
+use strict;
+
+my $verbose = 1;
+
+sub xrename ($$)
+{
+  my ($from, $to) = @_;
+
+  unless (rename ($from, $to))
+    {
+      print STDERR "rename: ", $from, ": ", $!, ".\n";
+      return undef;
+    }
+  print "$from -> $to\n" if $verbose;
+  return 1
+}
+
+sub xmkdir ($;$)
+{
+  my ($dir, $mode) = @_;
+
+  unless (mkdir ($dir, $mode))
+    {
+      print STDERR "mkdir: ", $dir, ": ", $!, ".\n";
+      return undef;
+    }
+  print "mkdir $dir\n" if $verbose;
+  return 1
+}
+
+sub xrmdir ($)
+{
+  my $dir = shift;
+
+  unless (rmdir ($dir))
+    {
+      print STDERR "rmdir: ", $dir, ": ", $!, ".\n";
+      return undef;
+    }
+  print "rmdir $dir\n" if $verbose;
+  return 1
+}
+
+sub get_dirents ($)
+{
+  my $dir = shift;
+
+  my $dfh = gensym;
+  if (!opendir ($dfh, $dir))
+    {
+      print STDERR "opendir: ", $dir, ": ", $!, ".\n";
+      return undef;
+    }
+  my @ent = sort grep (!/^\.\.?$/o, readdir ($dfh));
+  closedir ($dfh);
+
+  return \@ent;
+}
+
+sub move_dirents ($$;$)
+{
+  my ($fromdir, $todir, $except) = @_;
+
+  my $files = get_dirents ($fromdir);
+  for my $ent (@$files)
+    {
+      next if ($except && $ent eq $except);
+      my $ofile = join ("/", $fromdir, $ent);
+      my $nfile = join ("/", $todir,   $ent);
+      xrename ($ofile, $nfile);
+    }
+}
+
+sub dirsort ($)
+{
+  my $dir = shift;
+
+  my $tmpdir = "$dir/,dirsort$$";
+  xmkdir ($tmpdir, 0700) || return undef;
+  move_dirents ($dir, $tmpdir, ",dirsort$$");
+  move_dirents ($tmpdir, $dir);
+  xrmdir ($tmpdir);
+}
+
+sub main
+{
+  for my $arg (@ARGV)
+    {
+      dirsort ($arg);
+    }
+}
+
+main ();
+
+# local variables:
+# mode: perl
+# eval: (auto-fill-mode 1)
+# end:
