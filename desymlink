@@ -1,12 +1,12 @@
 #! /bin/sh
 # desymlink --- replace symlinks with copy of file pointed to
 
-# Copyright (C) 1995 Noah S. Friedman
+# Copyright (C) 1993, 1995, 1998 Noah S. Friedman
 
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-09-23
 
-# $Id: desymlink,v 1.4 1996/03/03 22:48:11 friedman Exp $
+# $Id: desymlink,v 1.5 1996/08/09 05:16:18 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -43,6 +43,7 @@ usage="Usage: $progname {options} [symlinks]
 Options are:
 -D, --debug                  Turn on debugging.
 -h, --help                   You're looking at it.
+-p, --preserve               Preserve permissions on copied files.
 -v, --verbose                Be verbose.
 "
 
@@ -51,6 +52,7 @@ Options are:
 # Instead, assign them an empty value.
 debug=
 verbose=
+preserve=
 
 # Parse command line arguments.
 # Make sure that all wildcarded options are long enough to be unambiguous.
@@ -68,6 +70,10 @@ while : ; do
     -h | --help | --h )
       echo "$usage" 1>&2
       exit 0
+     ;;
+    -p | --preserve | --p* )
+      preserve=-p
+      shift
      ;;
     -v | --verbose | --v* )
       verbose=-x
@@ -100,8 +106,9 @@ while : ; do
   esac
 done
 
+DESYMLINK_PRESERVE=$preserve
 DESYMLINK_PROGNAME=$progname
-export DESYMLINK_PROGNAME
+export DESYMLINK_PRESERVE DESYMLINK_PROGNAME
 
 ${PERL-perl} $debug - ${1+"$@"} <<'__EOF__' | sh $verbose
 
@@ -172,7 +179,7 @@ for ($i = 0; $i <= $#ARGV; $i++)
    # instances of "/../../"
    while (/\/[^\/][^\/]*\/\.\.\//o)
      {
-      s/\/[^\/][^\/]*\/\.\.\//\//og;  # Resolve most references to ".."
+       s/\/[^\/][^\/]*\/\.\.\//\//o;  # Resolve most references to ".."
      }
    s/\/[^\/][^\/]*\/\.\.$//o;         # Resolving trailing ".."
    s/^\/\.\.\//\//go;                 # Eliminate leading "/.."
@@ -188,7 +195,7 @@ for ($i = 0; $i <= $#ARGV; $i++)
        next next_path;
      }
 
-   print "rm -f '$ARGV[$i]' && cp '$_' '$ARGV[$i]'\n";
+   print "rm -f '$ARGV[$i]' && cp $ENV{DESYMLINK_PRESERVE} '$_' '$ARGV[$i]'\n";
   }
 
 sub err
