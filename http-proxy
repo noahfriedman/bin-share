@@ -4,7 +4,7 @@
 # Created: 1996-09-23
 # Public domain.
 
-# $Id$
+# $Id: http-proxy,v 1.1 1996/09/23 22:51:48 friedman Exp $
 
 PATH="$PATH:/usr/local/etc"
 export PATH
@@ -21,8 +21,8 @@ eval `echo "$line" \
 
            s/^[^ ]* //
            s/ .*//
-           s/^http:\/\///
-           /^[^/]*:[0-9]/!s/\([^/]*\)/\1:80/
+           s/^[\/]*http:\/\///
+           /^[^\/]*:[0-9]/!{s/\([^\/]*\)/\1:80/;}
            s/\([^:]*\):\([0-9]*\)\(\/.*\)/host="\1" port="\2" url="\3"/p
 
            g
@@ -32,7 +32,12 @@ eval `echo "$line" \
 
 {
   echo "$method $url $protocol"
-  cat
+  while read line; do
+    echo "$line"
+    case "$line" in
+      '' ) break ;;
+    esac
+  done
 } | tcpconnect $host $port
 
-# eof
+# http-proxy ends here
