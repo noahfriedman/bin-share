@@ -4,7 +4,7 @@
 # Created: 1996-11-05
 # Public domain
 
-# $Id: snarf-automount-map,v 2.1 1996/11/06 05:20:13 friedman Exp $
+# $Id: snarf-automount-map,v 2.2 1997/01/08 22:43:18 friedman Exp $
 
 # Commentary:
 
@@ -49,6 +49,7 @@ sub snarf
 
   while (<CMD>)
     {
+      next if ($_ =~ /^[ \t]*#/o);
       local (@tok) = split (/[ \t\n\r]+/o, $_);
       local ($thisprefix) = "$prefix";
 
