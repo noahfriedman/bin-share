@@ -4,13 +4,13 @@
 # Created: 1994-10-25
 # Public domain.
 
-# $Id: yemacs,v 1.1 1994/10/26 21:07:14 friedman Exp friedman $
+# $Id: yemacs,v 1.2 1995/01/05 23:35:03 friedman Exp friedman $
 
 # Commentary:
 # Code:
 
 prefix=/usr/local/src/gnu/emacs/19dev/build
-config=sparc-sun-sunos4shr
+config=${MACHTYPE-sparc-sun-sunos4.1.3}
 toolkit=lucid
 
 # Name by which this script was invoked.
@@ -72,20 +72,20 @@ getopt='
   {
     optarg=
     case "$1" in
-      --*=* ) 
+      --*=* )
         optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
-        shift 
+        shift
        ;;
-      * ) 
+      * )
         case ${2+set} in
-          set ) 
+          set )
             optarg="$2"
             shift
-            shift 
+            shift
            ;;
-          * ) 
-            case "$optarg_optional" in 
-              "" ) 
+          * )
+            case "$optarg_optional" in
+              "" )
                 case "$1" in
                   --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
                   * ) option="$1" ;;
