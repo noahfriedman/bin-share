@@ -4,7 +4,7 @@
 # Created: 1995-08-08
 # Public domain
 
-# $Id$
+# $Id: make-cgi-input,v 1.1 1995/08/09 02:09:05 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -112,7 +112,7 @@ while : ; do
       shift
       break
      ;;
-    -* )
+    -? | --* )
       case "$1" in
         --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
         * )     arg="$1" ;;
@@ -121,6 +121,13 @@ while : ; do
       echo "$progname: unknown or ambiguous option $bq$arg$eq"
       echo "$progname: Use $bq--help$eq for a list of options."
       exit 1
+     ;;
+    -??* )
+      # Split grouped single options into separate args and try again
+      optarg="$1"
+      shift
+      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+      shift
      ;;
     * )
       break

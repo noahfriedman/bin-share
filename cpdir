@@ -4,12 +4,12 @@
 # Created: 1991-08-14
 # Public domain.
 
-# $Id$
+# $Id: cpdir,v 1.4 1994/05/22 03:34:13 friedman Exp friedman $
 
 # Commentary:
 # Code:
 
-# Name by which this script was invoked. 
+# Name by which this script was invoked.
 progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 
 # To prevent hairy quoting and escaping later.
@@ -39,13 +39,13 @@ debug=
 verbose=
 fullpath=
 
-# Parse command line arguments. 
+# Parse command line arguments.
 # Make sure that all wildcarded options are long enough to be unambiguous.
 # It's a good idea to document the full long option name in each case.
 # Long options which take arguments will need a `*' appended to the
-# canonical name to match the value appended after the `=' character. 
+# canonical name to match the value appended after the `=' character.
 while test $# != 0; do
-  case "$1" in 
+  case "$1" in
     -D | --debug | --d* )
       debug=t
       shift
@@ -66,16 +66,22 @@ while test $# != 0; do
       shift
       break
      ;;
-    --*=* )
-      arg=`echo $1 | sed -e 's/=.*//'`
-      echo "$progname: unknown option $bq$arg$eq" 1>&2
-      echo "$usage" 1>&2
+    -? | --* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
       exit 1
      ;;
-    -* )
-      echo "$progname: unknown option $bq$1$eq" 1>&2
-      echo "$usage" 1>&2
-      exit 1
+    -??* )
+      # Split grouped single options into separate args and try again
+      optarg="$1"
+      shift
+      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+      shift
      ;;
     * )
       break
@@ -106,7 +112,7 @@ for src in ${1+"$@"} ; do
           srcdir=/
           src=`echo "$src" | sed -e 's/^\/*//'`
          ;;
-      esac 
+      esac
      ;;
     * )
       # sed is more portable than `dirname'

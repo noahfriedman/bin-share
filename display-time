@@ -4,7 +4,7 @@
 # Created: 1991-12-18
 # Public domain
 
-# $Id: display-time,v 1.8 1995/05/16 20:50:51 friedman Exp friedman $
+# $Id: display-time,v 1.9 1995/05/16 22:57:05 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -118,7 +118,7 @@ while test $# != 0 ; do
       shift
       break
      ;;
-    -* )
+    -? | --* )
       case "$1" in
         --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
         * )     arg="$1" ;;
@@ -127,6 +127,13 @@ while test $# != 0 ; do
       echo "$progname: unknown or ambiguous option $bq$arg$eq"
       echo "$progname: Use $bq--help$eq for a list of options."
       exit 1
+     ;;
+    -??* )
+      # Split grouped single options into separate args and try again
+      optarg="$1"
+      shift
+      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+      shift
      ;;
     * )
       break
