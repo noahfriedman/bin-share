@@ -9,7 +9,7 @@ exec ${PERL-perl} -Sx $0 ${1+"$@"}
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.51 2002/12/23 01:51:48 friedman Exp $
+# $Id: from,v 1.52 2003/03/13 10:10:19 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -34,7 +34,8 @@ exec ${PERL-perl} -Sx $0 ${1+"$@"}
 # Code:
 
 use 5.003;
-use strict qw(!vars);
+use strict;
+no strict qw(vars);
 
 use Getopt::Long;
 use POSIX qw(strftime);
