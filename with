@@ -9,7 +9,7 @@ exec ${PERL-perl} -Swx $0 ${1+"$@"}
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-08-14
 
-# $Id: with,v 1.10 2000/01/20 20:09:45 friedman Exp $
+# $Id: with,v 1.11 2003/02/25 09:01:22 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -54,6 +54,7 @@ my $opt_priority;
 my $opt_root;
 my $opt_uid;
 my $opt_umask;
+my $opt_foreground = 0;
 
 sub err
 {
@@ -192,8 +193,23 @@ sub set_uid
 
 sub background
 {
-  fork && exit (0);
-  return *STDERR{IO};
+  my $pid = fork;
+  die "$@" if $pid < 0;
+  if ($pid == 0)
+    {
+      # Backgrounded programs may expect to be able to read input from the
+      # user if stdin is a tty, but we will no longer have any job control
+      # management because of the double fork and exit.  This can result in
+      # a program either blocking on input (if still associated with a
+      # controlling terminal) and stopping, or stealing input from a
+      # foreground process (e.g. a shell).  So redirect stdin to /dev/null.
+      open (STDIN, "< /dev/null") if (-t STDIN);
+      return *STDERR{IO};
+    }
+
+  exit (0) unless $opt_foreground;
+  wait;
+  exit ($?);
 }
 
 sub dosetsid
@@ -234,6 +250,19 @@ sub notty
 }
 
 
+sub set_bg_option
+{
+  my %bgfntbl =
+    ( 1 => \&background,
+      2 => \&daemon,
+      4 => \&notty,
+      8 => \&dosetsid,
+    );
+
+  $bgopt = $_[0];
+  $bgfn  = $bgfntbl{$bgopt};
+}
+
 sub parse_options
 {
   Getopt::Long::config (qw(bundling autoabbrev require_order));
@@ -254,10 +283,12 @@ sub parse_options
      "U|euid=s",        \$opt_euid,
      "u|uid=s",         \$opt_uid,
 
-     "b|bg|background", sub { $bgopt |= 1; $bgfn = \&background },
-     "a|daemon|demon",  sub { $bgopt |= 2; $bgfn = \&daemon     },
-     "N|no-tty|notty",  sub { $bgopt |= 4; $bgfn = \&notty      },
-     "s|setsid",        sub { $bgopt |= 8; $bgfn = \&dosetsid   },
+     "f|fg|foreground", \$opt_foreground,
+
+     "b|bg|background", sub { set_bg_option (1); $opt_foreground = 0 },
+     "a|daemon|demon",  sub { set_bg_option (2) },
+     "N|no-tty|notty",  sub { set_bg_option (4) },
+     "s|setsid",        sub { set_bg_option (8) },
     );
   usage () unless $succ;
 
@@ -300,7 +331,13 @@ Options are:
 The following options cause the resulting process to be backgrounded
 automatically but differ in various ways:
 
--b, --background      Run process in background.
+-b, --background      Run process in background.  This is the default with
+                      the --daemon, --no-tty, and --setsid options.
+
+-f, --foreground      Do not put process into the background when using
+                      the --daemon, --no-tty, and --setsid options.
+                      In all other cases the default is to remain in the
+                      foreground.
 
 -a, --daemon          Run process in \"daemon\" mode.
                       This closes stdin, stdout, and stderr, dissociates
