@@ -4,7 +4,7 @@
 # Created: 1995-07-26
 # Public domain
 
-# $Id$
+# $Id: disksum,v 1.1 1995/07/26 18:15:28 friedman Exp friedman $
 
 # Commentary:
 
@@ -53,7 +53,11 @@ while read pwent; do
   user=$1
   home=$6
 
-  shift $#
+  # Set a single arg, then shift it away.
+  # We do this instead of "shift $#" because some versions of sh do not
+  # allow a numeric argument to shift.
+  set fnord
+  shift
 
   # If the home directory doesn't exist (or is inaccessible), skip it.
   if test -d "$home"; then
@@ -78,7 +82,8 @@ while read pwent; do
   esac
 
   echo "$2 $user $home" >> "$output"
-  shift $#
+  set fnord
+  shift
 done
 
 echo "done
