@@ -1,0 +1,303 @@
+#!/bin/sh
+# vminc --- incorporate new mail into VM inbox
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1993-12-31
+# Last modified: 1994-03-13
+# Public domain
+
+# Commentary:
+# Code:
+
+# Name by which this script was invoked. 
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options}
+
+Options are:
+-D, --debug                  Turn on shell debugging (${bq}set -x$eq).
+-c, --crash-file  CFILE      Temporary crash recovery folder.
+-h, --help                   You're looking at it.
+-i, --inbox-file  IFILE      VM primary incoming message folder pathname.
+-m, --mail-file   MFILE      Mail spool file (for new mail).
+-n, --no-vmincrc             Do not read vminc init file.
+-V, --vminrc-file VFILE      vminc init file (default $bq~/.vmincrc$eq).
+-v, --verbose                Report operations as they occur.
+
+Parameters can be set in the file specified by the VMINCRC environment
+variable (which defaults to ~/.vmincrc).  The useful parameters to set
+include MAIL, VMINBOX, VMCRASH, and perhaps PATH.  The syntax is bourne
+shell, e.g.
+
+        # To include path of ${bq}movemail$eq
+        PATH=/usr/local/lib/emacs/etc:\$PATH
+        VMINBOX=\$HOME/mail/INBOX
+
+"
+
+# Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
+#
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument ARG
+# won't get used if first long option syntax was used. 
+# If 3rd argument OPTIONAL is set, then 2nd may be empty without resulting
+# in an error (i.e. option argument is optional)
+#
+# Returns number of positions caller should shift.
+# If retval = 3, caller should exit.
+get_option_argument='
+  {
+    option="$1" arg="$2" arg_optional="$3" shift_num=2
+    case "$option" in
+      --*=* )
+        arg=`echo $option | sed -e "s/^[^=]*=//"` 
+        shift_num=1
+       ;;
+    esac
+    case "$arg" in
+      "" )
+        case "$arg_optional" in
+          "" )
+            case "$option" in 
+              --*=* ) option=`echo $option | sed -e "s/=.*//"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$usage" 1>&2
+            exit 3
+           ;;
+        esac
+        exit 1
+       ;;  
+    esac
+    echo "$arg"
+    exit $shift_num
+  }'
+
+# Some bourne shells don't allow a numeric argument to `shift'.
+# Usage: eval "shift_num=n; $shift_n_times"
+shift_n_times='
+  {
+    while : ; do
+      case "$shift_num" in 0 | "" ) break ;; esac
+      shift_num=`expr $shift_num - 1`
+      shift
+    done
+  }'
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+verbose=
+inhibit_vmincrc=
+
+# Parse command line arguments. 
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character. 
+while test $# != 0; do
+  case "$1" in 
+    -D | --debug | --d* )
+      debug=t
+      shift
+     ;;
+    -c | --crash-file* | --c* )
+      VMCRASH=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -h | --help | --h )
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -i | --inbox-file* | --i* )
+      VMINBOX=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -m | --mail-file* | --c* )
+      MAIL=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -n | --no-vmincrc | --n* )
+      inhibit_vmincrc=t
+      shift
+     ;;
+    -V | --vmincrc-file* | --vm* )
+      VMINCRC=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -v | --verbose | --ve* )
+      verbose=t
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    --*=* )
+      arg=`echo $1 | sed -e 's/=.*//'`
+      echo "$progname: unknown option $bq$arg$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -* )
+      echo "$progname: unknown option $bq$1$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+case "$debug" in t ) set -x ;; esac
+
+# Precedence for defs (highest->lowest): options, env, ~/.vmincrc, default
+VMINCRC=${VMINCRC-$HOME/.vmincrc}
+
+# Save env
+case "${MAIL+set}"    in set ) env_MAIL=$MAIL       ;; esac
+case "${VMINBOX+set}" in set ) env_VMINBOX=$VMINBOX ;; esac
+case "${VMCRASH+set}" in set ) env_VMCRASH=$VMCRASH ;; esac
+
+# Set defaults
+# TODO: Implement an inline frob which runs emacs, loads your .vm, and has
+# some other elisp commands to emit bourne shell code setting these
+# environment variables from the elisp defaults, which is evaled.
+#
+# Since setting MAIL is expensive, don't try to calculate the default
+# unless there really wasn't one inherited from the environment (which
+# would override anyway)
+case "$MAIL" in
+  '' )
+    USER=${USER-${LOGNAME-`{ (whoami) 2> /dev/null; } \
+                           || { id | sed -ne 's/.*uid=[0-9]*(//
+                                              s/).*//
+                                              p'
+                              }`}}
+
+    for dir in /usr/spool/mail /var/mail /usr/mail; do
+      if test -d "$dir" ; then
+        MAIL=$dir/$USER
+        if test -s "$MAIL" ; then
+          break
+        fi
+      fi
+    done
+   ;;
+esac
+VMINBOX=$HOME/INBOX
+VMCRASH=$HOME/CRASH
+
+# Read from ~/.vmincrc if it exists
+if test ".$inhibit_vmincrc" != .t -a -f "$VMINCRC" ; then
+  case "$verbose" in t )
+    echo "Reading $VMINCRC" ;;
+  esac
+  . "$VMINCRC"
+fi
+
+# Restore env
+MAIL=${env_MAIL-$MAIL}
+VMINBOX=${env_VMINBOX-$VMINBOX}
+VMCRASH=${env_VMCRASH-$VMCRASH}
+
+# Abort if there is an autosave for the inbox file and the autosave is newer.
+{
+  set fnord `echo "$VMINBOX" \
+             | sed -ne 's,/$,,g;s,\(.*\)/\(.*\),\1/ \2,p'`
+  shift
+  vminbox_autosave="$1#$2#"
+
+  set fnord `ls -t "$VMINBOX" "$vminbox_autosave" 2> /dev/null`
+  shift
+  case "$1" in "$vminbox_autosave" )
+    exec 1>&2
+    echo "$progname: Inbox autosave is newer than actual file.  Aborting."
+    ls -ltd "$vminbox_autosave" "$VMINBOX"
+    exit 1
+   ;;
+  esac
+}
+
+# If there is a crashbox already, incorporate it first.
+{
+  if test -f "$VMCRASH" ; then
+    case "$verbose" in t )
+      echo "Incorporating existing crashbox into inbox."
+      echo "${PS4-+} cat $VMCRASH >> $VMINBOX"
+     ;;
+    esac
+    cat "$VMCRASH" >> "$VMINBOX"
+    exitstat=$?
+    case $exitstat in
+      0 )
+        case "$verbose" in t )
+          echo "${PS4-+} rm $VMCRASH"
+         ;;
+        esac
+        if rm "$VMCRASH"; then 
+          :
+        else
+          exec 1>&2
+          echo "$progname: Deletion of existing crashbox failed.  Aborting."
+          ls -ld "$VMCRASH"
+          exit 1
+        fi
+       ;;
+      * )
+        exec 1>&2
+        echo "$progname: Incorporation of existing crashbox failed.  Aborting."
+        ls -ld "$VMCRASH" "$VMINBOX"
+        exit $exitstat
+       ;;
+    esac
+  fi
+}
+
+# If spool file is empty or nonexistent, stop now.
+{
+  if test -s "$MAIL" ; then
+    :
+  else
+    exec 1>&2
+    echo "$progname: Mail spool file is empty or nonexistent.  Exiting."
+    ls -ld "$MAIL" 2> /dev/null
+    exit 0
+  fi
+}
+
+# Incorporate new mail.
+{
+  case "$verbose" in t ) 
+    echo "Incorporating new mail."
+    echo "${PS4-+} ${MOVEMAIL-movemail} $MAIL $VMCRASH"
+   ;;
+  esac
+  ${MOVEMAIL-movemail} "$MAIL" "$VMCRASH" \
+   && {
+        case "$verbose" in t ) 
+          echo "${PS4-+} cat $VMCRASH >> $VMINBOX" ;;
+        esac
+        cat "$VMCRASH" >> "$VMINBOX"
+      } \
+   && {
+        case "$verbose" in t ) 
+          echo "${PS4-+} rm $VMCRASH" ;;
+        esac
+        rm "$VMCRASH"
+      }
+}
+
+# vminc ends here
