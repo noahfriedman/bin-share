@@ -1,14 +1,16 @@
 #!/bin/sh
-# $Id$
+# $Id: ssh-add-all,v 1.1 2001/03/20 12:00:37 friedman Exp $
 
 ssh1keys='
   friedman@splode.com
   friedman@inktomi.com
+  friedman@mozilla.org
 '
 
 openssh_dsakeys='
   friedman@splode.com
   friedman@inktomi.com
+  friedman@mozilla.org
 '
 
 for key in $ssh1keys; do
