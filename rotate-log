@@ -4,7 +4,7 @@
 # Created: 1992-02-10
 # Public domain
 
-# $Id$
+# $Id: rotate-log,v 1.3 1994/04/16 10:28:31 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -36,7 +36,7 @@ Options are:
                               ${bq}compact$eq, ${bq}compress$eq, ${bq}gzip$eq.
                               Default is ${bq}compress$eq.
 -m, --mode, --chmod     MODE  Change permissions to MODE on rotated logs.
--n, --number-of-logs       N  Keep up to N old versions of log (default 7).
+-n, --number-of-logs       N  Keep up to N versions of log total (default 7).
                               Rotated logs are numbered zero-origin.
 -o, --owner, --chown   OWNER  Change owner of logs to OWNER (you should use
                               OWNER.GROUP and avoid using --group if the
