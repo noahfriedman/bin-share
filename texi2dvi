@@ -25,7 +25,8 @@
 # If possible, please send a copy of the output of the script called with
 # the `--debug' option when making a bug report. 
 #
-# Version 0.2
+# Version 0.3
+# Last modified 30-Oct-92
 #
 
 # Please note that in the interest of general portability, some common
@@ -41,7 +42,7 @@
 
 progname=`basename $0`
 
-usage="Usage: ${progname} {-d} {-f} {-h} [file1] {file2} {...}
+usage="Usage: ${progname} {-D} {-f} {-h} [file1] {file2} {...}
        {--debug} {--force} {--help}
 
    Options in braces are optional.  Those in brackets are required. 
@@ -80,7 +81,7 @@ debug=""
 # document what the long option is canonically called. 
 while [ $# -gt 0 ]; do
    case z$1 in
-      z-d | z--debug | z--d* )
+      z-D | z--debug | z--d* )
          debug="t"
          shift
         ;;
@@ -117,9 +118,7 @@ if [ $# -eq 0 ]; then
    exit 1
 fi
 
-if [ "z${debug}" = "zt" ]; then
-   set -x
-fi
+test "z${debug}" = "zt" && set -x
 
 # Texify files
 for command_line_filename in "$@" ; do
@@ -131,9 +130,9 @@ for command_line_filename in "$@" ; do
 
    # Roughly equivalent to `dirname ...`, but more portable
    directory="`echo ${command_line_filename} | sed 's/\/[^\/]*$//'`"
-   file="`basename ${command_line_filename}`"
+   file_texi="`basename ${command_line_filename}`"
    # Strip off the last extension part (probably .texinfo or .texi)
-   filename_noext="`echo ${file} | sed 's/\.[^.]*$//'`"
+   filename_noext="`echo ${file_texi} | sed 's/\.[^.]*$//'`"
 
    # "Unset" variables that might have values from previous iterations and
    # which won't be completely reset later.
@@ -141,7 +140,7 @@ for command_line_filename in "$@" ; do
 
    # If directory and file are the same, then it's probably because there's
    # no pathname component.  Set dirname to `.', the current directory.
-   if [ "z${directory}" = "z${file}" ]; then
+   if [ "z${directory}" = "z${file_texi}" ]; then
       directory="."
    fi
 
@@ -156,17 +155,17 @@ for command_line_filename in "$@" ; do
    # though the user may be able to reenter a valid filename at the tex
    # prompt (assuming they're attending the terminal), this script won't be
    # able to find the right index files and so forth.
-   if [ ! -r "${file}" ]; then
-      echo "${progname}: ${file}: No such file or permission denied." 1>&2
+   if [ ! -r "${file_texi}" ]; then
+      echo "${progname}: ${file_texi}: No such file or permission denied." 1>&2
       continue; 
    fi
 
    # If dvi file is newer than the texinfo source, don't do anything
    # (unless --force option was specified)
-   if [ ! "${force}" ]; then
+   if [ -z "${force}" ]; then
       # List file.dvi first, just in case mtimes are identical and ls -t
       # sorts stably. 
-      filename_newest="`set -$- \`ls -t \"${filename_noext}.dvi\" \"${file}\" 2> /dev/null\`; echo \"\$1\"`"
+      filename_newest="`set -$- \`ls -t \"${filename_noext}.dvi\" \"${file_texi}\" 2> /dev/null\`; echo \"\$1\"`"
       if [ "${filename_newest}" = "${filename_noext}.dvi" ]; then
          echo "${progname}: ${bq}${filename_noext}.dvi${eq} is up to date." 1>&2
          continue
@@ -210,7 +209,7 @@ for command_line_filename in "$@" ; do
       ${texindex} ${orig_index_files_sans_aux}
    fi
 
-   if ${tex} ${file} ; then		# TeX run first time
+   if ${tex} ${file_texi} ; then		# TeX run first time
       definite_index_files=""
       # Get list of new index files
       possible_index_files="`eval echo ${filename_noext}.?? ${filename_noext}.aux`"
@@ -240,9 +239,9 @@ for command_line_filename in "$@" ; do
          # File list is the same.  We must compare each file until we find a
          # difference.  
          index_files_changed_p=""
-         for file in ${new_index_files} ; do
+         for this_file in ${new_index_files} ; do
             # cmp -s will return nonzero exit status if files differ. 
-            cmp -s "${file}" "${file}${backup_extension}"
+            cmp -s "${this_file}" "${this_file}${backup_extension}"
             if [ $? -ne 0 ] ; then
                # We only need to keep comparing until we find *one* that
                # differs, because we'll have to run texindex & tex no
@@ -262,7 +261,7 @@ for command_line_filename in "$@" ; do
             retval=$?
          fi
          if [ ${retval} -eq 0 ]; then
-            ${tex} "${file}"
+            ${tex} "${file_texi}"
          fi
       fi
    fi
