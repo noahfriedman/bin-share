@@ -4,7 +4,7 @@
 # Created: 1991-12-18
 # Public domain
 
-# $Id: display-time,v 1.6 1995/05/11 19:15:30 friedman Exp friedman $
+# $Id: display-time,v 1.7 1995/05/16 19:25:11 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -154,6 +154,7 @@ prev_spool_stat=
 
 while : ; do
   loadavg_result=
+  spool_stat=
   case "$check_loadavg" in t )
     loadavg=`uptime \
               | sed -ne 's/.*load averages*:[ 	]*//
@@ -173,10 +174,11 @@ while : ; do
         mail_result="mail:$1"
        ;;
     esac
-    prev_spool_stat="$spool_stat"
   else
     mail_result=
   fi
+
+  prev_spool_stat="$spool_stat"
 
   echo $loadavg_result $mail_result
   sleep "$sleep_time"
