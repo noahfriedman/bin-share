@@ -3,6 +3,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1991-12-18
 # Last modified: 1994-03-15
+# STATUS: UNFINISHED
 # Public domain
 
 # Commentary:
@@ -22,9 +23,36 @@ Options are;
 -D, --debug                  Turn on shell debugging (${bq}set -x$eq).
 -h, --help                   You're looking at it.
 -l, --load-average           Print present load average.
+-M, --mail-file     MFILE    Path of local mail spool file.
 -m, --mail                   Print number of spooled messages.
--s, --sleep SECONDS          Sleep SECONDS between each check.
+-r, --remote-mail-hosts RHOST1,RHOST2,...
+                             Name of remote mail hosts for mail counts.
+                             Syntax for RHOST is ${bq}user@host:mailfile$eq
+                             The ${bq}user@$eq and ${bq}mailfile$eq components
+                             are optional.
+-s, --sleep         SECONDS  Sleep SECONDS between each check.
 "
+
+# Clever way to save arguments whilst preserving quoting.
+# Note that only one set of args can be saved at a time.
+# Usage: eval "$save_current_args"
+#        eval "$restore_saved_args"
+save_current_args='
+  {
+    _saved_args=
+    while : ; do
+      case $# in 0 ) break ;; esac
+      eval _saved_args$#=\$1
+      _saved_args="$_saved_args \"\$_saved_args$#\""
+      shift
+    done
+    eval "$restore_saved_args"
+  }'
+restore_saved_args='
+  {
+    eval '\''{ eval set fnord $_saved_args ; }'\''
+    shift 
+  }'
 
 # Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
 #
@@ -80,6 +108,8 @@ shift_n_times='
 debug=
 check_loadavg=
 check_mail=
+rhost_list=
+spoolfile=${MAIL-$MAILPATH}
 sleep_time=60
 
 # Parse command line arguments. 
@@ -101,9 +131,21 @@ while test $# != 0 ; do
       check_loadavg=t
       shift
      ;;
-    -m | --mail | --m* )
+    -M | --mail-file* | --mail-* )
+      spoolfile=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -m | --mail )
       check_mail=t
       shift
+     ;;
+    -r | --remote-mail-host* | --r* )
+      rhost_list=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
      ;;
     -s | --sleep* | --s* )
       sleep_time=`(set - "$1" "$2"; eval "$get_option_argument")`
@@ -134,22 +176,40 @@ done
 
 case "$debug" in t ) set -x ;; esac
 
+case "$spoolfile" in '' )
+  for f in /usr/spool/mail /var/mail /usr/mail ; do
+    if test -d "$f" ; then
+      spoolfile="$f/$USER"
+      break
+    fi
+  done
+ ;;
+esac
+
+case "$rhost_list" in '' )
+  # Use remsh instead of rsh if the former exists
+  rsh=rsh
+  for d in `echo $PATH | sed -e 's/^:/.:/;s/::/:.:/g;s/:$/:./;s/:/ /g'` ; do
+    if test -f "$d/remsh" ; then
+      rsh=remsh
+      break
+    fi
+  done
+ ;;
+
+ 
+
+esac
+
+stampfile="/tmp/$progname$$"
+mail_result=
+
 trap '{ 
         exitstat=$?
         rm -f "$stampfile" 2> /dev/null
         trap "" 1 2 3 15
         exit $exitstat
       }' 1 2 3 15
-
-for f in /usr/spool/mail /var/mail /usr/mail ; do
-  if test -d "$f" ; then
-    spoolfile="$f/$USER"
-    break
-  fi
-done
-
-stampfile="/tmp/$progname$$"
-mail_result=
 
 while : ; do
   loadavg_result=
@@ -176,7 +236,26 @@ while : ; do
     mail_result=
   fi
 
-  echo $loadavg_result $mail_result
+  # FIXME
+  if test "z$rhost" != z ; then
+    rmail_result=`rsh "$rhost" -l "$USER" sh 2>/dev/null <<__EOF__
+      rmail_result="$rmail_result"
+      if test -s "$spoolfile" ; then
+        set \\\`ls -t "$stampfile" "$spoolfile" 2> /dev/null\\\` > /dev/null
+        if test "z\\\$1" = "z$spoolfile" ; then
+          set \\\`egrep '^From ' "$spoolfile" 2> /dev/null | wc -l\\\` > /dev/null
+          rmail_result="mailrem:\\\$1"
+          > "$stampfile"
+        fi
+      else
+        rmail_result=
+      fi
+      echo "\\\$rmail_result"
+__EOF__
+`
+  fi
+
+  echo $loadavg_result $mail_result $rmail_result
   sleep "$sleep_time"
 done
 
