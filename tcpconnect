@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-04-15
 
-# $Id: tcpconnect,v 1.8 1996/03/22 20:21:43 friedman Exp $
+# $Id: tcpconnect,v 1.9 1996/03/22 21:31:47 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -38,7 +38,6 @@ usage="Usage: $progname {options} [host {port}]
 Options are:
 -D, --debug           Turn on interactive debugging in perl.
 -h, --help            You're looking at it.
--H, --no-sigup        Do not kill child processes with SIGHUP on EOF.
 -I, --include   DIR   Include DIR in @INC path for perl.
                       This option may be specified multiple times to append
                       search paths to perl.
@@ -61,7 +60,6 @@ includes=
 perl=${TCPCONNECT_PERL-${PERL-perl}}
 TCPCONNECT_DYNLOAD=
 TCPCONNECT_RESREV=
-TCPCONNECT_SIGHUP=
 TCPCONNECT_SIGINT=
 TCPCONNECT_STTY=
 TCPCONNECT_VERBOSE=
@@ -111,6 +109,7 @@ getopt='
                 exit 1
                ;;
            esac
+           shift
          ;;
         esac
      ;;
@@ -134,11 +133,6 @@ while : ; do
     -d | --no-dynamic-loading | --no-dynload | --no-d* )
       TCPCONNECT_DYNLOAD=nil
       export TCPCONNECT_DYNLOAD
-      shift
-     ;;
-    -H | --no-sighup | --no-s* )
-      TCPCONNECT_SIGHUP=nil
-      export TCPCONNECT_SIGHUP
       shift
      ;;
     -h | --help | --he* )
@@ -228,7 +222,7 @@ sub main
       &errmsg ("cannot recover stdin from fd 9", "$!");
       exit (1);
     }
-  close (9);
+  close (9);  # I don't think this works... lose lose.
 
   $saved_stty_settings = '';
   if ($ENV{'TCPCONNECT_STTY'} ne "")
@@ -299,13 +293,8 @@ sub tcpconnect
       $rhost = pack ($sockaddr, &AF_INET, $port, $rhostaddr[0]);
       close (S);
 
-      # Make socket filehandle.
       socket (S, &AF_INET, &SOCK_STREAM, $proto)
         || die ("$progname: socket: $!");
-
-      # Give the socket an address.
-      bind (S, $thishost)
-        || die ("$progname: bind: $!");
 
       if ("$canon_rhostname" =~ /^[0-9.]+$/o)
         {
@@ -318,7 +307,6 @@ sub tcpconnect
                      . "] port $port";
         }
 
-      # Connect to server.
       &verbose ("trying $hinfo...");
       if (! connect (S, $rhost))
         {
@@ -351,97 +339,50 @@ sub tcpconnect
   &client_setproctitle ($canon_rhostname, $rhostname, $rhostaddrlen,
                         $rhostaddr[0], $port);
 
-  # Set file handles to be command buffered.
-  # Since we do unbuffered sysreads and syswrites this may actually be
-  # unnecessary.
-  select (S);      $| = 1;
-  select (STDIN);  $| = 1;
-  select (STDOUT); $| = 1;
-
-  # Avoid deadlock by forking.
-  $child = fork ();
-
-  if ($child == 0)
-    {
-      $SIG{'HUP'} = 'shutdown_child';
-      $0 = "$0 [PPID=" . getppid() . "]";
-      ($in, $out) = (STDIN, S);
-    }
-  else
-    {
-      $SIG{'HUP'} = 'shutdown_parent';
-      $SIG{'CHLD'} = 'parent_SIGCHLD_handler';
-      ($in, $out) = (S, STDOUT);
-    }
-
-  # If sighup may be sent, give time for both processes to finish setting
-  # up sig handlers.  This is usually only bcritical if sending input from a
-  # pipeline.  Users are slow as paste.
-  if ("$ENV{TCPCONNECT_SIGHUP}" ne "nil")
-    {
-      sleep (1);
-    }
-
-  local ($fn) = $SIG{'HUP'};
-
-  while ($len = sysread ($in, $_, 16384))
-    {
-      syswrite ($out, $_, $len);
-    }
-
-  &$fn;
+  &do_io (STDIN, STDOUT, S);
 }
 
-# Called by child
-sub shutdown_child
+sub do_io
 {
-  # Disable further hup signals
-  $SIG{'HUP'} = 'IGNORE';
+  local ($inh, $outh, $remh) = @_;
+  local ($inbits, $outbits, $len) = ('', '', 0);
+  local ($bufsize) = 4096;
 
-  local ($ppid) = getppid ();
+  vec ($inbits, fileno ($inh), 1) = 1;
+  vec ($inbits, fileno ($remh), 1) = 1;
 
-  if ($ppid != 1 && $ENV{'TCPCONNECT_SIGHUP'} eq "nil")
+  while (1)
     {
-      shutdown (S, $SHUTDOWN_SEND);
-    }
-  else
-    {
-      shutdown (S, $SHUTDOWN_SEND);
-      kill ('HUP', $ppid);
-    }
+      select ($outbits = $inbits, undef, undef, undef);
 
-  exit (0);
-}
+      if (vec ($outbits, fileno ($inh), 1) == 1)
+        {
+          if ($len = sysread ($inh, $_, $bufsize))
+            {
+              syswrite ($remh, $_, $len);
+            }
+          else
+            {
+              # Shut down sending, but don't return; allow remaining output
+              # to drain.
+              vec ($inbits, fileno ($inh), 1) = 0;
+              shutdown ($remh, $SHUTDOWN_SEND);
+            }
+        }
 
-# Called by parent
-sub shutdown_parent
-{
-  # Disable further hup signals
-  $SIG{'HUP'} = 'IGNORE';
-
-  shutdown (S, $SHUTDOWN_RECEIVE);
-  close (S);
-  &verbose ($hinfo, "connection closed.");
-  &restore_stty;
-  if ($ENV{'TCPCONNECT_SIGHUP'} ne "nil")
-    {
-      kill ('HUP', $child);
-    }
-  exit (0);
-}
-
-# This just reaps the child
-sub parent_SIGCHLD_handler
-{
-  wait;
-}
-
-sub restore_stty
-{
-  if ("$saved_stty_settings" ne '')
-    {
-      `stty "$saved_stty_settings"`;
-    }
+      if (vec ($outbits, fileno ($remh), 1) == 1)
+        {
+          if ($len = sysread ($remh, $_, $bufsize))
+            {
+              syswrite ($outh, $_, $len);
+            }
+          else
+            {
+              shutdown ($remh, $SHUTDOWN_BOTH);
+              return;
+            }
+        }
+   }
 }
 
 sub initialize_sockvars
