@@ -4,7 +4,7 @@
 # Created: 1995-04-15
 # Public domain
 
-# $Id: smtp,v 1.6 1996/09/20 17:18:11 friedman Exp $
+# $Id: smtp,v 1.7 1997/10/16 02:28:55 friedman Exp $
 
 case "$1" in
   aeneas )             h=aeneas.mit.edu            ;;
@@ -15,13 +15,12 @@ case "$1" in
   es | rc )            h=hawkwind.utcs.toronto.edu ;;
   eterna )             h=splode.eterna.com.au      ;;
   frob | baal )        h=frob.com                  ;;
-  gnu )                h=mail.gnu.org              ;;
+  gnu | prep )         h=mail.gnu.org              ;;
   lcs | mintaka )      h=mintaka.lcs.mit.edu       ;;
   mc )                 h=mc.lcs.mit.edu            ;;
   media )              h=media.mit.edu             ;;
   osu | cis )          h=cis.ohio-state.edu        ;;
   piglet )             h=piglet.splode.com         ;;
-  prep )               h=gnu-life.ai.mit.edu       ;;
   red-bean )           h=totoro.red-bean.com       ;;
   * )                  h="$1"                      ;;
 esac
