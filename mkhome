@@ -1,43 +1,48 @@
 #!/bin/sh
 # mkhome -- make user directories.
-# Created 06-Mar-93 Noah Friedman <friedman@prep.ai.mit.edu>
-# Last modified 25-Jun-93
-# Public domain.
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1993-03-06
+# Public domain
+
+# $Id$
 
 PATH="/usr/local/bin:/etc:/usr/etc:/usr/local/etc:${PATH}"
 export PATH
 
 umask 022
 
-verbose=""
-case "z${1}" in
-   'z-x' ) verbose="-x"; shift ;;
+verbose=
+case "$1" in
+  -x )
+    verbose=-x
+    shift
+   ;;
 esac
 
-case "z$*" in
-   'z' )
-      echo 'Usage: mkhome [user1] {user2} {...}' 1>&2
-      exit 1
-     ;;
+case $# in
+  0 )
+    echo 'Usage: mkhome [user1] {user2} {...}' 1>&2
+    exit 1
+   ;;
 esac
 
-re_namelist="^${1}:"
+re_namelist="^$1:"
 shift
 for name in ${1+"$@"} ; do
    re_namelist="${re_namelist}\|^${name}:"
 done
 
-sedscript='/'"${re_namelist}"'/{
+sedscript='/'"$re_namelist"'/{
               s/^[^:]*:[^:]*:\([^:]*\):\([^:]*\):[^:]*:\([^:]*\):.*/mkdir '\''\3'\'' ; chown '\''\1.\2'\'' '\''\3'\'' ;/
               s/\n//g
               s/^  *//g
               p
            }'
 
-#if egrep '^+:' /etc/passwd > /dev/null 2>&1 ; then
-#   ypcat passwd | sed -n -e "${sedscript}" | sh ${verbose}
-#else
-   sed -n -e "${sedscript}" /etc/passwd | sh ${verbose}
-#fi
+if grep '^+:' /etc/passwd > /dev/null 2>&1 ; then
+   ypcat passwd | sed -n -e "$sedscript" | sh $verbose
+else
+   sed -n -e "$sedscript" /etc/passwd | sh $verbose
+fi
 
 # eof
