@@ -1,15 +1,15 @@
-#!/bin/sh
+#! /bin/sh
 # rotate-log --- rotate accounting logs, optionally compressing old logs
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-02-10
 # Public domain
 
-# $Id: rotate-log,v 1.4 1994/04/16 10:30:06 friedman Exp friedman $
+# $Id: rotate-log,v 1.5 1994/04/20 16:03:10 friedman Exp friedman $
 
 # Commentary:
 # Code:
 
-# Name by which this script was invoked. 
+# Name by which this script was invoked.
 progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 
 # To prevent hairy quoting and escaping later.
@@ -44,52 +44,56 @@ Options are:
 -v, --verbose                 Chatter away while working.
 "
 
-# Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
+# Usage: eval "$getopt"; value=$optarg
+# or     optarg_optional=t; eval "$getopt"; value=$optarg
 #
-# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument ARG
-# won't get used if first long option syntax was used. 
-# If 3rd argument OPTIONAL is set, then 2nd may be empty without resulting
-# in an error (i.e. option argument is optional)
+# This function automatically shifts the positional args as appropriate.
+# The argument to an option is optional if the variable `optarg_optional'
+# is non-empty.  Otherwise, the argument is required and getopt will cause
+# the program to exit on an error.  optarg_optional is reset to be empty
+# after every call to getopt.  The argument (if any) is stored in the
+# variable `optarg'.
 #
-# Returns number of positions caller should shift.
-# If retval = 3, caller should exit.
-get_option_argument='
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument
+# won't get used if first long option syntax was used.
+#
+# Note: because of broken bourne shells, using --foo=bar syntax can
+# actually screw the quoting of args that end with trailing newlines.
+# Specifically, most shells strip trailing newlines from substituted
+# output, regardless of quoting.
+getopt='
   {
-    option="$1" arg="$2" arg_optional="$3" shift_num=2
-    case "$option" in
+    optarg=
+    case "$1" in
       --*=* )
-        arg=`echo $option | sed -e "s/^[^=]*=//"` 
-        shift_num=1
+        optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
+        shift
        ;;
-    esac
-    case "$arg" in
-      "" )
-        case "$arg_optional" in
-          "" )
-            case "$option" in 
-              --*=* ) option=`echo $option | sed -e "s/=.*//"` ;;
-            esac
-            echo "$progname: option $bq$option$eq requires argument." 1>&2
-            echo "$usage" 1>&2
-            exit 3
+      * )
+        case ${2+set} in
+          set )
+            optarg="$2"
+            shift
+            shift
            ;;
+          * )
+            case "$optarg_optional" in
+              "" )
+                case "$1" in
+                  --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
+                  * ) option="$1" ;;
+                esac
+                exec 1>&2
+                echo "$progname: option $bq$option$eq requires argument."
+                echo "$progname: use $bq--help$eq to list option syntax."
+                exit 1
+               ;;
+           esac
+         ;;
         esac
-        exit 1
-       ;;  
+     ;;
     esac
-    echo "$arg"
-    exit $shift_num
-  }'
-
-# Some bourne shells don't allow a numeric argument to `shift'.
-# Usage: eval "shift_num=n; $shift_n_times"
-shift_n_times='
-  {
-    while : ; do
-      case "$shift_num" in 0 | "" ) break ;; esac
-      shift_num=`expr $shift_num - 1`
-      shift
-    done
+    optarg_optional=
   }'
 
 # Initialize variables.
@@ -106,13 +110,14 @@ default_directory=.
 number_of_logs=7
 verbose=
 
-# Parse command line arguments. 
+# Parse command line arguments.
 # Make sure that all wildcarded options are long enough to be unambiguous.
 # It's a good idea to document the full long option name in each case.
 # Long options which take arguments will need a `*' appended to the
-# canonical name to match the value appended after the `=' character. 
-while test $# != 0; do
-  case "$1" in 
+# canonical name to match the value appended after the `=' character.
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
     -C | --compress-active | --compress-a* )
       compressp=t
       compress_activep=t
@@ -127,40 +132,28 @@ while test $# != 0; do
       shift
      ;;
     -d | --default-directory* | --def* )
-      default_directory=`(set - "$1" "$2"; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+      eval "$getopt"
+      default_directory="$optarg"
      ;;
     -g | --group | --g* | --chgrp* | --chg* )
-      chgrp="${CHGRP-chgrp} "`(set - "$1" "$2"; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+      eval "$getopt"
+      chgrp="${CHGRP-chgrp} $optarg"
      ;;
     -M | --compress-method* | --compress-m* )
-      compress_method=`(set - "$1" "$2"; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+      eval "$getopt"
+      compress_method="$optarg"
      ;;
     -m | --mode | --m* | --chmod* | --chm* )
-      chmod="${CHMOD-chmod} "`(set - "$1" "$2"; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+      eval "$getopt"
+      chmod="${CHMOD-chmod} $optarg"
      ;;
     -n | --number-of-logs* | --n* )
-      number_of_logs=`(set - "$1" "$2"; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+      eval "$getopt"
+      number_of_logs="$optarg"
      ;;
     -o | --owner | --o* | --chown* | --cho* )
-      chown="${CHOWN-chown} "`(set - "$1" "$2"; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+      eval "$getopt"
+      chown="${CHOWN-chown} $optarg"
      ;;
     -v | --verbose | --v* )
       verbose=t
@@ -174,15 +167,14 @@ while test $# != 0; do
       shift
       break
      ;;
-    --*=* )
-      arg=`echo $1 | sed -e 's/=.*//'`
-      echo "$progname: unknown option $bq$arg$eq" 1>&2
-      echo "$usage" 1>&2
-      exit 1
-     ;;
     -* )
-      echo "$progname: unknown option $bq$1$eq" 1>&2
-      echo "$usage" 1>&2
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
       exit 1
      ;;
     * )
@@ -208,7 +200,7 @@ case "$compress_method" in
     echo "$progname: unknown compress-method $bq$compress_method$eq" 1>&2
     exit 1
    ;;
-esac   
+esac
 
 orig_cwd=${PWD-`pwd`}
 max_log_number=`expr $number_of_logs - 1`  # make it zero-origin
