@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- smartly produce DVI files from texinfo sources
-# $Id: texi2dvi,v 0.8 1998/02/26 21:13:13 karl Exp $
+# $Id: texi2dvi,v 0.9 1998/04/14 14:43:39 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98 Free Software Foundation, Inc.
 #
@@ -45,7 +45,7 @@
 progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.8 $'
+rcs_revision='$Revision: 0.9 $'
 version=`set - $rcs_revision; echo $2`
 
 # To prevent hairy quoting and escaping later.
@@ -352,10 +352,11 @@ for command_line_filename in ${1+"$@"}; do
     file_list="${file_list} ${file}${backup_extension}"
   done
   if test -n "${file_list}"; then
-    $verbose "Removing $file_list $tmp_dir $tmp_dir2 ..."
+    $verbose "Removing $file_list ..."
     rm -f ${file_list}
-    rm -rf $tmp_dir $tmp_dir2
   fi
+  $verbose "Removing $tmp_dir $tmp_dir.2 ..."
+  rm -rf $tmp_dir $tmp_dir.2
 done
 
 $verbose "$0 done."
