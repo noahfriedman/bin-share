@@ -3,7 +3,7 @@
 
 # Copyright (C) 1996, 1997 Noah S. Friedman
 
-# $Id: netscape-fe,v 2.1 1997/06/10 08:13:02 friedman Exp $
+# $Id: netscape-fe,v 2.2 1997/06/10 10:14:12 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -163,9 +163,9 @@ if [ "$version" = "" ] ; then
 fi
 
 MOZILLA_HOME="$mozprefix$version"
-CLASSPATH="$MOZILLA_HOME/java/classes:$MOZILLA_HOME:$CLASSPATH"
+#CLASSPATH="$MOZILLA_HOME/java/classes:$MOZILLA_HOME:$CLASSPATH"
 PATH="$PATH:$MOZILLA_HOME"
-export MOZILLA_HOME CLASSPATH PATH
+export MOZILLA_HOME PATH #CLASSPATH
 
 case "${MOZPRINT+set}" in
   set )
