@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1991-08-14
 
-# $Id: cpdir,v 1.5 1995/09/23 21:58:56 friedman Exp $
+# $Id: cpdir,v 1.6 1996/03/03 22:47:38 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -39,7 +39,8 @@ Options are:
 -D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
 -f, --full-path              Copy entire src directory component.
 -h, --help                   You're looking at it.
--v, --verbose                Print filenames as they're copied.
+-q, --quiet                  Do not print filenames as they're copied.
+-v, --verbose                Print filenames as they're copied (default).
 
 Example: ${progname} /home/fsf/friedman /home/gp
          => /home/fsf/friedman -> /home/gp/friedman
@@ -53,7 +54,7 @@ Example: ${progname} /home/fsf/friedman /home/gp
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
 debug=
-verbose=
+verbose=v
 fullpath=
 
 # Parse command line arguments.
@@ -75,8 +76,12 @@ while test $# != 0; do
       echo "$usage" 1>&2
       exit 1
      ;;
+    -q | --quiet | --q* )
+      verbose=
+      shift
+     ;;
     -v | --verbose | --v* )
-      verbose="-v"
+      verbose=v
       shift
      ;;
     -- )     # Stop option processing
@@ -154,7 +159,7 @@ for src in ${1+"$@"} ; do
   else
     mkdir "$dst"
     ( cd "$srcdir/$src" && tar cf - . ) \
-     | ( cd "$dst" && tar xpv${verbose}f - )
+     | ( cd "$dst" && tar xp${verbose}f - )
   fi
 done
 
