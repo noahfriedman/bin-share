@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-01-19
 
-# $Id: from,v 1.21 1997/03/28 09:33:51 friedman Exp $
+# $Id: from,v 1.22 1998/01/20 21:25:04 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -49,6 +49,8 @@ fi
 usage="Usage: $progname {options} {folder {...}}
 
 Options are:
+-1, --first-header-line      Do not display header continuation lines; show
+                             only the first line of each displayed header.
 -C, --count-only             Only count the number of messages that would
                              be displayed, without displaying any other
                              information about them.  E.g. $bq-Cu$eq would
@@ -166,6 +168,7 @@ FROM_EXTRACTP=
 FROM_LINELIMIT=
 FROM_MATCH_HEADER=
 FROM_MATCH_REGEXP=
+FROM_FIRSTLINEP=
 FROM_PARSEP=t
 FROM_UNREAD_ONLY_P=
 FROM_USER=$USER
@@ -245,6 +248,11 @@ getopt='
 while : ; do
   case $# in 0) break ;; esac
   case "$1" in
+    -1 | --first-header-line-only | --fi* )
+      FROM_FIRSTLINEP=t
+      shift
+     ;;
+
     -C | --count-only | --cou* )
       FROM_COUNTP=t
       shift
@@ -416,10 +424,10 @@ esac
 
 FROM_PROGNAME=$progname
 
-export FROM_PROGNAME
-export FROM_COUNTP FROM_EXTRACTP FROM_PARSEP FROM_UNREAD_ONLY_P
-export FROM_LINELIMIT FROM_MATCH_HEADER FROM_MATCH_REGEXP
-export COLUMNS FROM_FORMAT FROM_USER
+export FROM_PROGNAME COLUMNS
+export FROM_COUNTP FROM_EXTRACTP FROM_FIRSTLINEP FROM_PARSEP
+export FROM_UNREAD_ONLY_P FROM_LINELIMIT FROM_MATCH_HEADER
+export FROM_MATCH_REGEXP FROM_FORMAT FROM_USER
 
 # By using a here-document to include the source of the perl script (to
 # avoid command line length limits), we usurp the normal stdin the inferior
@@ -550,10 +558,11 @@ sub initialize_variables
   $format_token{'{TLINES}'} = 'd';
   $format_token{'{FLINES}'} = 'd';
 
-  $hack_data_p    = &truep ('FROM_PARSEP');
-  $extract_body_p = &truep ('FROM_EXTRACTP');
-  $unread_only_p  = &truep ('FROM_UNREAD_ONLY_P');
-  $count_only_p   = &truep ('FROM_COUNTP');
+  $hack_data_p              = &truep ('FROM_PARSEP');
+  $extract_body_p           = &truep ('FROM_EXTRACTP');
+  $unread_only_p            = &truep ('FROM_UNREAD_ONLY_P');
+  $count_only_p             = &truep ('FROM_COUNTP');
+  $first_header_line_only_p = &truep ('FROM_FIRSTLINEP');
 
   $total_message_lines = 0;
   $in_message_body_p = $nil;
@@ -667,7 +676,7 @@ sub process_file
       if ($_ =~ /$re_message_delimiter/o)
         {
           undef (%current_headers);
-          $header_contents = "";
+          $header_contents = '';
           $in_message_body_p = $nil;
           next;
         }
@@ -685,6 +694,10 @@ sub process_file
       # we're at the end of the headers for this message.
       if ( $_ =~ /$re_blank_line/o && ! $in_message_body_p )
         {
+          # Add last buffered header.
+          &add_header ($header_contents);
+          $header_contents = '';
+
           $total_message_lines++;
           $folder_message_lines++;
           $current_headers{'{TLINES}'} = $total_message_lines;
@@ -711,7 +724,8 @@ sub process_file
         }
 
       # Otherwise, append current header info.
-      $header_contents .= "\n$_";
+      $header_contents .= "\n$_"
+        if ($header_contents eq '' || ! $first_header_line_only_p);
     }
   if ($count_only_p)
     {
@@ -762,10 +776,14 @@ sub process_pop3_folder
             }
           else
             {
-              $header_contents .= "\n$lines[$lineno]";
+              $header_contents .= "\n$lines[$lineno]"
+                if ($header_contents eq '' || ! $first_header_line_only_p);
             }
           $lineno++;
         }
+
+      # Add last buffered header.
+      &add_header ($header_contents);
 
       $total_message_lines++;
       $current_headers{'{FLINES}'} = $msgnumber;
@@ -863,6 +881,12 @@ sub hack_From_data
     {
       $data = $&;
       chop $data;
+    }
+  # From: <foobar@host>
+  elsif ($data =~ /^<.*/o)
+    {
+      $data = $&;
+      $data =~ s/[<>]//g;
     }
   # From: foobar@host
   else
