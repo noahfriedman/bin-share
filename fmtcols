@@ -9,7 +9,7 @@ exec ${PERL-perl} -wSx $0 ${1+"$@"}
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-08-02
 
-# $Id: fmtcols,v 2.10 2001/11/25 05:19:34 friedman Exp $
+# $Id: fmtcols,v 2.11 2001/11/27 17:52:46 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -126,6 +126,7 @@ sub read_input ($@)
               next;
             }
 
+          $l =~ s/^\s+//o if $option->{skip_lwspace};
           my @fields = split (/$fieldsep/o, $l, $numfields);
           my $i = 0;
 
@@ -218,6 +219,7 @@ sub parse_options ()
   my $skip_lines;
   my @ignore_re;
   my $width_limit;
+  my $skip_lwspace;
   my %right_justify;
   my @rightcols;
 
@@ -230,6 +232,7 @@ sub parse_options ()
               "r|right-justify=s@",        \@rightcols,
               "S|output-separator=s",      \$outsep,
               "s|separator=s",             \$fieldsep,
+              "w|skip-leading-whitespace", \$skip_lwspace,
               "h|help",                    \&usage);
 
   my $ignore_re;
@@ -254,6 +257,7 @@ sub parse_options ()
            rj_numeric    => $rj_numeric,
            skip_lines    => $skip_lines,
            ignore_re     => $ignore_re,
+           skip_lwspace  => $skip_lwspace,
          };
 }
 
@@ -278,6 +282,9 @@ Options are:
                                 This can be any regular expression.
                                 The default field separator is any number of
                                 tabs and spaces, i.e. \"[ \\t]+\".
+-w, --skip-leading-whitespace   Skip leading whitespace before splitting
+                                fields.  This option is probably only useful in
+                                conjunction with the default separator regexp.
 -S, --output-separator SEP      Output separator between fields.  Default \" \".
 -n, --num-fields       NUM      Assume there are no more than NUM fields.
                                 If there are more, last column contains all
