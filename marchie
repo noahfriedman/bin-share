@@ -4,7 +4,7 @@
 # Created: 1995-06-12
 # Public domain
 
-# $Id$
+# $Id: marchie,v 1.1 1995/08/14 22:47:36 friedman Exp friedman $
 
 # Commentary:
 
@@ -22,7 +22,7 @@
 
 # Code:
 
-archie -h archie.unit.no -sl -m 500 ${1+"$@"} \
+archie -h ${MARCHIESERVER-archie.unit.no} -sl -m 500 ${1+"$@"} \
  | sed -ne 's/[ 	][ 	]*/ /g
             s/^[^ ]*  *//;
             s=\([0-9]*\) \([^ ]*\) \(.*\)=\2 \3 \1=
