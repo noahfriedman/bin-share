@@ -2,7 +2,7 @@
 exec ${PERL-perl} -wSx $0 ${1+"$@"}
 #!perl
 
-# $Id: imapcount,v 1.1 2002/01/14 20:01:28 friedman Exp $
+# $Id: imapcount,v 1.2 2002/01/14 20:10:08 friedman Exp $
 
 package IMAP;
 
@@ -167,6 +167,7 @@ sub disconnect ($)
 package main;
 
 use Getopt::Long;
+use POSIX qw(setsid);
 use Symbol;
 use strict;
 
@@ -228,6 +229,7 @@ sub detach
   open (STDERR, ">/dev/null");
 
   exit (0) if (fork != 0);
+  setsid ();
 }
 
 sub getpass
@@ -257,10 +259,10 @@ sub process_options
 {
   my $ignore;
   my %option = ( daemon         => 0,
-                 host           => "inbox1.inktomi.com",
+                 host           => "mailhost",
                  port           => 143,
                  user           => $ENV{USER},
-                 countfile      => $ENV{HOME} . "/etc/misc/.imapcount",
+                 countfile      => $ENV{HOME} . "/.imapcount",
                  folder         => "INBOX",
                  pass           => $ENV{IMAPPASS},
                  sleep          => 60,
@@ -286,8 +288,8 @@ sub main
 
   if ($option->{daemon})
     {
-      $option->{pass} = `getpop` || getpass ("Password: ")
-        unless ($option->{pass});
+      $option->{pass} = getpass ("Password: ")
+        unless defined $option->{pass};
       daemon ($option);
     }
 
