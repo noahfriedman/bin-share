@@ -1,9 +1,10 @@
 #! /bin/sh
-# $Id$
+# $Id: find-ssh-agent,v 1.1 1999/11/04 22:26:50 friedman Exp $
 
 listkeys=
 case "$1" in
   -k ) listkeys=t ;;
+  -e ) printeval=t ;;
 esac
 
 for try in /tmp/ssh-${LOGNAME-${USER-`whoami`}}/ssh-*-agent; do
@@ -11,6 +12,13 @@ for try in /tmp/ssh-${LOGNAME-${USER-`whoami`}}/ssh-*-agent; do
   case "$got" in
     '' ) : ;;
     * )
+      case "$printeval" in
+        t )
+          echo "SSH_AUTH_SOCK=$try"
+          echo "export SSH_AUTH_SOCK"
+          exit 0
+         ;;
+      esac
       echo $try
       case "$listkeys" in
         t )
