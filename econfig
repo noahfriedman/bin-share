@@ -1,0 +1,243 @@
+#!/bin/sh
+# econfig --- front end to configure an emacs build tree for compilation
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1994-10-26
+# Public domain.
+
+# $Id$
+
+# Commentary:
+
+# If using this at cli.com, read the file
+# /usr/local/src/gnu/emacs/19dev/README
+
+# Code:
+
+configure=/usr/local/src/gnu/emacs/19dev/current/configure
+
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options} {{--} other args to canonical configure}
+
+Options are:
+-D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-c, --configuration CONFIG   Use CONFIG as the configuration type.
+                             This is a string of the form {cpu}-{vendor}-{os}.
+                             Read the file ${bq}INSTALL$eq in the emacs
+                             distribution for more details.
+-g, --no-guess               Do not guess configuration type based on
+                             current directory; instead, let the emacs
+                             configure program do it itself with the
+                             ${bq}config.guess$eq program supplied in the
+                             distribution.
+-h, --help                   You're looking at it.
+-P, --prefix        PREFIX   Use PREFIX for installation prefix path.
+                             Note: you probably don't need to set this
+                             since the devopment versions of emacs should
+                             not be installed.  If not specified, configure
+                             is given the $bq--run-in-place$eq option so
+                             that the executable can be run directly out of
+                             the build tree (with ${bq}yemacs$eq).
+-p, --program       PROG     Run PROG to configure emacs.
+-q, --quiet                  Turn off verbose messages from configure.
+-t, --toolkit       TOOLKIT  Use an emacs compiled with the TOOLKIT window
+                             toolkit.
+--                           End argument list to $progname and begin
+                             arguments to the configuration program.
+                             This is only necessary if passing arguments to
+                             configure that begin with $bq-$eq.
+
+The default configure program to run is
+$bq$configure$eq
+
+The default configuration and toolkit are deduced from the current
+directory of the build tree.  For example, if you are in
+/usr/local/src/gnu/emacs/19dev/build/sparc-sun-sunos4shr/lucid, the
+configuration type is assumed to be ${bq}sparc-sun-sunos4shr$eq, and the
+default toolkit to be ${bq}lucid$eq."
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+configuration=
+guessp=t
+prefix=--run-in-place
+toolkit=
+verbose=--verbose
+
+# Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
+#
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument ARG
+# won't get used if first long option syntax was used.
+# If 3rd argument OPTIONAL is set, then 2nd may be empty without resulting
+# in an error (i.e. option argument is optional)
+#
+# Returns number of positions caller should shift.
+# If retval = 3, caller should exit.
+get_option_argument='
+  {
+    option="$1" arg="$2" arg_optional="$3" shift_num=2
+    case "$option" in
+      --*=* )
+        arg=`echo $option | sed -e "s/^[^=]*=//"`
+        shift_num=1
+       ;;
+    esac
+    case "$arg" in
+      "" )
+        case "$arg_optional" in
+          "" )
+            case "$option" in
+              --*=* ) option=`echo $option | sed -e "s/=.*//"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$usage" 1>&2
+            exit 3
+           ;;
+        esac
+        exit 1
+       ;;
+    esac
+    echo "$arg"
+    exit $shift_num
+  }'
+
+# Some bourne shells don't allow a numeric argument to `shift'.
+# Usage: eval "shift_num=n; $shift_n_times"
+shift_n_times='
+  {
+    while : ; do
+      case "$shift_num" in 0 | "" ) break ;; esac
+      shift_num=`expr $shift_num - 1`
+      shift
+    done
+  }'
+
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
+    -D | --debug )
+      debug=t
+      shift
+     ;;
+    -c | --configuration* | --c* )
+      configuration=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -g | --no-guess | -n* )
+      guessp=
+      shift
+     ;;
+    -h | --help | --h* )
+      echo "$usage" 1>&2
+      exit 0
+     ;;
+    -P | --prefix* | --pre* )
+      prefix_arg=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+
+      prefix="--prefix=$prefix_arg"
+     ;;
+    -p | --program* | --pro* )
+      configure=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -q | --quiet | --q* )
+      verbose=
+      shift
+     ;;
+    -t | --toolkit* | --t* )
+      toolkit=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+case "$debug"   in t  ) set -x            ;; esac
+case "$verbose" in '' ) exec 1> /dev/null ;; esac
+
+case "$guessp" in
+  t )
+    if test ".$configuration" = '.' \
+        || test ".$toolkit" = '.'
+    then
+      error=
+      eval `pwd \
+             | sed -ne '/\/build\//!{
+                          s/.*/error=t/p
+                          q
+                        }
+                        s/.*\/build\//guess_configuration=/
+                        s/\// guess_toolkit=/
+                        s/\/.*//
+                        p'`
+
+      case "$error" in
+        t )
+          exec 1>&2
+          echo "$progname: your must be in a subdirectory of ${bq}build/$eq"
+          exit 1
+         ;;
+      esac
+
+      case "$configuration" in '' ) configuration=$guess_configuration ;; esac
+      case "$toolkit"       in '' ) toolkit=$guess_toolkit             ;; esac
+      case "$toolkit"       in '' ) toolkit=no                         ;; esac
+    fi
+   ;;
+  * )
+    # Don't molest configuration if it was actually specified
+    #configuration=
+
+    case "$toolkit" in '' ) toolkit=no ;; esac
+   ;;
+esac
+
+set fnord "$configure" \
+          $prefix \
+          $verbose \
+          --with-x-toolkit=$toolkit \
+          $configuration \
+	  ${1+"$@"}
+shift
+
+echo ${PS4-+} ${1+"$@"}
+${1+"$@"}
+
+# econfig ends here

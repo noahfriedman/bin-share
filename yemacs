@@ -1,0 +1,181 @@
+#!/bin/sh
+# yemacs --- front end to find right development version of compiled emacs
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1994-10-25
+# Public domain.
+
+# $Id$
+
+# Commentary:
+# Code:
+
+prefix=/usr/local/src/gnu/emacs/19dev/build
+config=sparc-sun-sunos4shr
+toolkit=no
+
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options} {{--} args to emacs}
+
+Options are:
+-D, --debug                  Turn on shell debugging ($bq${bq}set -x$eq$eq).
+-c, --configuration CONFIG   Use an emacs configured for system of type CONFIG.
+                             This is a string of the form {cpu}-{vendor}-{os}.
+-h, --help                   You're looking at it.
+-l, --list-available         List all available configurations and toolkits.
+-p, --prefix        PREFIX   Build-tree prefix; this is the base where
+                             all uninstalled build trees reside.
+-t, --toolkit       TOOLKIT  Use an emacs compiled with the TOOLKIT window
+                             toolkit.
+
+--                           End argument list to $progname and begin
+                             arguments to genuine emacs program.
+                             This is only necessary if passing arguments to
+                             emacs that begin with $bq-$eq.
+
+Default prefix is $bq$prefix$eq
+Default configuration is $bq$config$eq
+Default toolkit is $bq$toolkit$eq
+"
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+listp=
+quick=
+
+# Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
+#
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument ARG
+# won't get used if first long option syntax was used.
+# If 3rd argument OPTIONAL is set, then 2nd may be empty without resulting
+# in an error (i.e. option argument is optional)
+#
+# Returns number of positions caller should shift.
+# If retval = 3, caller should exit.
+get_option_argument='
+  {
+    option="$1" arg="$2" arg_optional="$3" shift_num=2
+    case "$option" in
+      --*=* )
+        arg=`echo $option | sed -e "s/^[^=]*=//"`
+        shift_num=1
+       ;;
+    esac
+    case "$arg" in
+      "" )
+        case "$arg_optional" in
+          "" )
+            case "$option" in
+              --*=* ) option=`echo $option | sed -e "s/=.*//"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$usage" 1>&2
+            exit 3
+           ;;
+        esac
+        exit 1
+       ;;
+    esac
+    echo "$arg"
+    exit $shift_num
+  }'
+
+# Some bourne shells don't allow a numeric argument to `shift'.
+# Usage: eval "shift_num=n; $shift_n_times"
+shift_n_times='
+  {
+    while : ; do
+      case "$shift_num" in 0 | "" ) break ;; esac
+      shift_num=`expr $shift_num - 1`
+      shift
+    done
+  }'
+
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
+    -D | --debug )
+      debug=t
+      shift
+     ;;
+    -c | --configuration* | --c* )
+      config=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -h | --help | --h* )
+      echo "$usage" 1>&2
+      exit 0
+     ;;
+    -l | --list-available | --l* )
+      listp=t
+      shift
+     ;;
+    -p | --prefix* | --p* )
+      prefix=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -q )
+      # Pass this option to emacs; this is just for the sake of convenience.
+      quick=-q
+      shift
+     ;;
+    -t | --toolkit* | --t* )
+      toolkit=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+case "$debug" in t ) set -x ;; esac
+
+case "$listp" in
+  '' ) exec $prefix/$config/$toolkit/src/emacs $quick ${1+"$@"} ;;
+  * )
+    cd $prefix || exit 1
+    echo "Available configurations/toolkits:"
+    for config in `find * -type d -prune -print`; do
+      for toolkit in `cd $config && find * -type d -prune -print`; do
+        if test -f $config/$toolkit/src/emacs ; then
+          echo "  --configuration=$config --toolkit=$toolkit"
+        fi
+      done
+    done
+   ;;
+esac
+
+# yemacs ends here
