@@ -4,7 +4,7 @@
 # Created: 1991-12-18
 # Public domain
 
-# $Id: display-time,v 1.7 1995/05/16 19:25:11 friedman Exp friedman $
+# $Id: display-time,v 1.8 1995/05/16 20:50:51 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -165,7 +165,7 @@ while : ; do
   esac
 
   if test ".$check_mail" = .t -a -s "$spoolfile" ; then
-    spool_stat=`ls -d "$spoolfile" 2> /dev/null`
+    spool_stat=`ls -ld "$spoolfile" 2> /dev/null`
     case "$spool_stat" in
       "$prev_spool_stat" ) : ;;
       * )
