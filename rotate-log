@@ -4,7 +4,7 @@
 # Created: 1992-02-10
 # Public domain
 
-# $Id: rotate-log,v 1.10 1995/10/03 22:57:32 friedman Exp friedman $
+# $Id: rotate-log,v 1.11 1995/12/14 19:52:25 friedman Exp $
 
 # Commentary:
 
@@ -256,12 +256,12 @@ case $# in
    ;;
 esac
 
-case "$compress_method" in
+case "$compressp:$compress_method" in
   # re_suffix is regexp-quoted
-  compact )  compress_cmd='compact -f'  suffix='.C'  re_suffix='\.C'  ;;
-  compress ) compress_cmd='compress -f' suffix='.Z'  re_suffix='\.Z'  ;;
-  gzip )     compress_cmd='gzip';       suffix='.gz' re_suffix='\.gz' ;;
-  * )
+  t:compact )  compress_cmd='compact -f'  suffix='.C'  re_suffix='\.C'  ;;
+  t:compress ) compress_cmd='compress -f' suffix='.Z'  re_suffix='\.Z'  ;;
+  t:gzip )     compress_cmd='gzip';       suffix='.gz' re_suffix='\.gz' ;;
+  t:* )
     echo "$progname: unknown compress-method $bq$compress_method$eq" 1>&2
     echo "$progname: Known compression methods: compact compress gzip" 1>&2
     exit 1
@@ -296,22 +296,22 @@ for log in ${1+"$@"} ; do
     continue
   fi
 
-  if test ".$compressp" = '.t' ; then
-    num=$max_log_number
-    while : ; do
-      case $num in -1 ) break ;; esac
-      file="$basename.$num"
+  case "$compressp" in
+    t )
+      num=$max_log_number
+      while : ; do
+        case $num in -1 ) break ;; esac
+        file="$basename.$num"
 
-      test -f "$file" \
-       && $compress_cmd "$file" \
-       && test ".$verbose" = '.t' \
-       && echo "$file -> $file$suffix"
+        test -f "$file" \
+         && $compress_cmd "$file" \
+         && test ".$verbose" = '.t' \
+         && echo "$file -> $file$suffix"
 
-      num=`expr $num - 1`
-    done
-  else
-    suffix=
-  fi
+        num=`expr $num - 1`
+      done
+     ;;
+  esac
 
   num=
   case "$size_threshold" in
@@ -335,6 +335,9 @@ for log in ${1+"$@"} ; do
         fi
       else
         # If log doesn't exist, we'll skip any rotation.
+        case "$verbose_not_rotated" in t)
+          echo "$progname: $log: does not exist; not rotating." ;;
+        esac
         num=-2
       fi
      ;;
