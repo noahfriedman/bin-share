@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-04-15
 
-# $Id: tcpconnect,v 1.7 1996/03/03 23:01:26 friedman Exp $
+# $Id: tcpconnect,v 1.8 1996/03/22 20:21:43 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -250,7 +250,8 @@ sub main
 sub tcpconnect
 {
   local ($rhostname, $port) = @_;
-  local ($proto, $name, $aliases, $type, $len, $thisaddr, @rhostaddr);
+  local ($proto, $name, $aliases, $type, $len, $thisaddr);
+  local (@rhostaddr, $rhostaddrlen);
   local ($in, $out);
   # This is made global so that do_shutdown can use it.
   #local ($child);
@@ -262,14 +263,14 @@ sub tcpconnect
 
   ($name, $aliases, $proto) = getprotobyname ("tcp");
 
-  if ($port !~ /^\d+$/)
+  if ($port !~ /^\d+$/o)
     {
       ($name, $aliases, $port) = getservbyname ($port, "tcp");
     }
 
   ($name, $aliases, $type, $len, $thisaddr) = gethostbyname ($hostname);
 
-  if ($rhostname =~ /^[0-9.][0-9.]*$/)
+  if ($rhostname =~ /^[0-9.][0-9.]*$/o)
     {
       $canon_rhostname = &my_gethostbyaddr ($rhostname, $type);
       @rhostaddr = &ip_canonical ($rhostname);
@@ -291,6 +292,7 @@ sub tcpconnect
   $sockaddr = "S n a4 x8";
   $thishost = pack ($sockaddr, &AF_INET, 0, $thisaddr);
 
+  $rhostaddrlen = $#rhostaddr + 1;
   $ok = 0;
   while ($ok == 0 && $#rhostaddr > -1)
     {
@@ -305,7 +307,7 @@ sub tcpconnect
       bind (S, $thishost)
         || die ("$progname: bind: $!");
 
-      if ("$canon_rhostname" =~ /^[0-9.]+$/)
+      if ("$canon_rhostname" =~ /^[0-9.]+$/o)
         {
           $hinfo = "$canon_rhostname port $port";
         }
@@ -345,6 +347,9 @@ sub tcpconnect
     {
       $SIG{'INT'} = 'IGNORE';
     }
+
+  &client_setproctitle ($canon_rhostname, $rhostname, $rhostaddrlen,
+                        $rhostaddr[0], $port);
 
   # Set file handles to be command buffered.
   # Since we do unbuffered sysreads and syswrites this may actually be
@@ -486,6 +491,28 @@ sub require_soft
   return 0;
 }
 
+sub client_setproctitle
+{
+  local ($canon_rhostname, $rhostname,
+         $rhostaddrlen, $rhostaddr[0], $port) = @_;
+  local ($hinfo) = "$canon_rhostname";
+
+  if ($rhostname !~ /^[0-9.][0-9.]*$/o)
+    {
+      $hinfo = "$rhostname";
+    }
+
+  # If host has a name and that name has more than one IP address, show
+  # the address actually connected.
+  if (($rhostname =~ /^[0-9.][0-9.]*$/o || $rhostaddrlen > 1)
+        && "$hinfo" !~ /^[0-9.]+$/o)
+      {
+        $hinfo = "$hinfo" . "[" . &ipaddr2string ($rhostaddr[0]) . "]";
+      }
+
+    $0 = "$progname ($hinfo:$port)";
+}
+
 sub my_gethostbyaddr
 {
   local ($addrstring, $type) = @_;
@@ -511,14 +538,14 @@ sub my_gethostbyaddr
 sub ip_canonical
 {
   local ($addrstring) = @_;
-  local ($addr) = 0;
+  local ($addr) = $addrstring;
 
-  if ($addrstring =~ /^[0-9.][0-9.]*$/)
+  if ($addrstring =~ /^[0-9.][0-9.]*$/o)
     {
-      if ($addrstring =~ /[.]/)
+      if ($addrstring =~ /[.]/o)
         {
           # String is in 255.255.255.255 format
-          local (@octet) = split (/[.]/, $rhostname);
+          local (@octet) = split (/[.]/o, $rhostname);
           $addr = pack ('C4', @octet);
         }
       else
@@ -529,6 +556,7 @@ sub ip_canonical
           #
           # source IP addresses are specified in this flat format in the
           # IRC DCC protocol; I don't know if it's common anywhere else.
+          $addrstring = pack ("I", "$addrstring");
           $addr = &htonl ($addrstring);
         }
     }
@@ -562,7 +590,7 @@ sub htonl
       return $h;
     }
 
-  @o = unpack ('C4', pack ("I", "$h"));
+  @o = unpack ('C4', $h);
   $h = pack ('C4', $o[3], $o[2], $o[1], $o[0]);
   return $h;
 }
