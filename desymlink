@@ -1,12 +1,12 @@
 #! /bin/sh
 # desymlink --- replace symlinks with copy of file pointed to
 
-# Copyright (C) 1993, 1995, 1998 Noah S. Friedman
+# Copyright (C) 1995, 1998, 2000 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-09-23
 
-# $Id: desymlink,v 1.6 1998/09/29 01:05:00 friedman Exp $
+# $Id: desymlink,v 1.7 1999/10/03 21:07:54 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -31,192 +31,187 @@
 
 # Code:
 
-# Name by which this script was invoked.
-progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl		  [perl will skip all lines in this file before this line]
 
-# To prevent hairy quoting and escaping later.
-bq='`'
-eq="'"
+use Getopt::Long;
+use Fcntl;
+use Symbol;
 
-usage="Usage: $progname {options} [symlinks]
+sub expand_file_name ($)
+{
+  local $_ = shift;
+  s|/\./|/|o         while (m|/\./|o);
+  s|//|/|o           while (m|//|o);
+  s|/[^/]+/\.\./|/|o while (m|/[^/]+/\.\./|o);
+  s|/[^/]+/\.\.$||o;
+  s|/.$||go;
+  return $_;
+}
 
+sub dereference_links ($)
+{
+  my $file = shift;
+  my @p = split (m|/|, $file);
+  my $link_count = 0;
+  for (my $j = 0; $j <= $#p; $j++)
+    {
+      my $k = join ("/", @p[0 .. $j]);
+      my $orig_component = $k;
+      while (my $l = readlink ($k))
+        {
+          $k = $l;
+          # Simple way of detecting symlink loops (it unfortunately causes
+          # the system to give up when there are simply too many levels,
+          # even if resolution would eventually occur).  This parameter is
+          # adjustable, of course.  Most unix kernels allow a depth of 8.
+          return errmsg ($file, "Too many levels of symbolic links")
+            if ($link_count++ == 64);
+        }
+      next if ($k eq $orig_component);
+      if (substr ($k, 0, 1) eq "/")
+        {
+          # Absolute link.  Trash $p[0]-$p[$j+1] and replace with readlinked
+          # path components.  Set $j to -1 so that next iteration of loop
+          # will check array @p from start.
+          splice (@p, 0, $j + 1, split (m|/|, $k));
+          $j = -1;
+        }
+      else
+        {
+          # Insert partial (relative) path component into array in place of
+          # current element $p[$j]
+          splice (@p, $j, 1, split (m|/|, $k));
+          $j--;
+        }
+    }
+  join ("/", @p);
+}
+
+sub copy_file ($$;$)
+{
+  my ($from, $to, $preserve) = @_;
+  my $fh_from = gensym;
+  my $fh_to   = gensym;
+
+  verbose ("Copying $from -> $to");
+
+  sysopen ($fh_from, $from, O_RDONLY) || return errmsg ("open", $from, $!);
+  if (!(unlink ($to)
+        && sysopen ($fh_to, $to, O_WRONLY | O_CREAT | O_EXCL | O_TRUNC, 0600)))
+    {
+      close ($fh_from);
+      return errmsg ((-l $to ? "unlink" : "open"), $to, $!);
+    };
+
+  my $data;
+  while (my $len = sysread ($fh_from, $data, 2**20)) # 1mb buffer
+    {
+      if (syswrite ($fh_to, $data, $len) != $len)
+        {
+          errmsg ("write", $to, $!);
+          close ($fh_from);
+          close ($fh_to);
+          return undef;
+        }
+    }
+
+  my @fromstat = stat ($fh_from);
+  my @tostat   = stat ($fh_to);
+  close ($fh_from);
+  close ($fh_to);
+
+  # Always carry over permissions.
+  errmsg (sprintf ("chmod(%o)", $fromstat[2]), $to, $!)
+    unless (chmod ($fromstat[2], $to));
+
+  if ($preserve)
+    {
+      # Restore atime and mtime if possible
+      utime $fromstat[8], $fromstat[9], $to;
+      # Attempt to preserve owner/group, if possible.
+      chown $fromstat[4], $fromstat[5], $to;
+    }
+  return 1;
+}
+
+sub link_file ($$;$)
+{
+  my ($from, $to) = @_;
+  verbose ("Linking $from -> $to");
+  unlink ($to)      || return errmsg ("unlink", "$to", $!);
+  link ($from, $to) || return errmsg ("link", "$from -> $to", $!);
+}
+
+sub errmsg (;@)
+{
+  print STDERR join (": ", $progname, @_), "\n";
+  return undef;
+}
+
+sub verbose (;@)
+{
+  print join (": ", $progname, @_), "\n" if ($verbose);
+}
+
+sub parse_options ()
+{
+  $progname = $0;
+  $progname =~ s|.*/||;
+
+  $hardlink = 0;
+  $preserve = 0;
+  $verbose = 0;
+
+  Getopt::Long::config ('bundling', 'autoabbrev');
+  GetOptions ("l|link",     \$hardlink,
+              "p|preserve", \$preserve,
+              "v|verbose",  \$verbose,
+              "h|help",     \&usage);
+}
+
+sub usage ()
+{
+  print "Usage: $progname {options} [symlinks]\n
 Options are:
 -D, --debug                  Turn on debugging.
 -h, --help                   You're looking at it.
 -l, --link                   Create a hard link to original file; don't copy.
--p, --preserve               Preserve permissions on copied files.
--v, --verbose                Be verbose.
-"
-
-# Initialize variables.
-# Don't use `unset' since old bourne shells don't have this command.
-# Instead, assign them an empty value.
-debug=
-verbose=
-preserve=
-cmd=cp
-
-# Parse command line arguments.
-# Make sure that all wildcarded options are long enough to be unambiguous.
-# It's a good idea to document the full long option name in each case.
-# Long options which take arguments will need a `*' appended to the
-# canonical name to match the value appended after the `=' character.
-while : ; do
-  case $# in 0) break ;; esac
-  case "$1" in
-    -D | --debug | --d* )
-      debug=-d
-      verbose=-x
-      shift
-     ;;
-    -h | --help | --h )
-      echo "$usage" 1>&2
-      exit 0
-     ;;
-    -l | --link | --l* )
-      cmd=ln
-      shift
-     ;;
-    -p | --preserve | --p* )
-      preserve=-p
-      shift
-     ;;
-    -v | --verbose | --v* )
-      verbose=-x
-      shift
-     ;;
-    -- )     # Stop option processing
-      shift
-      break
-     ;;
-    -? | --* )
-      case "$1" in
-        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
-        * )     arg="$1" ;;
-      esac
-      exec 1>&2
-      echo "$progname: unknown or ambiguous option $bq$arg$eq"
-      echo "$progname: Use $bq--help$eq for a list of options."
-      exit 1
-     ;;
-    -??* )
-      # Split grouped single options into separate args and try again
-      optarg="$1"
-      shift
-      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
-      shift
-     ;;
-    * )
-      break
-     ;;
-  esac
-done
-
-case "$cmd" in
-  ln ) preserve= ;;
-esac
-
-DESYMLINK_CMD=$cmd
-DESYMLINK_PRESERVE=$preserve
-DESYMLINK_PROGNAME=$progname
-export DESYMLINK_CMD DESYMLINK_PRESERVE DESYMLINK_PROGNAME
-
-${PERL-perl} $debug - ${1+"$@"} <<'__EOF__' | sh $verbose
-
-chop ($pwd = `pwd`);
-
-next_path:
-for ($i = 0; $i <= $#ARGV; $i++)
-  {
-   if (! -l $ARGV[$i])
-     {
-       if (! -e $ARGV[$i])
-         {
-           &err ($ARGV[$i], "No such file or directory.");
-         }
-       else
-         {
-           &err ($ARGV[$i], "not a symbolic link.");
-         }
-       next next_path;
-     }
-
-   @p = split (/\//, "$ARGV[$i]");
-   $link_count = 0;
-   for ($j = 0; $j < @p; $j++)
-     {
-      $orig_component = $k = join ("/", @p[0 .. $j]);
-      while ($l = readlink($k))
-        {
-         $k = $l;
-         # Simple way of detecting symlink loops (it unfortunately causes
-         # the system to give up when there are simply too many levels,
-         # even if resolution would eventually occur).  This parameter is
-         # adjustable, of course.  Some unix kernels allow a depth of only 8.
-         # A more flexible (but slower) method would be to keep track of
-         # inodes encountered and stop only when a real loop is detected.
-         if ($link_count++ == 64)
-           {
-             &err ($ARGV[$i], "Too many levels of symbolic links.");
-             next next_path;
-           }
-        }
-      if ($k eq $orig_component)
-        {
-         next;
-        }
-      if (substr ($k, 0, 1) eq "/")
-        {
-         # Absolute link.  Trash $p[0]-$p[$j+1] and replace with readlinked
-         # path components.  Set $j to -1 so that next iteration of loop
-         # will check array @p from start.
-         splice (@p, 0, $j + 1, split (/\//, $k));
-         $j = -1;
-        }
-      else
-        {
-         # Insert partial (relative) path component into array in place of
-         # current element $p[$j]
-         splice (@p, $j, 1, split (/\//, $k));
-         $j--;
-        }
-     }
-   $_ = join ("/", @p);
-
-   # Canonicalize pathname.
-   s/^\.$/$pwd/o;                     # Replace single "." with pwd.
-   s/^([^\/])/$pwd\/\1/o;             # Prepend pwd if relative.
-   s/\/\.\//\//og;                    # Remove any occurence of "/./".
-   s/^.*\/\//\//og;                   # Get rid of "//" occurences.
-   # Must do this in a loop to handle overlapping `/' character in
-   # instances of "/../../"
-   while (/\/[^\/][^\/]*\/\.\.\//o)
-     {
-       s/\/[^\/][^\/]*\/\.\.\//\//o;  # Resolve most references to ".."
-     }
-   s/\/[^\/][^\/]*\/\.\.$//o;         # Resolving trailing ".."
-   s/^\/\.\.\//\//go;                 # Eliminate leading "/.."
-
-   if (! -f $_)
-     {
-       &err ($ARGV[$i], "File referenced ($_) is not a plain file.");
-       next next_path;
-     }
-   if (! -r $_)
-     {
-       &err ($ARGV[$i], "File referenced ($_) is not readable.");
-       next next_path;
-     }
-
-   print "rm -f '$ARGV[$i]' "
-     . "&& $ENV{DESYMLINK_CMD} $ENV{DESYMLINK_PRESERVE} '$_' '$ARGV[$i]'\n";
-  }
-
-sub err
-{
-  printf (STDERR join(": ", $ENV{'DESYMLINK_PROGNAME'}, @_) . "\n");
+-p, --preserve               Preserve owner, timestamps on copied files.
+-v, --verbose                Be verbose.\n";
+  exit (1);
 }
 
-__EOF__
+sub main ()
+{
+  parse_options ();
+  for my $to (@ARGV)
+    {
+      if (! -l $to)
+        {
+          my $msg = -e $to ? "Not a symbolic link" : $!;
+          errmsg ($to, $msg);
+          next;
+        }
+      my $from = expand_file_name (dereference_links ($to));
+      if (-f $from)
+        {
+          link_file ($from, $to)            if     ($hardlink);
+          copy_file ($from, $to, $preserve) unless ($hardlink);
+        }
+      eval
+        {
+          -e $from || return errmsg ($to, "Link does not point to an existing file");
+          -f $from || return errmsg ($to, "Link does not point to a regular file");
+        }
+    }
+}
 
-# desymlink ends here
+main ();
+
+# local variables:
+# mode: perl
+# eval: (auto-fill-mode 1)
+# end:
+
+# symlink-resolve ends here
