@@ -1,0 +1,26 @@
+#!/bin/sh
+# $Id$
+
+include=/usr/include
+export include
+
+(cd "$include" && find * -follow \( -name '*.h' -o -type d \) -print) \
+ | xargs sh -c 'for h in ${1+"$@"}; do
+                  if [ -d "$include/$h" ]; then
+                    if [ ! -d "$h" ]; then
+                      echo "mkdir $h"
+                      mkdir "$h"
+                    fi
+                  else
+                    ph=`echo "$h" | sed -e "s/\.h\$/.ph/"`
+                    if [ "$include/$h" -nt "$ph" ]; then
+                      echo "$ph is up to date."
+                    else
+                      echo "$h -> $ph"
+                      h2ph < "$include/$h" > "$ph"
+                    fi
+                  fi
+                done
+               ' mkphfiles
+
+#eof
