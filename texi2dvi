@@ -1,115 +1,317 @@
-#!/bin/sh
+#!/usr/local/gnubin/bash
+# texi2dvi, a shell script to smartly convert texinfo source files to DVI.
+# 05-Dec-91 Noah Friedman <friedman@prep.ai.mit.edu>
+# Last modified 30-Oct-92
 #
-# Copyright (C) 1991 Free Software Foundation.
+# Requires bash 1.12 or later to work properly. 
 #
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2, or (at your option)
-# any later version.
+# Public domain.
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# A copy of the GNU General Public License can be obtained from this
-# program's author (send electronic mail to roland@ai.mit.edu) or from
-# the Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA
-# 02139, USA.
 
-if [ $# -eq 0 ]; then
-  echo "Usage: `basename $0` FILE ..." >&2
-  exit 1
-fi
+function usage ()
+{
+    if [ $# -gt 0 ]; then
+       echo -e "${progname}: $*\n" 1>&2
+    fi
 
-TEXINDEX=${TEXINDEX-texindex}
-TEX=${TEXINFO-${TEX-tex}}
+    cat 1>&2 <<EOF
+Usage: ${progname} {-D} {-f} {-v} [file1] {file2} {...}
+       ${progname} {--debug} {--force} {--verbose} [file1] {file2} {...}
 
-for file in $*; do
-  base="`basename $file .texinfo | \
-	 sed -e 's/\.texi$//' -e 's/\.tex$//'`"
+EOF
 
-  # Find all existing index files corresponding to FILE.
-  idx_files="`echo ${base}.??`"
-  if [ "$idx_files" = "${base}.??" ]; then
-    idx_files=''
-  else
-    # Ignore files with two-letter extensions that don't look like index files.
-    oidx_files="$idx_files"
-    idx_files=''
-    for idx_file in $oidx_files; do
-      if [ "`sed -n '1s/^\(.\).*$/\1/p' $idx_file`" = \\ ]; then
-        # It starts with a backslash, so it's probably an index file.
-	idx_files="$idx_files $idx_file"
-      fi
+   exit 1
+}
+
+function main ()
+{
+    progname=$(basename $0)
+    [ $# -eq 0 ] && usage;
+    initialize_variables "$@"
+    parse_command_args "$@"
+    shift $?
+
+    test -n "${debug+set}" && set -x
+
+    test $# -eq 0 && usage "at least 1 file name is required as an argument.";
+        
+    for file_texi in "$@" ; do
+       texify "${file_texi}"
     done
-  fi
+}
 
-  for idx_file in $idx_files; do
-    # Save a copy of the old index file.
-    cp ${idx_file} ${idx_file}O
-  done
+function initialize_variables ()
+{
+    backup_extension="-ORIG"
+    texindex=${TEXINDEX:-texindex}
+    tex=${TEX:-tex}
+    bq="\`"  # To prevent hairy quoting and escaping later.
+    eq="'"
+}
 
-  if [ "$idx_files" != "" ]; then
-    # Run texindex on the index files.
-    ${TEXINDEX} $idx_files
-  fi
+function parse_command_args ()
+{
+ local orig_number_options=$#
 
-  # Run TeX on FILE.
-  if ${TEX} $file; then
+    # unset option variables to make sure they weren't accidentally
+    # exported 
+    unset force verbose debug
 
-    # Find all the index files that exist now,
-    # so we can see if there are any new ones.
-    new_idx_files="`echo ${base}.??`"
-    if [ "$new_idx_files" = "${base}.??" ]; then
-      new_idx_files=''
-    else
-      oidx_files="$new_idx_files"
-      new_idx_files=''
-      for idx_file in $oidx_files; do
-	if [ "`sed -n '1s/^\(.\).*$/\1/p' $idx_file`" = \\ ]; then
-	  # It starts with a backslash, so it's probably an index file.
-	  new_idx_files="$new_idx_files $idx_file"
-	fi
-      done
-    fi
-
-    if [ "$new_idx_files" != "$idx_files" ]; then
-      # There are some new index files.
-      changed=yes
-      idx_files="$new_idx_files"
-    else
-      # Run through all the index files, comparing them to the old ones.
-      changed=no
-      for idx_file in $idx_files; do
-	# Compare the old and new index files.
-	cmp -s ${idx_file}O ${idx_file}
-	status=$?
-
-	# Remove the old index file.
-	rm -f ${idx_file}O
-
-	if [ $status -ne 0 ]; then
-	  # The index file has changed.
-	  changed=yes
-	fi
-      done	# for idx_file
-    fi
-
-    if [ $changed = yes ]; then
-      # Some index file changed.  Run texindex and TeX again.
-
-      # Run texindex on the index files.
-      if ${TEXINDEX} $idx_files; then
-	# Run TeX on FILE.
-	${TEX} $file
-      fi
-    fi
-  else
-    # TeX failed.  Remove the copies of the index files.
-    for idx_file in $idx_files; do
-      rm ${idx_file}O
+    # If you add new commands be sure to change the wildcards below to make
+    # sure they are unambiguous (i.e. only match one possible long option)
+    # Be sure to show at least one instance of the full long option name to
+    # document what the long option is canonically called. 
+    while [ $# -gt 0 ]; do
+       case z$1 in
+          z-D | z--debug | z--d* )
+             debug="t"
+             shift
+            ;;
+          z-f | z--force | z--f* )
+             force="t"
+             shift
+            ;;
+          z-h* | z--help | z--h* )
+             usage
+            ;;
+          z-v | z--verbose | z--v* )
+             verbose="t"
+             shift
+            ;;
+          z-- )
+             shift
+             break
+            ;;
+          z-* )
+             usage "${bq}${1}${eq} is not a valid option."
+            ;;
+          * )
+             break
+            ;;
+       esac
     done
-  fi
 
-done	   # for file
+    # Return number of shifted arguments so calling function can shift
+    # appropriate amount.
+    return $[ orig_number_options - $# ]
+}
+
+# Somewhat generalized for the purposes of this shell script, but I just
+# pulled it out of my library of shell functions.
+# Using this implementation of basename also lets us get away with using
+# wildcards as the suffix.  For example, 
+#
+#        basename /foo/bar/baz.texinfo '.*'
+#
+# returns just "baz".  You can't do that with basename(1), and function
+# texify() takes advantage of this.
+#
+function basename ()
+{
+ local path="$1"
+ local suffix="$2"
+ local tpath="${path%/}"
+
+    # Strip trailing '/' characters from path (unusual that this should
+    # ever occur, but basename(1) seems to deal with it.)
+    while [ "${tpath}" != "${path}" ]; do
+       tpath="${path}"
+       path="${tpath%/}"
+    done
+
+    path="${path##*/}"       # Strip off pathname
+    echo ${path%${suffix}}   # Also strip off extension, if any.
+}
+
+function dirname ()
+{
+ local dir="$1"
+ local tdir="${dir%/}"
+
+    # Strip trailing '/' characters from dir (unusual that this should
+    # ever occur, but dirname(1) seems to deal with it.)
+    while [ "${tdir}" != "${dir}" ]; do
+       tdir="${dir}"
+       dir="${tdir%/}"
+    done
+
+    dir="${dir%/*}"
+    echo "${dir:-/}"
+}
+
+function texify ()
+{
+ local directory="$(dirname $1)"
+ local file_texi="$(basename $1)";
+ local basename=$(basename $1 '.*'); # see note by function basename() for info.
+
+    # If directory and file_texi are the same, it's probably because there's
+    # no pathname component.  Set dirname to `.', the current directory.
+    if [ "${directory}" = "${file_texi}" ]; then
+       directory="."
+    fi
+
+    # Change to directory where file is located. 
+    chdir ${directory} || return 1 
+
+    # If dvi file is newer than the texinfo source, don't do anything
+    # (unless --force option was specified)
+    if [ ! "${force}" -a "${basename}.dvi" -nt "${file_texi}" ] ; then
+       error "${basename}.dvi is up to date."
+       return 0
+    fi
+
+    # See if file is readable here.  If it doesn't we're in trouble since,
+    # even though the user may be able to reenter another filename at the
+    # tex prompt (assuming they're attending the terminal), this script
+    # won't be able to find the right index files and so forth.
+    if [ ! -r "${file_texi}" ]; then
+       echo "${progname}: ${file_texi}: No such file or permission denied." 1>&2
+       return 1
+    fi
+
+    # Find all files having root filename with a two-letter extension,
+    # determine whether they're really index files, and save them. 
+    orig_index_files=$(get_index_files "${basename}")
+    report "saving old index files (if any)"
+    save_index_files ${orig_index_files}
+
+    # Run texindex on current index files.  If they already exist, and
+    # after running TeX a first time the index files don't change, then
+    # there's no reason to run TeX again.  But we won't know that if the
+    # index files are out of date or nonexistent.
+    if [ "${orig_index_files}" ]; then
+       report "running texindex before tex for first time"
+       # Remove [basename].aux from list of index files, since it shouldn't
+       # be run through texindex.
+       texindex ${orig_index_files%${basename}.aux}
+    fi
+
+    report "about to run tex first time"
+    if ${tex} ${file_texi} ; then		# TeX run first time
+       new_index_files=$(get_index_files "${basename}")
+       # If index files have changed since TeX has been run, or if the aux
+       # file wasn't present originally, run texindex and TeX again.
+       if index_files_changed_p "${orig_index_files}" "${new_index_files}"; then
+          report "running texindex and tex second time"
+          # Run texindex, and, if that succeeds, run TeX again.  Remove
+          # [basename].aux from list of index files, since it shouldn't be
+          # run through texindex.
+          texindex ${new_index_files%${basename}.aux} && ${tex} ${file_texi}
+       fi
+    fi
+
+    report "removing old index files (if any)"
+    remove_old_index_files ${orig_index_files}
+}
+
+function texindex ()
+{
+    if [ $# -ne 0 ]; then
+       command ${texindex} "$@"
+       return $?
+    fi
+}
+
+function get_index_files ()
+{
+ # foo.aux is actually the cross-references file, but we need to keep track
+ # of that too.
+ local possible_index_files="$(eval echo ${1}.?? ${1}.aux)"
+ local definite_index_files
+ local this_file
+
+    for this_file in ${possible_index_files} ; do
+       # If file is empty, forget it.  
+       [ ! -s ${this_file} ] && continue;
+
+       # Examine first character of file.  If it's not a backslash or
+       # single quote, then it's definitely not an index or xref file.
+       first_character=$(sed -n '1s=^\(.\).*$=\1=p;q' ${this_file})
+       if [ "${first_character}" = "\\" -o "${first_character}" = "'" ]; then
+          definite_index_files="${definite_index_files} ${this_file}"
+       fi
+    done
+
+    echo "${definite_index_files}"
+}
+
+function save_index_files ()
+{
+ local this_file
+
+    for this_file in "$@" ; do
+       cp "${this_file}" "${this_file}${backup_extension}"
+    done
+}
+
+function index_files_changed_p ()
+{
+ local old_index_files="$1"
+ local new_index_files="$2"
+ local this_file
+ local old_file
+
+    # If old and new list don't at least have the same file list, then one
+    # file or another has definitely changed.
+    [ "${old_index_files}" != "${new_index_files}" ] && return 0;
+
+    # File list is the same.  We must compare each file until we find a
+    # difference.  
+    for this_file in ${new_index_files} ; do
+       old_file="${this_file}${backup_extension}"
+
+       # (No need to check for existence of $old_file.  We know it exists
+       # because all the files in old_index_files were copied and lists
+       # are the same.)
+
+       # cmp -s will return nonzero exit status if files differ.
+       cmp -s ${this_file} ${old_file} || return 0;
+    done
+
+    # If function hasn't returned yet, then the files are simply identical. 
+    return 1;
+}
+
+function remove_old_index_files ()
+{
+ local this_file
+ local file_list
+
+    # Generate list of files to delete, then call rm once with the entire
+    # list.  This is significantly faster than multiple executions of rm. 
+    for this_file in "$@"; do
+       file_list="${file_list} ${this_file}${backup_extension}"
+    done
+
+    test -n "${file_list}" && { rm -f ${file_list}; return $?; }
+    return 0
+}
+
+function chdir ()
+{
+    if cd "${1}" 2> /dev/null ; then
+       return 0
+    fi
+
+    reason="$(cd ${1} 2>&1)"
+    reason="${reason#*:}"
+    echo "${progname}: Could not chdir to ${bq}${1}${eq}:${reason}" 1>&2
+    return 1
+}
+
+# Inform user of something if he wants us to be verbose.
+function report () 
+{
+    [ "${verbose}" ] && echo "${progname}: $*" 1>&2; 
+}
+
+# Complain.
+function error ()
+{
+    echo "${progname}: $*" 1>&2; 
+}
+
+main "$@"
+
+# eof
