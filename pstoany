@@ -4,7 +4,7 @@
 # Created: 1994-10-17
 # Public domain.
 
-# $Id$
+# $Id: pstogif,v 1.2 1995/02/10 19:58:38 friedman Rel friedman $
 
 # Commentary:
 
@@ -17,7 +17,7 @@
 # Code:
 
 # This string is expanded by RCS automatically when this file is checked out.
-rcs_revision='$Revision$'
+rcs_revision='$Revision: 1.2 $'
 
 # Name by which this script was invoked.
 progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
@@ -90,20 +90,20 @@ getopt='
   {
     optarg=
     case "$1" in
-      --*=* ) 
+      --*=* )
         optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
-        shift 
+        shift
        ;;
-      * ) 
+      * )
         case ${2+set} in
-          set ) 
+          set )
             optarg="$2"
             shift
-            shift 
+            shift
            ;;
-          * ) 
-            case "$optarg_optional" in 
-              "" ) 
+          * )
+            case "$optarg_optional" in
+              "" )
                 case "$1" in
                   --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
                   * ) option="$1" ;;
@@ -199,7 +199,7 @@ while : ; do
       shift
       break
      ;;
-    -* )
+    -? | --* )
       case "$1" in
         --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
         * )     arg="$1" ;;
@@ -208,6 +208,13 @@ while : ; do
       echo "$progname: unknown or ambiguous option $bq$arg$eq"
       echo "$progname: Use $bq--help$eq for a list of options."
       exit 1
+     ;;
+    -??* )
+      # Split grouped single options into separate args and try again
+      optarg="$1"
+      shift
+      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+      shift
      ;;
     * )
       break

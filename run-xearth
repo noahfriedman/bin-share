@@ -4,7 +4,7 @@
 # Created: 1995-04-05
 # Public domain
 
-# $Id: run-xearth,v 1.1 1995/04/05 23:27:56 friedman Exp friedman $
+# $Id: run-xearth,v 1.2 1995/07/10 19:54:44 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -121,7 +121,7 @@ while : ; do
       shift
       break
      ;;
-    -* )
+    -? | --* )
       case "$1" in
         --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
         * )     arg="$1" ;;
@@ -130,6 +130,13 @@ while : ; do
       echo "$progname: unknown or ambiguous option $bq$arg$eq"
       echo "$progname: Use $bq--help$eq for a list of options."
       exit 1
+     ;;
+    -??* )
+      # Split grouped single options into separate args and try again
+      optarg="$1"
+      shift
+      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+      shift
      ;;
     * )
       break
