@@ -1,0 +1,35 @@
+#!/bin/sh -x
+# $Id$
+
+params='
+  FallBackToRsh=no
+  EscapeChar=none
+  ForwardAgent=no
+  ForwardX11=no
+  Compression=no
+  BatchMode=yes
+  Protocol
+  Port
+  User
+'
+
+for param in $params ; do
+  param=`echo $param \
+          | sed -e '/=/!{s/^/default= option=/;q;}' \
+                -e 's/^\([^=]*\)=\(.*\)/option=\1 default=\2/'`
+  eval $param
+
+  var=SSH_REXEC_`echo $option | tr '[a-z]' '[A-Z]'`
+  eval val=\${$var-$default}
+  case $val in
+    '' ) : ;;
+    * )
+      set fnord -o "$option $val" ${1+"$@"}
+      shift
+     ;;
+  esac
+done
+
+exec ${SSH_REXEC-ssh} ${1+"$@"}
+
+# eof
