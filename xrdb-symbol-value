@@ -4,7 +4,7 @@
 # Created: 1995-04-05
 # Public domain
 
-# $Id$
+# $Id: xrdb-symbol-value,v 1.1 1995/04/05 22:36:55 friedman Exp friedman $
 
 # Commentary:
 
@@ -31,7 +31,8 @@ case "${XRDB_SYMBOLS+set}" in
 esac
 
 echo "$XRDB_SYMBOLS" \
-  | sed -ne 's/[ 	][ 	]*/ /g
+  | sed -ne '/-D'"$1"'=/!d
+             s/[ 	][ 	]*/ /g
              s/.* -D'"$1"'=//
              s/ -D.*//
              p
