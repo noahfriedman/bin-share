@@ -4,7 +4,7 @@
 # Created: 1993-03-08
 # Public domain
 
-# $Id$
+# $Id: xon,v 1.4 1994/10/14 00:17:44 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -43,53 +43,58 @@ for fd in 1 2; do
   fi
 done
 
-# Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
+# Usage: eval "$getopt"; value=$optarg
+# or     optarg_optional=t; eval "$getopt"; value=$optarg
 #
-# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument ARG
-# won't get used if first long option syntax was used. 
-# If 3rd argument OPTIONAL is set, then 2nd may be empty without resulting
-# in an error (i.e. option argument is optional)
+# This function automatically shifts the positional args as appropriate.
+# The argument to an option is optional if the variable `optarg_optional'
+# is non-empty.  Otherwise, the argument is required and getopt will cause
+# the program to exit on an error.  optarg_optional is reset to be empty
+# after every call to getopt.  The argument (if any) is stored in the
+# variable `optarg'.
 #
-# Returns number of positions caller should shift.
-# If retval = 3, caller should exit.
-get_option_argument='
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument
+# won't get used if first long option syntax was used.
+#
+# Note: because of broken bourne shells, using --foo=bar syntax can
+# actually screw the quoting of args that end with trailing newlines.
+# Specifically, most shells strip trailing newlines from substituted
+# output, regardless of quoting.
+getopt='
   {
-    option="$1" arg="$2" arg_optional="$3" shift_num=2
-    case "$option" in
-      --*=* )
-        arg=`echo $option | sed -e "s/^[^=]*=//"` 
-        shift_num=1
+    optarg=
+    case "$1" in
+      --*=* ) 
+        optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
+        shift 
        ;;
-    esac
-    case "$arg" in
-      "" )
-        case "$arg_optional" in
-          "" )
-            case "$option" in 
-              --*=* ) option=`echo $option | sed -e "s/=.*//"` ;;
-            esac
-            echo "$progname: option $bq$option$eq requires argument." 1>&2
-            echo "$usage" 1>&2
-            exit 3
+      * ) 
+        case ${2+set} in
+          set ) 
+            optarg="$2"
+            shift
+            shift 
            ;;
+          * ) 
+            case "$optarg_optional" in 
+              "" ) 
+                case "$1" in
+                  --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
+                  * ) option="$1" ;;
+                esac
+                exec 1>&2
+                echo "$progname: option $bq$option$eq requires argument."
+                echo "$progname: use $bq--help$eq to list option syntax."
+                exit 1
+               ;;
+           esac
+         ;;
         esac
-        exit 1
-       ;;  
+     ;;
     esac
-    echo "$arg"
-    exit $shift_num
+    optarg_optional=
   }'
 
-# Some bourne shells don't allow a numeric argument to `shift'.
-# Usage: eval "shift_num=n; $shift_n_times"
-shift_n_times='
-  {
-    while : ; do
-      case "$shift_num" in 0 | "" ) break ;; esac
-      shift_num=`expr $shift_num - 1`
-      shift
-    done
-  }'
 
 # Initialize variables.
 # Don't use `unset' since old bourne shells don't have this command.
@@ -114,16 +119,12 @@ while : ; do
      ;;
     -d | --display* | --di* )
       explicit_display=t
-      DISPLAY=`(set - "$1" "$2"; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+      eval "$getopt"
+      DISPLAY=$optarg
      ;;
     -e | --export* | --e* )
-      var=`(set - "$1" "$2"; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+      eval "$getopt"
+      var=$optarg
 
       case "$var" in
         *,* ) var=`echo "$var" | sed -e 's/,/ /g'` ;;
@@ -137,20 +138,16 @@ while : ; do
       done
      ;;
     -l | --login-as* | --l* )
-      USER=`(set - "$1" "$2"; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+      eval "$getopt"
+      USER=$optarg
      ;;
     -h | --help | --h )
       echo "$usage" 1>&2
       exit 1
      ;;
     -x | --xhost-enable* | --x* )
-      xhost_enable_host=`(set - "$1" "$2"; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+      eval "$getopt"
+      xhost_enable_host=$optarg
      ;;
     -- )     # Stop option processing
       shift
