@@ -1,15 +1,17 @@
 #!/bin/sh
-# $Id: ssh-add-all,v 1.1 2001/03/20 12:00:37 friedman Exp $
+# $Id: ssh-add-all,v 1.2 2002/07/18 07:44:20 friedman Exp $
 
 ssh1keys='
   friedman@splode.com
   friedman@inktomi.com
+  noahf@yahoo-inc.com
   friedman@mozilla.org
 '
 
 openssh_dsakeys='
   friedman@splode.com
   friedman@inktomi.com
+  noahf@yahoo-inc.com
   friedman@mozilla.org
 '
 
