@@ -1,215 +1,183 @@
-#!/bin/bash
-# loadst, 18-Dec-91 Noah Friedman <friedman@prep.ai.mit.edu>
-# Last modified 13-Oct-92
+#!/bin/sh
+# display-time --- mode-line data accumulator for my time.el
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1991-12-18
+# Last modified: 1994-03-15
+# Public domain
+
+# Commentary:
+# Code:
+
+# Name by which this script was invoked. 
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+# Substitute your usage string here. 
+usage="Usage: $progname {options}
+
+Options are;
+-D, --debug                  Turn on shell debugging (${bq}set -x$eq).
+-h, --help                   You're looking at it.
+-l, --load-average           Print present load average.
+-m, --mail                   Print number of spooled messages.
+-s, --sleep SECONDS          Sleep SECONDS between each check.
+"
+
+# Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
 #
-# A replacement for GNU loadst (which has reportedly been replaced
-# with a different program in GNU Emacs 18.56. This shell script
-# basically emulates loadst with the following differences: 
-#    1) The number of mail messages pending is reported
-#    2) Time is always given in 24-hour form.
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument ARG
+# won't get used if first long option syntax was used. 
+# If 3rd argument OPTIONAL is set, then 2nd may be empty without resulting
+# in an error (i.e. option argument is optional)
 #
-# Requires bash version 1.12 or later to work properly. 
-#
-# Public domain.
-#
-
-function usage ()
-{
-    if [ $# -gt 0 ]; then
-       echo -e "${progname}: $*\n" 1>&2
-    fi
-
-    cat 1>&2 <<EOF
-Usage: ${progname} {-D} {-n} {-u} [delay]
-EOF
-
-   exit 1
-}
-
-function main ()
-{
-    initialize_variables "$@"
-    parse_command_args "$@"
-    shift $?
-
-    test -n "${debug+set}" && set -x
-
-    delay="$1"
-    if ! numericp "${delay}" ; then
-      usage "${bq}${delay}${eq}: interval argument should be numeric."
-    fi
-
-    if [ "${delay}" ]; then
-       while : ; do 
-          do_loadst; 
-          sleep ${delay}
-       done
-    else
-       do_loadst
-    fi
-
-}
-
-function initialize_variables ()
-{
-    progname="${0##*/}"
-    bq="\`"  # To prevent hairy quoting and escaping later.
-    eq="'"
-
-    timestamp="/tmp/${progname}$$"
-
-    TRAP_SIGNALS="EXIT SIGHUP SIGINT SIGQUIT SIGTERM"
-    trap 'cleanup_and_exit' ${TRAP_SIGNALS}
-}
-
-function parse_command_args ()
-{
- local orig_number_options=$#
- local whoami_cmd="logname"
-
-    # unset option variables to make sure they weren't accidentally
-    # exported 
-    unset newline debug
-
-    # If you add new options be sure to change the wildcards below to make
-    # sure they are unambiguous (i.e. only match one possible long option)
-    # Be sure to show at least one instance of the full long option name to
-    # document what the long option is canonically called. 
-    # Long options which take arguments will need a `*' appended to the
-    # canonical name to match the value appended after the `=' character. 
-    while [ $# -gt 0 ]; do
-       case z$1 in
-          z-D | z--debug | z--d* )
-             debug=t
-             shift
-            ;;
-          z-n | z--no-newline | z--n* )
-             newline="-n"
-             shift
-            ;;
-          z-h* | z--help | z--h* )
-             usage
-            ;;
-          z-u | z--use-euid | z--u* )
-             whoami_cmd="whoami"
-             shift
-            ;;
-          z-- )
-             shift
-             break
-            ;;
-          z-* )
-             usage "${bq}${1}${eq} is not a valid option."
-            ;;
-          * )
-             break
-            ;;
-       esac
-    done
-
-    user="${USER:-$(${whoami_cmd})}"
-    mailfile="/usr/spool/mail/${user}"
-
-    # Return number of shifted arguments so calling function can shift
-    # appropriate amount.
-    return $[ orig_number_options - $# ]
-}
-
-cleanup_and_exit ()
-{
- local exitstat="$?"
-
-   # Reset traps to avoid double execution of this function when a signal
-   # is caught (as opposed to normal exit).
-   trap '' ${TRAP_SIGNALS}
-
-   rm -f "${timestamp}" 2> /dev/null
-
-   builtin exit ${exitstat}
-}
-
-function logname () 
-{ 
- local uname;
-
-    uname="$(command logname 2> /dev/null)"
-    echo "${uname:-$(command whoami)}"
-}
-
-# Returns zero exit status if argument consists entirely of numeric
-# characters, nonzero otherwise.
-function numericp ()
-{
-    case "${1}" in
-       "" | *[!0-9]* )  
-          return 1
-         ;;
-       *)
+# Returns number of positions caller should shift.
+# If retval = 3, caller should exit.
+get_option_argument='
+  {
+    option="$1" arg="$2" arg_optional="$3" shift_num=2
+    case "$option" in
+      --*=* )
+        arg=`echo $option | sed -e "s/^[^=]*=//"` 
+        shift_num=1
+       ;;
     esac
+    case "$arg" in
+      "" )
+        case "$arg_optional" in
+          "" )
+            case "$option" in 
+              --*=* ) option=`echo $option | sed -e "s/=.*//"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$usage" 1>&2
+            exit 3
+           ;;
+        esac
+        exit 1
+       ;;  
+    esac
+    echo "$arg"
+    exit $shift_num
+  }'
 
-    return 0 
-}
+# Some bourne shells don't allow a numeric argument to `shift'.
+# Usage: eval "shift_num=n; $shift_n_times"
+shift_n_times='
+  {
+    while : ; do
+      case "$shift_num" in 0 | "" ) break ;; esac
+      shift_num=`expr $shift_num - 1`
+      shift
+    done
+  }'
 
-# A clever hack would be to run date once and parse it, then use bash's
-# builtin $SECONDS variable to forever calculate the date afterward.  I
-# guess it's not worth the bother, but it might save some exec overhead.
-function do_loadst ()
-{
- # Need GNU `date' for this to work
- #time="$(date +'%h %d  %H:%M')"
- 
- #time=$(date | awk '{ split($4, time, ":");
- #                     printf( "%s %s  %s:%s\n", $2, $3, time[1], time[2] );
- #                   }')
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+check_loadavg=
+check_mail=
+sleep_time=60
 
- # Sed is usually faster than awk. 
- time=$(date | sed 's/.*\(... [0-9][0-9]* [0-9][0-9]*:[0-9][0-9]*\):.*/\1/')
+# Parse command line arguments. 
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character. 
+while test $# != 0 ; do
+  case "$1" in 
+    -D | --debug | --d* )
+      debug=t
+      shift
+     ;;
+    -h | --help | --h* )
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -l | --load-average | --l* )
+      check_loadavg=t
+      shift
+     ;;
+    -m | --mail | --m* )
+      check_mail=t
+      shift
+     ;;
+    -s | --sleep* | --s* )
+      sleep_time=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    --*=* )
+      arg=`echo $1 | sed -e 's/=.*//'`
+      echo "$progname: unknown option $bq$arg$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -* )
+      echo "$progname: unknown option $bq$1$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
 
+case "$debug" in t ) set -x ;; esac
 
- load=$(uptime | sed 's/.*load average:[ 	]*\([0-9.]*\).*/\1/')
- output="${time}  ${load}"
+trap '{ 
+        exitstat=$?
+        rm -f "$stampfile" 2> /dev/null
+        trap "" 1 2 3 15
+        exit $exitstat
+      }' 1 2 3 15
 
+for f in /usr/spool/mail /var/mail /usr/mail ; do
+  if test -d "$f" ; then
+    spoolfile="$f/$USER"
+    break
+  fi
+done
 
- mail=$(count_messages "${mailfile}" "${mail}")
- if [ "${mail}" != "0" ]; then
-    output="${output} Mail:${mail}"
- fi
+stampfile="/tmp/$progname$$"
+mail_result=
 
- echo ${newline} "${output}"
-}
+while : ; do
+  loadavg_result=
+  case "$check_loadavg" in t )
+    loadavg=`uptime \
+              | sed -ne 's/.*load average:[ 	]*//
+                         s/[, 	].*//
+                         p'`
+    loadavg_result="loadavg:$loadavg"
+   ;;
+  esac
+    
+  if test ".$check_mail" = .t -a -s "$spoolfile" ; then
+    set fnord `ls -td "$stampfile" "$spoolfile" 2> /dev/null` 
+    shift
+    case "$1" in "$spoolfile" )
+      set fnord `grep '^From ' "$spoolfile" 2> /dev/null | wc -l`
+      shift
+      mail_result="mail:$1"
+      : > "$stampfile"
+     ;;
+    esac
+  else
+    mail_result=
+  fi
 
-function count_messages ()
-{
- local file="${1}"
- local oldmail="${2}"
+  echo $loadavg_result $mail_result
+  sleep "$sleep_time"
+done
 
-    # If file isn't readable, or it's zero size, say it's zero in size. 
-    if [ ! -r "${file}" -o ! -s "${file}" ]; then
-      echo "0" 
-      return
-    fi
-
-    # Create timestamp file if it's missing, and unset oldmail
-    # value---various kinds of race conditions make it safest to just
-    # recount the mail. 
-    if [ ! -e "${timestamp}" ]; then
-       touch "${timestamp}"
-       oldmail="";
-    fi
-
-    # If file hasn't changed since timestamp was created and file has been
-    # checked at least once before, return old number of messages.
-    if [ "${timestamp}" -nt "${file}" -a -n "${oldmail}" ]; then
-       echo "${oldmail}"
-       return
-    fi
-
-    egrep "^From " ${file} | wc -l | sed "s/^[ 	]*//"
-    touch "${timestamp}"
-
-    return 0
-}
-
-main "$@"
-
-# eof
+# display-time ends here
