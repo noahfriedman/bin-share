@@ -1,0 +1,100 @@
+#!/usr/local/bin/perl
+# snarf-automount-map --- construct flat automount tree description
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 1996-11-05
+# Public domain
+
+# $Id$
+
+# Commentary:
+
+# Usage: snarf-automount-map [auto.master]
+# You can set the env var SNARF_RSH_CMD_PREFIX if you need to rsh to
+# another host to ypcat the maps.
+
+# This script assumes you are using NIS2 (nee YP), not NIS+.
+
+# Code:
+
+$cmd = "$ENV{SNARF_RSH_CMD_PREFIX} ypcat -k";
+
+&main ($ARGV[0]);
+
+sub main
+{
+  local ($initial_map) = @_;
+
+  $maxlen = 0;
+  undef (%entries);
+  &snarf ("", $initial_map);
+
+
+  $maxlen++;
+  foreach $key (sort (keys (%entries)))
+    {
+      printf ("%-${maxlen}s %s\n", $key, $entries{$key});
+    }
+}
+
+sub snarf
+{
+  local ($prefix, $map) = @_;
+  local (%data);
+
+  printf (STDERR "Getting map $map...\n");
+
+  open (CMD, "$cmd $map |") || return 0;
+
+  while (<CMD>)
+    {
+      local (@tok) = split (/[ \t\n\r]+/o, $_);
+      local ($thisprefix) = "$prefix";
+
+      if ($tok[0] !~ /^\//o)
+        {
+          $thisprefix = "$thisprefix/";
+        }
+
+      if ($tok[0] eq "")
+        {
+          next;
+        }
+      elsif ($tok[1] =~ /:/o)
+        {
+          local ($mntpoint) = "$thisprefix$tok[0]";
+          local ($len) = length ($mntpoint);
+
+          if ($len > $maxlen) { $maxlen = $len; }
+          $entries{$mntpoint} = $tok[1];
+        }
+      elsif ($tok[1] =~ /^-/o && $tok[2] =~ /:/o)
+        {
+          local ($mntpoint) = "$thisprefix$tok[0]";
+          local ($len) = length ($mntpoint);
+
+          if ($len > $maxlen) { $maxlen = $len; }
+          $entries{$mntpoint} = $tok[2];
+        }
+      elsif ($tok[1] =~ /^-/o)
+        {
+          next;
+        }
+      else
+        {
+          if ($tok[0] eq "/-")
+            {
+              $tok[0] = "";
+            }
+          $data{"$thisprefix$tok[0]"} = $tok[1];
+        }
+    }
+
+  close (CMD);
+
+  foreach $key (keys (%data))
+    {
+      &snarf ($key, $data{$key});
+    }
+}
+
+# snarf-automount-map ends here
