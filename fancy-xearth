@@ -5,7 +5,7 @@
 # Created: 1996-03-05
 # Public domain
 
-# $Id: fancy-xearth,v 1.4 1998/03/11 01:30:54 friedman Exp $
+# $Id: fancy-xearth,v 1.5 1998/03/11 01:52:50 friedman Exp $
 
 # Commentary:
 # Code:
@@ -46,25 +46,6 @@ export DISPLAY
   yshift=`expr $height / 6`
 }
 
-# Now run xearth with computed offset and other parameters.
-{
-  xearth -nolabel \
-         -stars \
-         -onepix \
-         -nomarkers \
-         -night 15 \
-         -wait 3600 \
-         -nice 19 \
-         -mag 0.25 \
-         -shift -$xshift,-$yshift \
-         -pos sunrel,24.64,41.3 \
-         -gamma 2.3 \
-         -rot 21 \
-         -proj orthographic \
-         -bigstars 20 \
-         ${1+"$@"} > /dev/null 2>&1 0<&1 &
-}
-
 # Install starship enterprise bitmaps
 {
   cursorfile="/tmp/ent-d.xbm$$"
@@ -101,6 +82,28 @@ __EOF_MASKFILE__
 
   xsetroot -cursor "$cursorfile" "$maskfile"
   rm -f "$cursorfile" "$maskfile"
+}
+
+# Now run xearth with computed offset and other parameters.
+# This should background itself unless this script is called with `-nofork'
+# on the command line.
+{
+  xearth -nolabel \
+         -stars \
+         -onepix \
+         -nomarkers \
+         -night 15 \
+         -wait 3600 \
+         -nice 19 \
+         -mag 0.25 \
+         -shift -$xshift,-$yshift \
+         -pos sunrel,24.64,41.3 \
+         -gamma 2.3 \
+         -rot 21 \
+         -proj orthographic \
+         -bigstars 20 \
+         -fork \
+         ${1+"$@"} > /dev/null 2>&1 0<&1
 }
 
 # fancy-xearth ends here
