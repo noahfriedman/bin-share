@@ -3,7 +3,7 @@
 
 # Copyright (C) 1996, 1997 Noah S. Friedman
 
-# $Id: netscape-fe,v 2.3 1997/08/07 04:54:37 friedman Exp $
+# $Id: netscape-fe,v 2.4 1997/09/01 05:35:17 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -51,7 +51,7 @@ eq="'"
 DEFAULTVERSION="${DEFAULTVERSION-NEWEST}"
 
 if [ "$prefix" = "" ] ; then
-  prefix=/usr/local/netscape
+  prefix=/usr/local/netscape/lib
 fi
 
 if [ ! -d "$prefix" ] ; then
