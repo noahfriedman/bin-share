@@ -1,4 +1,4 @@
-#! /bin/sh
+#!/bin/sh
 exec ${PERL-perl} -wSx $0 ${1+"$@"}
 #!perl
 
@@ -9,7 +9,7 @@ exec ${PERL-perl} -wSx $0 ${1+"$@"}
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-08-02
 
-# $Id: fmtcols,v 2.4 2000/07/22 10:28:35 friedman Exp $
+# $Id: fmtcols,v 2.5 2001/01/12 20:28:05 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -33,8 +33,6 @@ use Getopt::Long;
 use Symbol;
 use strict;
 
-my (@line, @maxwidth, %right_justify, $fieldsep, $width_limit);
-
 sub min { return [ sort {   $a <=> $b  } @_ ]->[0]; }
 sub max { return [ sort { -($a <=> $b) } @_ ]->[0]; }
 
@@ -55,7 +53,8 @@ sub map_over_file_contents ($@)
   my $fh = gensym;
   my $blocksize = 10 * 1024 * 1024; # 10mb
 
-  foreach my $file (@_)
+  my $file;
+  foreach $file (@_)
     {
       if ($file eq "-")
         {
@@ -72,28 +71,32 @@ sub map_over_file_contents ($@)
       while (defined $bytesread && $bytesread == $blocksize)
         {
           my $len = length;
-          $_ = substr ($_, $offset) if ($offset > 0 && $offset < $len);
+          $_ = substr ($_, $offset)
+            if ($offset > 0 && $offset < $len);
           $_ = "" if ($offset < 0 || $offset >= $len);
           $bytesread = sysread ($fh, $_, $blocksize, length);
-          $offset = &$fn (\$_);
+          $offset = &$fn (\$_) || 0;
         }
       close ($fh);
     }
 }
 
-sub read_input
+sub read_input ($@)
 {
   my $fieldsep = shift;
+  my @line;
+  my @maxwidth;
 
   map_over_file_contents
     sub {
-      while (${$_[0]} =~ /(.*)\n/gcmo)
+      while (${$_[0]} =~ m/(.*)\n/gmo)
         {
           my @fields = split (/$fieldsep/o, $1, -1);
           my $i = 0;
 
           push @line, \@fields;
-          foreach my $f (@fields)
+          my $f;
+          foreach $f (@fields)
             {
               my $l = length $f;
               $maxwidth[$i] = $l
@@ -102,29 +105,32 @@ sub read_input
             }
         }
       return pos ${$_[0]};
-    }, @ARGV;
+    }, @_;
+  return \@line, \@maxwidth;
 }
 
-sub print_output
+sub print_output ($$$$$$)
 {
-  my ($fieldsep, $width_limit) = @_;
+  my ($line, $fieldsep, $outsep, $maxwidth, $width_limit, $right_justify) = @_;
 
   my @fmts;
   my $i = 0;
-  foreach my $width (@maxwidth)
+  my $width;
+  foreach $width (@$maxwidth)
     {
       my $w = (defined $width_limit ? min ($width, $width_limit) : $width);
       push @fmts, join ("",
-                        (exists $right_justify{$i} ? "%" : "%-"),
+                        (exists $right_justify->{$i} ? "%" : "%-"),
                         $w,
                         (defined $width_limit ? "." . ($w-1) : ""),
                         "s");
       $i++;
     }
   $fmts[$#fmts] = "%s" if (substr ($fmts[$#fmts], 1, 1) eq '-');
-  my $fmtstr = join (" ", @fmts);
+  my $fmtstr = join ($outsep, @fmts);
 
-  foreach my $l (@line)
+  my $l;
+  foreach $l (@$line)
     {
       my $s = sprintf ($fmtstr, @$l);
       $s =~ s/\s+$//o;
@@ -132,23 +138,28 @@ sub print_output
     }
 }
 
-sub parse_options
+sub parse_options ()
 {
-  $fieldsep = "[ \t]+";
-  $width_limit = undef;
-  undef %right_justify;
+  my $fieldsep    = "[ \t]+";
+  my $outsep      = " ";
+  my $width_limit;
+  my %right_justify;
   my @rightcols;
 
   Getopt::Long::config ('bundling', 'autoabbrev');
-  GetOptions ("s|separator=s", \$fieldsep,
-              "m|max-field-width=i", \$width_limit,
-              "r|right-justify=s@", \@rightcols,
-              "h|help", \&usage);
+  GetOptions ("m|max-field-width=i",  \$width_limit,
+              "r|right-justify=s@",   \@rightcols,
+              "S|output-separator=s", \$outsep,
+              "s|separator=s",        \$fieldsep,
+              "h|help",               \&usage);
 
-  foreach my $col (split (/\s*,\s*/o, join (",", @rightcols)))
+  my $col;
+  foreach $col (split (/\s*,\s*/o, join (",", @rightcols)))
     {
       $right_justify{$col} = 1;
     }
+
+  return ($fieldsep, $outsep, $width_limit, \%right_justify);
 }
 
 sub usage ()
@@ -158,21 +169,22 @@ sub usage ()
 Options are:
 -h, --help                      You're looking at it.
 -r, --right-justify  F0,F1,...  Right-justify fields F0, F1, ...
--s, --separator      SEP        Field separator between columns.
+-s, --separator        SEP      Field separator between columns.
                                 This can be any regular expression.
                                 The default field separator is any number of
                                 tabs and spaces, i.e. \"[ \\t]+\".
--m, --max-field-width MAX       Truncate fields on output that are larger than
+-S, --output-separator SEP      Output separator between fields.  Default \" \".
+-m, --max-field-width  MAX      Truncate fields on output that are larger than
                                 this limit.  By default, there is no limit.\n";
   exit (1);
 }
 
 sub main
 {
-  parse_options ();
+  my ($fieldsep, $outsep, $width_limit, $align) = parse_options ();
   push @ARGV, "-" unless (scalar @ARGV > 0);
-  read_input ($fieldsep);
-  print_output ($fieldsep, $width_limit);
+  my ($lines, $maxwidth) = read_input ($fieldsep, @ARGV);
+  print_output ($lines, $fieldsep, $outsep, $maxwidth, $width_limit, $align);
 }
 
 main ();
