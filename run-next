@@ -3,7 +3,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1995-09-07
 
-# $Id$
+# $Id: run-next,v 1.1 1995/09/07 23:46:20 friedman Exp friedman $
 
 # Commentary:
 
@@ -180,10 +180,16 @@ set fnord
 shift
 
 for d in `IFS=':'; echo $PATH`; do
-  if test -f $d/$prog ; then
-    set fnord ${1+"$@"} "$d"
-    shift
-  fi
+  case " $* " in
+    # Do not add duplicate directories to search path
+    *" $d "* ) : ;;
+    * )
+      if test -f $d/$prog ; then
+        set fnord ${1+"$@"} "$d"
+        shift
+      fi
+     ;;
+  esac
 done
 
 case "$progdir" in
