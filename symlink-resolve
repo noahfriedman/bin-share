@@ -4,25 +4,92 @@
 # Created: 1993-02-07
 # Public domain
 
-# $Id: symlink-resolve,v 1.2 1995/08/15 05:25:28 friedman Exp friedman $
+# $Id: symlink-resolve,v 1.3 1995/08/15 05:25:53 friedman Exp friedman $
 
 # Commentary:
 
-# Usage: symlink-resolve [path1] {path2} {...}
-#
 # Resolve pathnames until there are no more symbolic links.  Resulting
 # pathname be not be a file that actually exists (depending on whether
 # symlinks point to nonexistent files).
-#
-# If environment variable SYMLINK_RESOLVE is set to "nil", then
-# pathnames are not cleaned up of internal relative pathnames, i.e.
-# canonicalization to absolute pathname is not done.
 
 # Code:
 
-exec perl - ${1+"$@"} <<'__EOF__'
+# Name by which this script was invoked.
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 
-if ($ENV{'SYMLINK_RESOLVE'} ne 'nil')
+# To prevent hairy quoting and escaping later.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options} [path1] {path2} {...}
+
+Options are:
+-D, --debug                  Enable shell/perl debugging.
+-h, --help                   You're looking at it.
+-n, --no-canonicalize        Do not canonicalize pathnames by resolving
+                             references to $bq..$eq, etc.
+"
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+SYMLINK_CANONICALIZE=
+
+# Parse command line arguments.
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character.
+while : ; do
+  case $# in 0) break ;; esac
+  case "$1" in
+    -D | --debug | --d* )
+      # This option is passed to perl for interactive debugging
+      debug=-d
+      shift
+     ;;
+    -h | --help | --h )
+      echo "$usage" 1>&2
+      exit 0
+     ;;
+    -n | --no-canonicalize | --n* )
+      SYMLINK_CANONICALIZE=nil
+      export SYMLINK_CANONICALIZE
+      shift
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    -* )
+      case "$1" in
+        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+        * )     arg="$1" ;;
+      esac
+      exec 1>&2
+      echo "$progname: unknown or ambiguous option $bq$arg$eq"
+      echo "$progname: Use $bq--help$eq for a list of options."
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+case "$debug" in -d ) set -x ;; esac
+
+case $# in
+  0 )
+   echo "$usage" 1>&2
+   exit 1
+  ;;
+esac
+
+exec perl $debug - ${1+"$@"} <<'__EOF__'
+
+if ($ENV{'SYMLINK_CANONICALIZE'} ne 'nil')
   {
    chop ($pwd = `pwd`);
   }
@@ -42,7 +109,7 @@ for ($i = 0; $i < @ARGV; $i++)
          # the system to give up when there are simply too many levels,
          # even if resolution would eventually occur).  This parameter is
          # adjustable, of course.  Most unix kernels allow a depth of 8.
-         if ($link_count++ == 16)
+         if ($link_count++ == 32)
            {
             print STDERR "symlink-resolve: $ARGV[$i]: " .
                          "Too many levels of symbolic links\n";
@@ -72,7 +139,7 @@ for ($i = 0; $i < @ARGV; $i++)
    $_ = join ("/", @p);
 
    # If pathname should not be canonicalized, exit here.
-   if ($ENV{'SYMLINK_RESOLVE'} ne 'canonicalize')
+   if ($ENV{'SYMLINK_CANONICALIZE'} eq 'nil')
      {
       print "$_\n";
       exit (0);
