@@ -1,0 +1,52 @@
+#!/bin/sh
+# endian -- determine endian-ness of machine
+#
+# Written 21-Jan-93 by Noah Friedman <friedman@prep.ai.mit.edu>
+# Last modified 21-Jan-93
+#
+# Public domain. 
+#
+# The C compiler is called by this shell script.  The environment
+# variable `CC' and `CFLAGS' are used to determine exactly what
+# compiler and args to use.  `cc' is the default. 
+#
+
+cd /tmp || exit 1
+
+file="endian$$"
+
+cat > "${file}.c" <<__EOF__
+   main () 
+   {
+     union
+       {
+         long l;
+         char c[sizeof (long)];
+       } u;
+
+     u.l = 1;
+     exit (u.c[sizeof (long) - 1] == 1);
+   }
+__EOF__
+
+${CC-cc} ${CFLAGS} ${file}.c -o ./${file} || exit 1
+
+./"${file}"
+
+case $? in
+   0)
+      echo "little-endian"
+     ;;
+   1)
+      echo "big-endian"
+     ;;
+   *)
+      echo "unknown"
+     ;;
+esac
+
+rm -f "${file}" "${file}.c"
+
+exit 0
+
+# eof
