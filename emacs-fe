@@ -4,7 +4,7 @@
 # Created: 1995-09-11
 # Public domain.
 
-# $Id: emacs-fe,v 1.1 1995/10/25 22:29:42 friedman Exp friedman $
+# $Id: emacs-fe,v 1.2 1995/10/26 23:38:43 friedman Exp $
 
 # Commentary:
 
@@ -19,9 +19,10 @@
 # are the commands users would normally execute to run them.
 
 # Give each version of emacs/xemacs/mule/ispell a separate hierarchy under
-# $prefix, with the name "[emacs|xemacs|mule|ispell]-NN.NN" where NN.NN is
-# the version number.  This script looks at what versions are available,
-# and selects a version, currently $OLDEST .
+# $prefix/[emacs|xemacs|mule|ispell], with the name
+# "[emacs|xemacs|mule|ispell]-NN.NN" where NN.NN is the version number.
+# This script looks at what versions are available, and selects a version,
+# currently whatever is specified by $DEFAULTLVERSION.
 
 # However, users can specify their own choice to force the selection of a
 # particular version by setting the environment variable PROGNAMEVERSION
@@ -38,6 +39,9 @@ progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 bq='`'
 eq="'"
 
+DEFAULTVERSION="${DEFAULTVERSION-NEWEST}"
+VARIANT="${EMACSVARIANT-emacs}"
+
 if [ "$prefix" = "" ] ; then
   # root of the GNU installed tree
   prefix=/usr/local/gnu
@@ -52,11 +56,11 @@ case "$progname" in
   emacs | lemacs | xemacs | mule | ispell )
     if [ "$eprefix" = "" ] ; then
       # prefix name of the subdirectory
-      eprefix="${progname}-"
+      eprefix="${progname}/${progname}-"
     fi
    ;;
   * )
-    eprefix="${EMACSVARIANT-emacs}-"
+    eprefix="$VARIANT/${VARIANT}-"
    ;;
 esac
 
@@ -72,9 +76,9 @@ esac
 # will stop on the first `.'.
 # This may not work correctly if the version number has more than 4 levels
 # of minor versions (e.g. "1.2.3.4.5" may cause problems).
-availversions=`ls -1d $prefix/${eprefix}*/bin/$progname* 2> /dev/null \
+availversions=`ls -1d $prefix/${eprefix}*/. 2> /dev/null \
                 | sed -n \
-                      -e "s#^$prefix/$eprefix\([0-9.][0-9.]*\)/bin/.*#\1#" \
+                      -e "s#^$prefix/$eprefix\([0-9.][0-9.]*\)/\.*#\1#" \
                       -e 'h
                           s/[^.]*[^0-9.][^.]*\.//g
                           :0
@@ -129,8 +133,11 @@ case "$version" in
         # but that is a very pathological case and is a lot of work.
         version=3.1 ;;
       * )
-        VARIANT=`echo "${EMACSVARIANT-emacs}" | sed -e "$sed_upcase"`
-        eval version=\"\$${VARIANT}VERSION\"
+        variant=`echo "$VARIANT" | sed -e "$sed_upcase"`
+        eval version=\"\$${variant}VERSION\"
+        case "$version" in
+          '' ) version="$DEFAULTVERSION" ;;
+        esac
        ;;
     esac
 esac
@@ -228,13 +235,30 @@ fi
 #PATH=$prefix/$eprefix$version/bin:$PATH
 #export PATH
 
-for p in $progname-$version $progname ; do
-  if [ -f $prefix/$eprefix$version/bin/$p ] ; then
-    exec $prefix/$eprefix$version/bin/$p ${1+"$@"}
-  fi
+searchdirs="
+   bin \
+   libexec/$VARIANT/$version/* \
+   lib/$VARIANT/$version/*
+   lib/$VARIANT/etc
+   lib/etc
+"
+
+for dir in $searchdirs ; do
+  for p in $progname-$version $progname ; do
+    if [ -f $prefix/$eprefix$version/$dir/$p ] ; then
+      exec $prefix/$eprefix$version/$dir/$p ${1+"$@"}
+    fi
+  done
 done
 
-echo "$progname: Cannot find $bq$progname-$version$eq or $bq$progname$eq in $prefix/$eprefix$emacsversion/bin" 1>&2
+exec 1>&2
+
+echo "$progname: Cannot find $bq$progname-$version$eq or $bq$progname$eq in"
+
+for d in $searchdirs ; do
+  ls -1d $prefix/$eprefix$version/$d 2> /dev/null \
+   | sed -e "s/^/$progname:   /"
+done
 
 exit 1
 
