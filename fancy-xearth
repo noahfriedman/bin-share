@@ -5,7 +5,7 @@
 # Created: 1996-03-05
 # Public domain
 
-# $Id: fancy-xearth,v 1.6 1998/03/11 02:48:43 friedman Exp $
+# $Id: fancy-xearth,v 1.7 1998/04/13 20:30:44 friedman Exp $
 
 # Commentary:
 # Code:
@@ -13,24 +13,26 @@
 DISPLAY=${DISPLAY-:0.0}
 export DISPLAY
 
-{ xearth -version; } 2> /dev/null || exit 1
+version=`{ xearth -version 2>&1 \
+            | sed -n -e '/This is xearth version /{s///p;s/\.$//;p;}'
+         } 2> /dev/null` || exit 1
 
-# Original offset was fixed at -250,-150 which looked good at 1024x768, but
-# doesn't feel far enough to the left for higher resolution displays
-# (e.g. 1600x1200).  Instead, calculate relative offset based on the size
-# of the display.
+# Align using galactic axis if available.
+#case "$version" in
+#  1.0 ) rot=21       ;;
+#  *   ) rot=galactic ;;
+#esac
+
+# Actually, I still prefer the traditional rotation.
+rot=21
+
+# Calculate relative offset based on the size of the display.
 {
-  xrdb_syms=`xrdb -symbols`
-  case "$DISPLAY" in
-    # If display does not contain an explicit screen number (e.g. 0.0),
-    # then there are multiple screens associated with the display and
-    # xrdb -symbols is going to spit out comments.
-    # We really want a way to determine which syms we want since they may
-    # vary from screen to screen, but I just don't know of any method of
-    # deciding which to use.
-    *:*.* ) : ;;
-    * )     xrdb_syms=`echo "$xrdb_syms" | sed -e '/^#/d'` ;;
-  esac
+  # The -screen argument should limit the output to the current screen if
+  # there is more than one; if the display does not refer to a specific
+  # screen (e.g. set to ":0", then the default screen should be selected.
+  # To get information about a different screen, set DISPLAY to that screen.
+  xrdb_syms="`xrdb -symbols -screen`"
 
   sedfilt='s/-D.*//
            s/[ 	][ 	]*/ /g
@@ -46,7 +48,7 @@ export DISPLAY
   yshift=`expr $height / 6`
 }
 
-# Install starship enterprise bitmaps
+# Set X cursor to resemble star trek enterprise
 {
   cursorfile="/tmp/ent-d.xbm$$"
   maskfile="/tmp/ent-m.xbm$$"
@@ -99,7 +101,7 @@ __EOF_MASKFILE__
          -shift -$xshift,-$yshift \
          -pos sunrel,24.64,41.3 \
          -gamma 1.0 \
-         -rot 21 \
+         -rot $rot \
          -proj orthographic \
          -bigstars 20 \
          -fork \
