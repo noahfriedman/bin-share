@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report. 
 #
 # Version 0.3
-# Last modified 30-Oct-92
+# Last modified 01-Nov-92
 #
 
 # Please note that in the interest of general portability, some common
@@ -42,8 +42,8 @@
 
 progname=`basename $0`
 
-usage="Usage: ${progname} {-D} {-f} {-h} [file1] {file2} {...}
-       {--debug} {--force} {--help}
+usage="Usage: ${progname} {-D} {-h} [file1] {file2} {...}
+       {--debug} {--help}
 
    Options in braces are optional.  Those in brackets are required. 
 "
@@ -72,7 +72,6 @@ fi
 
 # "unset" option variables to make sure they weren't accidentally
 # exported
-force=""
 debug=""
 
 # If you add new commands be sure to change the wildcards below to make
@@ -83,10 +82,6 @@ while [ $# -gt 0 ]; do
    case z$1 in
       z-D | z--debug | z--d* )
          debug="t"
-         shift
-        ;;
-      z-f | z--force | z--f* )
-         force="t"
          shift
         ;;
       z-h | z--help | z--h* )
@@ -158,18 +153,6 @@ for command_line_filename in "$@" ; do
    if [ ! -r "${file_texi}" ]; then
       echo "${progname}: ${file_texi}: No such file or permission denied." 1>&2
       continue; 
-   fi
-
-   # If dvi file is newer than the texinfo source, don't do anything
-   # (unless --force option was specified)
-   if [ -z "${force}" ]; then
-      # List file.dvi first, just in case mtimes are identical and ls -t
-      # sorts stably. 
-      filename_newest="`set -$- \`ls -t \"${filename_noext}.dvi\" \"${file_texi}\" 2> /dev/null\`; echo \"\$1\"`"
-      if [ "${filename_newest}" = "${filename_noext}.dvi" ]; then
-         echo "${progname}: ${bq}${filename_noext}.dvi${eq} is up to date." 1>&2
-         continue
-      fi
    fi
 
    # Find all files having root filename with a two-letter extension,
