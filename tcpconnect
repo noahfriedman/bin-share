@@ -7,7 +7,13 @@
 # $Id$
 
 # Commentary:
+
+# One way in which this might be improved is to look up all alternate
+# addresses for a host and try each one if previous ones fail.
+
 # Code:
+
+$0 =~ s/.*\///;
 
 &tcpconnect(@ARGV);
 
@@ -15,8 +21,8 @@
 sub tcpconnect
 {
   local ($rhost, $port) = @_;
-  local ($name, $aliases, $type, $len, $thisaddr, $rhostaddr);
-  local ($proto);
+  local ($proto, $name, $aliases, $type, $len, $thisaddr, $rhostaddr);
+  local ($in, $out);
   # This is made global so that do_shutdown can use it.
   #local ($child);
 
@@ -38,7 +44,21 @@ sub tcpconnect
     }
 
   ($name, $aliases, $type, $len, $thisaddr) = gethostbyname ($hostname);
-  ($name, $aliases, $type, $len, $rhostaddr) = gethostbyname ($rhost);
+
+  if ($rhost =~ /^[0-9.][0-9.]*$/)
+    {
+      local (@octet) = split (/[.]/, $rhost);
+      $rhostaddr = pack ('C4', @octet);
+    }
+  else
+    {
+      ($name, $aliases, $type, $len, $rhostaddr) = gethostbyname ($rhost);
+      if ($name eq "")
+        {
+          print (STDERR "$0: cannot resolve $rhost\n");
+          exit (1);
+        }
+    }
 
   $thishost = pack ($sockaddr, $AF_INET, 0, $thisaddr);
   $rhost    = pack ($sockaddr, $AF_INET, $port, $rhostaddr);
@@ -53,53 +73,57 @@ sub tcpconnect
   connect (S, $rhost) || die ("$0: connect: $!");
 
   # Avoid deadlock by forking.
-  $child = fork();
+  $child = fork ();
 
   # Set file handles to be command buffered.
   # Since we do unbuffered sysreads and syswrites this may actually be
   # unnecessary.
   select (S); $| = 1; select (STDOUT); $| = 1;
 
-  $SIG{'HUP'} = 'shutdown';
-
   if ($child == 0)
     {
-      # child
-      while ($len = sysread(STDIN, $_, 16384))
-        {
-          syswrite (S, $_, $len);
-        }
-      &shutdown;
+      $SIG{'HUP'} = 'shutdown_child';
+      ($in, $out) = (STDIN, S);
     }
   else
     {
-      while ($len = sysread (S, $_, 16384))
-        {
-          syswrite (STDOUT, $_, $len);
-        }
-      &shutdown;
+      $SIG{'HUP'} = 'shutdown_parent';
+      ($in, $out) = (S, STDIN);
     }
+
+  while ($len = sysread ($in, $_, 16384))
+    {
+      syswrite ($out, $_, $len);
+    }
+
+  local ($fn) = $SIG{'HUP'};
+  &$fn;
 }
 
-sub shutdown
+# Called by child
+sub shutdown_child
 {
+  local ($ppid) = getppid ();
+
+  # 2 == shut down both send and receive.
+  shutdown (S, 2);
   close (S);
 
-  if ($child == 0)
+  if ($ppid != 1)
     {
-      # Child.  Slaughter parent if not already orphaned.
-      $ppid = getppid();
-      if ($ppid != 1)
-        {
-          kill 1, $ppid;
-        }
-    }
-  else
-    {
-      # Parent.  Slay children.
-      kill 1, $child;
+      kill 1, $ppid;
     }
 
+  exit (0);
+}
+
+# Called by parent
+sub shutdown_parent
+{
+  # 2 == shut down both send and receive.
+  shutdown (S, 2);
+  close (S);
+  kill 1, $child;
   exit (0);
 }
 
