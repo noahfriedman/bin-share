@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- produce DVI files from Texinfo/LaTeX sources.
-# $Id: texi2dvi,v 0.22 1998/12/20 12:54:47 karl Exp $
+# $Id: texi2dvi,v 0.23 1998/12/20 14:14:20 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98 Free Software Foundation, Inc.
 #
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.22 $'
+rcs_revision='$Revision: 0.23 $'
 rcs_version=`set - $rcs_revision; echo $2`
 
 version="texi2dvi (GNU Texinfo 3.12-pretest) $rcs_version
@@ -44,15 +44,15 @@ containing each FILE is searched for included files.  The suffix of FILE
 is used to determine its language (LaTeX or Texinfo).
 
 Options:
-  -@                   Use @input instead of \input; useful if texinfo
+  -@                   Use @input instead of \input; useful if Texinfo
                          is preloaded into TeX.
-  -b, --batch          Same as --quiet.
   -c, --clean          Remove all auxiliary files.
   -D, --debug          Turn on shell debugging (set -x).
   -e, --expand         Expand Texinfo macros with makeinfo before running TeX.
   -I DIR               Search DIR for Texinfo files.
   -h, --help           Display this help and exit successfully.
   -l, --language=LANG  Specify the LANG of FILE: LaTeX or Texinfo.
+  -p, --pdf            Use pdftex or pdflatex for processing.
   -q, --quiet          No interaction and no output unless errors.
   -s, --silent         Same as --quiet.
   -t, --texinfo=CMD    Insert CMD after @setfilename in copy of input file.
@@ -71,13 +71,12 @@ general questions and discussion to <help-texinfo@gnu.org>."
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
 at_escape=
-batch=
 clean=
 debug=
 expand=t   # FIXME: should be turned off once in-TeX-expansion is fixed
 language=
 miincludes= # makeinfo include path
-nonopt=
+pdf=
 textra=
 txincludes= # TEXINPUTS extensions
 quiet=    # by default let the tools' message be displayed
@@ -117,10 +116,11 @@ while test x"$1" != x"$arg_sep"; do
       ;;
   esac
 
-  # This recognizes --bletch as --batch.  So what.
+  # This recognizes --quark as --quiet.  So what.
   case "$1" in
     -@ ) at_escape=t;;
-    -b | -q | -s | --b* | --s* | --q*) batch=t; quiet=t;;
+    # Silently and without documentation accept -b and --b[atch] as synonyms.
+    -b | -q | -s | --b* | --s* | --q*) quiet=t;;
     -c | --c*) clean=t;;
     -D | --d*) debug=t;;
     -e | --e*) expand=t;;
@@ -131,13 +131,14 @@ while test x"$1" != x"$arg_sep"; do
       txincludes="$txincludes$path_sep$1"
       ;;
     -l | --l*) shift; language=$1;;
+    -p | --p*) pdf=t;;
     -t | --t*) shift; textra="$textra\\
 $1";;
     -v | --vers*) echo "$version"; exit 0;;
     -V | --verb*) verbose=echo;;
     --) # What remains are not options.
       shift
-      while test "$1" != "$arg_sep"; do
+      while test x"$1" != x"$arg_sep"; do
         set - "$@" "$1"
         shift
       done
@@ -212,15 +213,19 @@ for command_line_filename in "$@"; do
 
   # Get the type of the file (latex or texinfo) based on its extension,
   # or upon the specified language.
-  case ${language-$filename_ext} in
+  case ${language:-$filename_ext} in
     [lL]a[tT]e[xX] | *.ltx | *.tex)
       # Assume a LaTeX file.  LaTeX needs bibtex and uses latex for
       # compilation.  No makeinfo.
-      bibtex=${BIBTEX-bibtex}
+      bibtex=${BIBTEX:-bibtex}
       ext=tex
       makeinfo=
-      texindex=${MAKEINDEX-makeindex}
-      tex=${LATEX-latex}
+      texindex=${MAKEINDEX:-makeindex}
+      if test -z "$pdf"; then
+        tex=${LATEX:-latex}
+      else
+        tex=${LATEX:-pdflatex}
+      fi
       ;;
 
     *)
@@ -228,15 +233,19 @@ for command_line_filename in "$@"; do
       # and tex.
       bibtex=
       ext=texi
-      test "$expand" = t && makeinfo=${MAKEINFO-makeinfo}
-      texindex=${TEXINDEX-texindex}
-      tex=${TEX-tex}
+      test "$expand" = t && makeinfo=${MAKEINFO:-makeinfo}
+      texindex=${TEXINDEX:-texindex}
+      if test -z "$pdf"; then
+        tex=${TEX:-tex}
+      else
+        tex=${TEX:-pdftex}
+      fi
       ;;
   esac
 
   # Vastly abbreviated temporary directory name is so we don't have
   # collisions on 8.3 or 14-character filesystems.
-  tmpdir=${TMPDIR-/tmp}/t2d$$
+  tmpdir=${TMPDIR:-/tmp}/t2d$$
 
   # _src.  Use same basename since we want to generate aux files with
   # the same basename as the manual.  If --expand, then output the
@@ -390,7 +399,7 @@ for command_line_filename in "$@"; do
       input='\input'
     fi
 
-    if test "$batch" = t; then
+    if test "$quiet" = t; then
       tex_mode=$nonstopmode
     else
       tex_mode=
