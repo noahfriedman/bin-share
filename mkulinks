@@ -4,7 +4,7 @@
 # Created: 1995-06-23
 # Public domain.
 
-# $Id: mkulinks,v 1.2 1995/09/05 20:51:48 friedman Exp friedman $
+# $Id: mkulinks,v 1.3 1995/11/08 04:55:36 friedman Exp friedman $
 
 # Commentary:
 # Code:
@@ -20,13 +20,19 @@ usage="Usage: $progname {options}
 
 Options are:
 -D, --debug                  Enable interative perl debugging.
+-E, --errors-to-fd    FD     Direct errors to file descriptor FD.
+                             This is for the sake of scripts which run via
+                             rsh/csh and cannot redirect flexibly.
+                             FD can also be one of ${bq}stdin$eq,
+                             ${bq}stdout$eq, or ${bq}stderr$eq.
 -h, --help                   You're looking at it.
 -l, --link-directory  DIR    Make symlinks in DIR (default: /u)
--s, --strip-non-user-links   Remove symlinks which do not correspond to the
-                             name of any user account.
+-p, --perl	      PROG   Use PROG as perl interpreter.
 -r, --remove-non-links       Remove any non-symlinks.
                              WARNING: this option will remove files and
                              entire directory hierarchies.
+-s, --strip-non-user-links   Remove symlinks which do not correspond to the
+                             name of any user account.
 -v, --verbose                Report file operations.
 "
 
@@ -34,6 +40,7 @@ Options are:
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
 debug=
+PERL=${PERL-perl}
 MKULINKS_HOMEDIR=/u
 MKULINKS_STRIP=
 MKULINKS_RMNONLINKS=
@@ -105,7 +112,20 @@ while : ; do
       debug=-d
       shift
      ;;
-    -h | --help | --h )
+    -E | --errors-to-fd* | --e* )
+      eval "$getopt"
+      case "$optarg" in
+        0 | [Ss][Tt][Dd][Ii][Nn] )     exec 2>&0 ;;
+        1 | [Ss][Tt][Dd][Oo][Uu][Tt] ) exec 2>&1 ;;
+        2 | [Ss][Tt][Dd][Ee][Rr][Rr] ) : ;;
+        [3456789] )                    eval exec "2>&$optarg" ;;
+        * )
+          echo "$progname: $optarg: Invalid stderr redirect." 1>&2
+          exit 1
+         ;;
+      esac
+     ;;
+    -h | --help | --h* )
       echo "$usage" 1>&2
       exit 0
      ;;
@@ -113,12 +133,16 @@ while : ; do
       eval "$getopt"
       MKULINKS_HOMEDIR="$optarg"
      ;;
-    -s | --strip-non-user-links | --s* )
-      MKULINKS_STRIP=t
-      shift
+    -p | --perl* | --p* )
+      eval "$getopt"
+      PERL="$optarg"
      ;;
     -r | --remove-non-links | --r* )
       MKULINKS_RMNONLINKS=t
+      shift
+     ;;
+    -s | --strip-non-user-links | --s* )
+      MKULINKS_STRIP=t
       shift
      ;;
     -v | --verbose | --v* )
@@ -157,12 +181,16 @@ case "$debug" in -d ) set -x ;; esac
 MKULINKS_PROGNAME="$progname"
 export MKULINKS_PROGNAME
 
-exec perl $debug - ${1+"$@"} <<'__EOF__'
+exec "$PERL" $debug - ${1+"$@"} <<'__EOF__'
 
 &main;
 
 sub main
 {
+  # Unbuffer output.
+  select (STDERR); $| = 1;
+  select (STDOUT); $| = 1;
+
   $progname = $ENV{'MKULINKS_PROGNAME'};
   $tophome = $ENV{'MKULINKS_HOMEDIR'};
 
