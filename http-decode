@@ -1,0 +1,4 @@
+#!/usr/bin/perl -pw
+
+y/+/ /;
+s/%([\dabcdef]{2})/chr(hex($1))/iego;
