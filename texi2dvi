@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- produce DVI (or PDF) files from Texinfo (or LaTeX) sources.
-# $Id: texi2dvi,v 0.29 1999/01/24 14:28:12 karl Exp $
+# $Id: texi2dvi,v 0.30 1999/01/31 22:07:58 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98, 99 Free Software Foundation, Inc.
 #
@@ -26,7 +26,7 @@
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.29 $'
+rcs_revision='$Revision: 0.30 $'
 rcs_version=`set - $rcs_revision; echo $2`
 program=`echo $0 | sed -e 's!.*/!!'`
 version="texi2dvi (GNU Texinfo 3.12-pretest) $rcs_version
@@ -74,9 +74,10 @@ escape='\'
 batch=:
 clean=
 debug=
-expand=t   # FIXME: should be turned off once in-TeX-expansion is fixed
+expand=
 oformat=dvi
-language=
+set_language=
+makeinfo=
 miincludes= # makeinfo include path
 textra=
 txincludes= # TEXINPUTS extensions
@@ -104,7 +105,7 @@ export TEXINPUTS INDEXSTYLE
 # than 'set - ..." because on Solaris set - turns off set -x (but keeps
 # set -e).
 arg_sep="$$--$$"
-set dummy "$@" "$arg_sep"; shift
+set dummy ${1+"$@"} "$arg_sep"; shift
 
 # 
 # Parse command line arguments.
@@ -116,7 +117,7 @@ while test x"$1" != x"$arg_sep"; do
       opt=`echo "$1" | sed -e 's/=.*//'`
       val=`echo "$1" | sed -e 's/[^=]*=//'`
       shift
-      set dummy "$opt" "$val" "$@"; shift
+      set dummy "$opt" "$val" ${1+"$@"}; shift
       ;;
   esac
 
@@ -135,7 +136,7 @@ while test x"$1" != x"$arg_sep"; do
       miincludes="$miincludes -I $1"
       txincludes="$txincludes$path_sep$1"
       ;;
-    -l | --l*) shift; language=$1;;
+    -l | --l*) shift; set_language=$1;;
     -p | --p*) oformat=pdf;;
     -t | --t*) shift; textra="$textra\\
 $1";;
@@ -144,7 +145,7 @@ $1";;
     --) # What remains are not options.
       shift
       while test x"$1" != x"$arg_sep"; do
-        set dummy "$@" "$1"; shift
+        set dummy ${1+"$@"} "$1"; shift
         shift
       done
       break;;
@@ -152,7 +153,7 @@ $1";;
       echo "$0: Unknown or ambiguous option \`$1'." >&2
       echo "$0: Try \`--help' for more information." >&2
       exit 1;;
-    *) set dummy "$@" "$1"; shift;;
+    *) set dummy ${1+"$@"} "$1"; shift;;
    esac
    shift
 done
@@ -185,12 +186,15 @@ fi
 
 # 
 # TeXify files.
-for command_line_filename in "$@"; do
+
+# Digital Unix and Ultrix 4.3 still expand "$@" to a single argument
+# (the empty string) rather than nothing at all.
+for command_line_filename in ${1+"$@"}; do
   $verbose "Processing $command_line_filename ..."
 
   # If the COMMAND_LINE_FILENAME is not absolute (e.g., --debug.tex),
   # prepend `./' in order to avoid that the tools take it as an option.
-  echo "$command_line_filename" | grep '^/' >/dev/null \
+  echo "$command_line_filename" | egrep '^(/|[A-z]:/)' >/dev/null \
   || command_line_filename="./$command_line_filename"
 
   # See if the file exists.  If it doesn't we're in trouble since, even
@@ -214,6 +218,15 @@ for command_line_filename in "$@"; do
   # Strip extension:
   filename_noext=`echo "$filename_ext" | sed 's/\.[^.]*$//'`
 
+  # If the user explicitly specified the language, use that.
+  # Otherwise, if the first line is \input texinfo, assume it's texinfo.
+  # Otherwise, guess from the file extension.
+  if test -n "$set_language"; then
+    language=$set_language
+  elif sed 1q "$command_line_filename" | grep 'input texinfo' >/dev/null; then
+    language=texinfo
+  fi
+
   # Get the type of the file (latex or texinfo) based on its extension,
   # or upon the specified language.
   case ${language:-$filename_ext} in
@@ -222,7 +235,6 @@ for command_line_filename in "$@"; do
       # compilation.  No makeinfo.
       bibtex=${BIBTEX:-bibtex}
       ext=tex
-      makeinfo=
       texindex=${MAKEINDEX:-makeindex}
       if test $oformat = dvi; then
         tex=${LATEX:-latex}
@@ -277,12 +289,41 @@ for command_line_filename in "$@"; do
   # Always use `end' footnote style, since the `separate' style
   #   generates different output (arguably this is a bug in -E).
   # Discard main info output, the user asked to run TeX, not makeinfo.
-  # Although we'd like to include --no-ifinfo --iftex here, makeinfo
-  #  isn't ready for that yet.  So keep expanding the @ifinfo parts :(.
   if test -n "$makeinfo"; then
     $verbose "Macro-expanding $command_line_filename to $filename_src ..."
-    $makeinfo --footnote-style=end -E "$filename_src" -I "$filename_dir" \
-      $miincludes -o /dev/null "$command_line_filename"
+
+    # Preprocess with sed in order to keep the iftex sections only.
+    # We want to remove non TeX sections, and comment (with `@c texi2dvi')
+    # TeX sections so that makeinfo does not try to parse them.
+    # Nevertheless, while commenting TeX sections, don't comment
+    # @macro/@end macro so that makeinfo does propagate them.
+    # Unfortunately makeinfo --iftex --no-ifhtml --no-ifinfo doesn't
+    # work well enough yet to use that, so work around with sed.
+    comment=$tmpdir/comment.sed
+    cat <<EOF >$comment
+/^@tex/,/^@end tex/{
+  s/^/@c texi2dvi/
+}
+/^@iftex/,/^@end iftex/{
+  s/^/@c texi2dvi/
+  /^@c texi2dvi@macro/,/^@c texi2dvi@end macro/{
+    s/^@c texi2dvi//
+  }
+}
+/^@html/,/^@end html/d
+/^@ifhtml/,/^@end ifhtml/d
+/^@ifnottex/,/^@end ifnottex/d
+/^@ifinfo/,/^@end ifinfo/{
+  /^@node/p
+  /^@menu/,/^@end menu/p
+  d
+}
+EOF
+    # Uncommenting is simple: Remove any leading `@c texi2dvi'.
+    sed -f $comment "$command_line_filename" \
+      | $makeinfo --footnote-style=end -I "$filename_dir" $miincludes \
+        -o /dev/null --macro-expand=- \
+      | sed -e 's/^@c texi2dvi//' >"$filename_src"
   fi
 
   # If makeinfo failed (or was not even run), use a copy of the
