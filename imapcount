@@ -2,7 +2,7 @@
 exec ${PERL-perl} -wSx $0 ${1+"$@"}
 #!perl
 
-# $Id$
+# $Id: imapcount,v 1.1 2002/01/14 20:01:28 friedman Exp $
 
 package IMAP;
 
@@ -255,6 +255,7 @@ sub getpass
 
 sub process_options
 {
+  my $ignore;
   my %option = ( daemon         => 0,
                  host           => "inbox1.inktomi.com",
                  port           => 143,
@@ -272,6 +273,8 @@ sub process_options
               "f|imap-folder=s",  \$option{folder},
               "c|counter-file=s", \$option{countfile},
               "s|sleep=i",        \$option{sleep},
+              # For compatibility with xbiffpop
+              "C|count-only",     \$ignore,
               );
 
   return \%option;
