@@ -4,7 +4,7 @@
 # Created: 1995-11-10
 # Public domain.
 
-# $Id$
+# $Id: stockquote,v 1.1 1995/11/10 21:37:58 friedman Exp friedman $
 
 # Commentary:
 
@@ -19,8 +19,8 @@ case "$1" in
 esac
 
 server=qs.secapl.com
-port=81
-path='/cgi-bin/qsx'
+port=80
+path='/cgi-bin/qso'
 query="$1"
 qlen=`echo "....$1" | wc -c`  # Add 5 to arg length using four dots + newline
 
