@@ -1,0 +1,12 @@
+#!/bin/sh
+
+# $Id$
+
+rpm --qf '%{SIZE} %{NAME} %{VERSION}-%{RELEASE}\n' -qa \
+ | {
+     case $1 in
+       -size | size | '' ) sort -f -k1,1n -k2,2  ;;
+       -name | name )      sort -f -k2,2  -k1,1n ;;
+     esac
+   } \
+ | fmtcols -Nw
