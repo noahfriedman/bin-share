@@ -1,0 +1,51 @@
+#!/bin/sh
+# make-backup-file-name -- print the next numbered emacs-style backup file
+#                          name for a given file on disk
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1994-01-14
+# Last modified: 1994-03-09
+# Public domain
+
+# Comments:
+
+# Usage: make-backup-file-name [filename]
+#
+# Return the next emacs-style backup file name for a given file on disk,
+# based on the VERSION_CONTROL environment variable.
+# `t' or `numbered' means make numeric backup versions unconditionally.
+# `nil' or `existing' means make them for files that have some already.
+# `never' or `simple' means do not make them.
+
+# Code:
+
+name=$1
+case "$VERSION_CONTROL" in
+   never | simple ) result=$name~ ;;
+   * )
+     set `for f in "$name".~*~ ; do 
+             echo "$f"
+          done \
+           | sed -ne 's/~$//
+                      s/.*\.~//
+                      p' \
+           | sort -nr` > /dev/null
+     highest=$1
+     case "$highest" in
+        '*' | '' ) highest=0 ;;
+     esac
+     case "$VERSION_CONTROL" in
+        nil | existing )
+           case "$highest" in
+             0 ) result=$name~ ;;
+           esac
+        ;;
+        t | numbered | * )
+           next=`expr $highest + 1`
+           result=$name.~$next~
+        ;;
+     esac
+   ;;
+esac
+echo "$result"
+
+# make-backup-file-name ends here

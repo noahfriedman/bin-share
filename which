@@ -1,31 +1,24 @@
 #!/bin/sh
-#
-# $INITBIN/which, 17-Jul-91 Noah Friedman <friedman@prep.ai.mit.edu>
-#
-# Determine determine first directory in the path where a file name is
-# located.  Note: If you are using bash, it is strongly recommended that
-# you use a function taking advantage of builtin features instead, as they
-# are noticeably faster.  See $INIT/functions.
-#
+# which --- show first instance of program in path
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1991-07-17
+# Last modified: 1994-03-09
 # Public domain.
-#
 
-if [ ! "$1" ]; then
-    echo "Usage: where {commandname}"
-    exit 1
+if test $# = 0; then
+  echo "Usage: which {prog}" 1>&2
+  exit 1
 fi
 
-path=`echo ${PATH} | sed -e 's=^:=.:=' -e 's=::=:.:=g' -e 's=:$=:.=' -e 's=:= =g'`
+path=`echo $PATH | sed -e 's/^:/.:/;s/::/:.:/g;s/:$/:./;s/:/ /g'`
 
-for p in ${path} ; do
-   if [ -f "${p}/$1" ]; then
-      echo "${p}/$1"
-      exit
-   fi
+for p in $path ; do
+  if test -f "$p/$1" ; then
+    echo "$p/$1"
+    exit 0
+  fi
 done
 
-exit 2
+exit 1
 
-#
-# eof
-#
+# which ends here
