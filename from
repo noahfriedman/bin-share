@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-01-19
 
-# $Id: from,v 1.16 1996/10/16 04:43:26 friedman Exp $
+# $Id: from,v 1.17 1996/10/18 08:28:49 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -952,7 +952,7 @@ sub hack_Date_data
   # (where hh:mm is the timezone offset from UTC)
   # This parsing doesn't attempt to convert the originating time zone to
   # the local time.
-  if ($data =~ /[0-9]+-[0-9]+-[0-9]+[ \t][0-9]+:[0-9]+:[0-9]+[ \t-][0-9:]*/o)
+  if ($data =~ /[0-9]+-[0-9]+-[0-9]+[ \t][0-9]+:[0-9]+:[0-9]+[ \t+-][0-9:]*/o)
     {
       @fields = split (/[:\t -]+/o, $data);
       return sprintf ("%s %-2.2d %-2.2d:%-2.2d",
