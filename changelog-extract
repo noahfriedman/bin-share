@@ -1,17 +1,21 @@
 #!/bin/sh
-# changelog-extract - extract entries from ChangeLog files.
-# Created 26-Mar-93 by Noah Friedman <friedman@prep.ai.mit.edu>
-# Last modified 30-Mar-93
-# Public domain.
-#
+# changelog-extract --- extract entries from ChangeLog files
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1993-03-26
+# Last modified: 1994-02-28
+# Public domain
+
+# Comments:
+
 # Usage: changelog-extract {--regexp} entry1 entry2 ... < ChangeLog
 #        cat ChangeLog1 ChangeLog2 ... | changelog-extract ...
 #
 # --regexp [-r] option means entryN are regular expressions instead of
 # exact patterns.
-#
 
-re_quote=''
+# Code:
+
+re_quote='s/\([][*.\/?+&|^$]\)/\\\1/g;'
 
 case "z$1" in
    z)
@@ -19,7 +23,7 @@ case "z$1" in
       exit $?
      ;;
    z-r | z--regexp | z--r* )
-      re_quote='s/\\\/\\\/g;s/\([][*.\/?+&|^$]\)/\\\\\1/g;'
+      re_quote=''
       shift
      ;;
    z-- )
@@ -28,7 +32,7 @@ case "z$1" in
 esac
 
 re_filenames="`for f in ${1+\"$@\"} ; do echo \"${f}\"; done \
-                | sed -ne \"${re_quote}\"'
+                | sed -ne \"${re_quote}\"'s@/@\\\\/@g
                            H;${x;s/^\n//;s/\n/|/g;/|/s/\(.*\)/(\1\)/;p;}'`"
 
 awk 'BEGIN {
@@ -73,4 +77,4 @@ awk 'BEGIN {
         next; 
      }'
 
-# eof
+# changelog-extract ends here
