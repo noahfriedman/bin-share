@@ -1,257 +1,320 @@
-#!/bin/bash
-# xon -- run remote X application.
-#
-# Created 08-Mar-93 by Noah Friedman <friedman@prep.ai.mit.edu>
-# Last modified 08-Mar-93
-#
-# Requires bash version 1.12 or later to work properly. 
-#
-# Public domain.
-#
+#!/bin/sh
+# xon --- run remote X application
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1993-03-08
+# Last modified: 1994-03-16
+# Public domain
 
-function usage ()
-{
-    if [ $# -gt 0 ]; then
-       echo -e "${progname}: $*\n" 1>&2
-    fi
+# Commentary:
+# Code:
 
-    cat 1>&2 <<EOF
-Usage: ${progname} {-D} {-d disp} {-h} {-l user} {-x xhost}
-       {--debug} {--display=disp} {--help} {--login-as=user}
-       {--xhost-enable=xhost} [rhost] [rmd] {args...}
+# Name by which this script was invoked. 
+fullprogname=$0
+progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
 
--D, --debug                  Turn on shell debugging ("set -x").
--d, --display DISP           Set DISPLAY environment variable to DISP.
+bq='`'
+eq="'"
+
+usage="Usage: $progname {options} [rhost] [rmd] {args...}
+
+Options are:
+-D, --debug                  Turn on shell debugging (${bq}set -x$eq).
+-d, --display      DISP      Set DISPLAY environment variable to DISP.
 -h, --help                   You're looking at it.
--l, --login-as USER          Log in as USER on remote host. 
--x, --xhost-enable XHOST     Use ${bq}xhost${eq} to enable X server access
+-l, --login-as     USER      Log in as USER on remote host. 
+-x, --xhost-enable XHOST     Use ${bq}xhost$eq to enable X server access
                              for this host.
-EOF
+"
 
-   exit 1
-}
+# Make sure stdout and stderr are readable *somewhere*.
+# Maybe I should use syslog via `logger' instead?
+for fd in 1 2; do
+  if test ! -t $fd ; then
+    eval exec "$fd>" /dev/console
+  fi
+done
 
-function main ()
-{
- local rhost
-
-    # Make sure stdout and stderr are readable *somewhere*.
-    # Maybe I should use syslog via `logger' instead?
-    for fd in 1 2; do
-       if [ ! -t ${fd} ]; then
-          eval exec "${fd}>" /dev/console
-       fi
-    done
-
-    initialize_variables "$@"
-    parse_command_args "$@"
-    shift $?
-
-    test -n "${debug+set}" && set -x
-    test $# -ge 2 || usage
-   
-    canonicalize_display
-    xhost_enable "${xhost_enable_host}"
-
-    rhost="$1"; shift
-
-    # Be sure to close various file descripters so that lusing rshds wont
-    # inherit them.  (6, 7, 8, and 9 show up under various operating
-    # systems where rshd hasn't been fixed).
-    rsh "${rhost}" -l "${USER}" sh <<- __EOF__
-	XPATH='';
-	case "$1" in
-	   /* | ./* ) ;;
-	   * )
-	      for dir in '/usr/bin/X11'         \
-	                 '/usr/local/X11R5'     \
-	                 '/usr/local/X11'       \
-	                 '/export/XNeXT/bin'    \
-	                 '/usr/local/bin'
-	      do
-	         if test -f "\${dir}/${1}" ; then
-	            PATH="\${PATH}:\${dir}" 
-	            export PATH
-	            break
-	         fi
-	      done
-	     ;;
-	esac 
-	DISPLAY="${DISPLAY}"; export DISPLAY;
-	set - $(for arg in "$@" ; do echo -n \""${arg}"\"\  ; done)
-	\${1+"\$@"} >/dev/null 2>&1 9>&- 8>&- 7>&- 6>&- </dev/null &
-	__EOF__
-}
-
-function initialize_variables ()
-{
-    fullprogname="$0"
-    progname="${0##*/}"
-    bq="\`"  # To prevent hairy quoting and escaping later.
-    eq="'"
-
-    TRAP_SIGNALS="EXIT SIGHUP SIGINT SIGQUIT SIGTERM"
-    trap 'cleanup_and_exit' ${TRAP_SIGNALS}
-
-    USER="${USER:-${LOGNAME:-$(whoami)}}"
-    export USER
-
-    hostname=$(hostname 2> /dev/null)
-    case "${hostname}" in
-       *.* ) ;;
-       * )
-          # Note that if this is done the result could be incorrect.
-          # "domainname" is actually supposed to return the NIS domain
-          # rather than the domain of the host, but many system
-          # administrators configure systems incorrectly.
-          hostname="${hostname}.$(domainname 2> /dev/null)"
-         ;;
+# Usage: value=`(set - "$1" "$2"; eval "$get_option_argument")`
+#
+# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument ARG
+# won't get used if first long option syntax was used. 
+# If 3rd argument OPTIONAL is set, then 2nd may be empty without resulting
+# in an error (i.e. option argument is optional)
+#
+# Returns number of positions caller should shift.
+# If retval = 3, caller should exit.
+get_option_argument='
+  {
+    option="$1" arg="$2" arg_optional="$3" shift_num=2
+    case "$option" in
+      --*=* )
+        arg=`echo $option | sed -e "s/^[^=]*=//"` 
+        shift_num=1
+       ;;
     esac
-}
-
-function parse_command_args ()
-{
- local orig_number_options=$#
-
-    # unset option variables to make sure they weren't accidentally
-    # exported 
-    unset debug xhost_enable_host
-
-    # If you add new options be sure to change the wildcards below to make
-    # sure they are unambiguous (i.e. only match one possible long option)
-    # Be sure to show at least one instance of the full long option name to
-    # document what the long option is canonically called. 
-    # Long options which take arguments will need a `*' appended to the
-    # canonical name to match the value appended after the `=' character. 
-    while [ $# -gt 0 ]; do
-       case z$1 in
-          z-D | z--debug | z--de* )
-             debug=t
-             shift
-            ;;
-          z-d | z--display* | z--di* )
-             get_option_argument DISPLAY "$1" "$2"
-             shift $?
-            ;;
-          z-l | z--login-as* | z--l* )
-             get_option_argument USER "$1" "$2"
-             shift $?
-            ;;
-          z-h* | z--help | z--h* )
-             usage
-            ;;
-          z-x | z--xhost-enable* | z--x* )
-             get_option_argument xhost_enable_host "$1" "$2"
-             shift $?
-            ;;
-          z-- )
-             shift
-             break
-            ;;
-          z-* )
-             usage "${bq}${1}${eq} is not a valid option."
-            ;;
-          * )
-             break
-            ;;
-       esac
-    done
-
-    # Return number of shifted arguments so calling function can shift
-    # appropriate amount.
-    return $[ orig_number_options - $# ]
-}
-
-# Usage: get_option_argument VARIABLE OPTION ARG {OPTIONAL}
-#    where VARIABLE is shell variable that will be set to the value ARG.
-#    Long option syntax is `--foo=bar' or `--foo bar'.  3rd argument ARG
-#    won't get used if first long option syntax was used.  If 4 arg
-#    OPTIONAL is non-empty, option isn't required to have an argument; if
-#    the argument is missing, VARIABLE is set to the empty value. 
-# Returns number of positions caller should shift
-function get_option_argument ()
-{
- local variable="$1"
- local option="$2"
- local arg="$3"
- local arg_optional="$4"
-
-    # All long options must be at least 3 characters long (--o*), whereas
-    # short options are only two chars (-o) and arguments are always
-    # separate.
-    if [ ${#option} -ge 3 -a "z${option#*=}" != "z${option}" ]; then
-       arg="${option#*=}"  # Strip off anything before and including `=' char
-       eval ${variable}=\'"${arg}"\'
-       return 1
-    else
-       if [ -z "${arg}" -a -z "${arg_optional}" ]; then
-          usage "option ${bq}${option}${eq} requires argument."
-       fi
-       eval ${variable}=\'"${arg}"\'
-       return 2
-    fi
-}
-
-function cleanup_and_exit ()
-{
- local exitstat="$?"
-
-   # Reset traps to avoid double execution of this function when a signal
-   # is caught (as opposed to normal exit).
-   trap '' ${TRAP_SIGNALS}
-
-   builtin exit ${exitstat}
-}
-
-function canonicalize_display ()
-{
- local display_number
- local display_host
-
-    # If DISPLAY isn't already set, then we really don't know the display.
-    # Assume :0.0 on current host.
-    if [ -z "${DISPLAY}" ]; then
-       export DISPLAY="${hostname}:0.0"
-       return 1
-    fi
-
-    display_number="${DISPLAY##*:}"  # Parse display number from DISPLAY
-    display_host="${DISPLAY%:*}"
-
-    # This will only happen if there's no display number in the first place.
-    if [ "z${display_number}" = "z${display_host}" ]; then
-       display_number="0.0"
-    fi
-
-    # Try to guess intelligently whether display host should be reset
-    # (e.g., if it's a hostname that's not local, then it's probably
-    # accurate and we shouldn't clobber it by setting it to the local host) 
-    case "${display_host}" in
-       unix | loopback | localhost | "" )
-          display_host="${hostname}"
-         ;;
+    case "$arg" in
+      "" )
+        case "$arg_optional" in
+          "" )
+            case "$option" in 
+              --*=* ) option=`echo $option | sed -e "s/=.*//"` ;;
+            esac
+            echo "$progname: option $bq$option$eq requires argument." 1>&2
+            echo "$usage" 1>&2
+            exit 3
+           ;;
+        esac
+        exit 1
+       ;;  
     esac
+    echo "$arg"
+    exit $shift_num
+  }'
 
-    export DISPLAY="${display_host}:${display_number}"
+# Some bourne shells don't allow a numeric argument to `shift'.
+# Usage: eval "shift_num=n; $shift_n_times"
+shift_n_times='
+  {
+    while : ; do
+      case "$shift_num" in 0 | "" ) break ;; esac
+      shift_num=`expr $shift_num - 1`
+      shift
+    done
+  }'
+
+# Initialize variables.
+# Don't use `unset' since old bourne shells don't have this command.
+# Instead, assign them an empty value.
+debug=
+xhost_enable_host=
+
+# Parse command line arguments. 
+# Make sure that all wildcarded options are long enough to be unambiguous.
+# It's a good idea to document the full long option name in each case.
+# Long options which take arguments will need a `*' appended to the
+# canonical name to match the value appended after the `=' character. 
+while test $# != 0; do
+  case "$1" in 
+    -D | --debug | --d* )
+      set -x
+      debug=-x
+      shift
+     ;;
+    -d | --display* | --di* )
+      DISPLAY=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -l | --login-as* | --l* )
+      USER=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -h | --help | --h )
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -x | --xhost-enable* | --x* )
+      xhost_enable_host=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -- )     # Stop option processing
+      shift
+      break
+     ;;
+    --*=* )
+      arg=`echo $1 | sed -e 's/=.*//'`
+      echo "$progname: unknown option $bq$arg$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    -* )
+      echo "$progname: unknown option $bq$1$eq" 1>&2
+      echo "$usage" 1>&2
+      exit 1
+     ;;
+    * )
+      break
+     ;;
+  esac
+done
+
+case $# in 0 | 1 )
+  echo "$usage" 1>&2
+  exit 1
+ ;;
+esac
+
+USER=${USER-${LOGNAME-`(whoami) 2> /dev/null \
+                       || id | sed -ne 's/.*uid=[0-9]*(//;s/).*//;p'`}}
+export USER
+
+rhost=$1
+shift
+
+hostname=`hostname 2> /dev/null`
+case "$hostname" in
+  *.* ) ;;
+  * )
+    # Note that if this is done the result could be incorrect.
+    # "domainname" is actually supposed to return the NIS domain rather
+    # than the domain of the host, but many system administrators
+    # configure systems incorrectly.
+    hostname=$hostname.`domainname 2> /dev/null`
+   ;;
+esac
+
+# canonicalize DISPLAY
+{
+  # If DISPLAY isn't already set, then we really don't know the display.
+  # Assume :0.0 on current host.
+  case "$DISPLAY" in
+    '' )
+      DISPLAY=$hostname:0.0
+      export DISPLAY
+     ;;
+    * )
+      display_number=`echo "$DISPLAY" | sed -e 's/.*://'`
+      display_host=`echo "$DISPLAY" | sed -e 's/:[^:]*//'`
+
+      # This will only happen if there's no display number in the first place.
+      case "$display_number" in "$display_host" )
+        display_number=0.0 ;;
+      esac
+
+      # Try to guess intelligently whether display host should be reset
+      # (e.g., if it's a hostname that's not local, then it's probably
+      # accurate and we shouldn't clobber it by setting it to the local host) 
+      case "$display_host" in
+        unix | loopback | localhost | '' )
+          display_host=$hostname
+         ;;
+      esac
+
+      DISPLAY=$display_host:$display_number
+      export DISPLAY
+     ;;
+  esac
 }
 
-function xhost_enable ()
+# enable access via xhost, if necessary.
+# This calls this script recursively (without the --xhost-enable option) to
+# do the whole path searching and exporting frobs implemented below.
+# Perhaps the stuff below could be turned into a pseudo shell function a la 
+# the `get_option_argument' fragment above.
 {
- local rhost="$1"
-
-   test -z "${rhost}" && return 0
-
-   case "$(xhost 2>&1)" in
-      *"${rhost}"* | *'access control disabled'* ) ;;
-      * )
-         case "$(xhost "${rhost}" 2>&1)" in
+  case "$xhost_enable_host" in
+    . ) : ;;
+    * )
+      case "`xhost 2>&1`" in
+        *"$xhost_enable_host"* | *'access control disabled'* ) ;;
+        * )
+          case "`xhost $xhost_enable_host 2>&1`" in
             *'must be on local machine'*)
-               "${fullprogname}" "${DISPLAY%:*}" xhost "${rhost}"
-              ;;
-         esac
-   esac
+              display_host=`echo "$DISPLAY" | sed -e 's/:[^:]*//'`
+              "$fullprogname" -- "$display_host" xhost "$xhost_enable_host"
+             ;;
+          esac
+         ;;
+      esac
+     ;;
+  esac
 }
 
-main "$@"
+{
+  xdirs='
+    /usr/X11R6/bin
+    /usr/X11R5/bin
+    /usr/X11R4/bin
+    /usr/bin/X11R6
+    /usr/bin/X11R5
+    /usr/bin/X11R4
+    /usr/local/X11R6/bin
+    /usr/local/X11R5/bin
+    /usr/local/X11R4/bin
+    /usr/local/bin/X11R6
+    /usr/local/bin/X11R5
+    /usr/local/bin/X11R4
+    /usr/X11/bin
+    /usr/bin/X11
+    /usr/local/X11/bin
+    /usr/local/bin/X11
+    /usr/openwin/bin
+    /usr/openwin/share/bin
+    /usr/X386/bin
+    /usr/x386/bin
+    /usr/XFree86/bin/X11
+    /usr/bin
+    /usr/local/bin
+    /usr/unsupported/bin
+    /usr/athena/bin
+    /usr/local/x11r5/bin
+    /usr/lpp/Xamples/bin
+  '
 
-# eof
+  # Use remsh instead of rsh if the former exists
+  rsh=rsh
+  for d in `echo $PATH | sed -e 's/^:/.:/;s/::/:.:/g;s/:$/:./;s/:/ /g'` ; do
+    if test -f "$d/remsh" ; then
+      rsh=remsh
+      break
+    fi
+  done
+
+  # Be sure to close various file descripters so that lusing rshds wont
+  # inherit them.  (6, 7, 8, and 9 show up under various operating
+  # systems where rshd hasn't been fixed).
+  $rsh "$rhost" -l "$USER" sh $debug <<__EOF__
+    case "$1" in
+      /* | ./* ) : ;;
+      * )
+        for dir in `echo $xdirs` ; do
+          if test -f "\$dir/$1" ; then
+            PATH="\$PATH:\$dir"
+            export PATH
+            break
+          fi
+        done
+       ;;
+    esac 
+
+    DISPLAY="$DISPLAY"
+    export DISPLAY
+
+    case "$XAUTHORITY" in
+      '' ) XAUTHORITY="\$HOME/.Xauthority" ;;
+    esac
+    export XAUTHORITY
+
+    case "$XUSERFILESEARCHPATH" in
+      '' ) : ;;
+      * ) 
+        XUSERFILESEARCHPATH="$XUSERFILESEARCHPATH"
+        export XUSERFILESEARCHPATH
+       ;;
+    esac
+
+    set fnord `for arg in ${1+"$@"} ; do
+                 echo ":$arg"
+               done \
+               | sed -ne 's/^://
+                          s/\\\\/\\\\\\\/g
+                          s/'\''/'\''\\\\\\'\'\''/g
+                          s/^/'\''/
+                          s/$/'\''/
+                          H
+                          ${x
+                            s/\n/ /g
+                            p
+                           }'`
+
+    shift
+    \${1+"\$@"} >/dev/null 2>&1 9>&- 8>&- 7>&- 6>&- </dev/null &
+__EOF__
+}
+
+# xon ends here
