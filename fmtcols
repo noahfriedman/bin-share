@@ -9,7 +9,7 @@ exec ${PERL-perl} -wSx $0 ${1+"$@"}
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-08-02
 
-# $Id: fmtcols,v 2.13 2002/05/29 18:46:55 friedman Exp $
+# $Id: fmtcols,v 2.14 2002/07/22 04:02:25 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -155,6 +155,7 @@ sub print_output ($$)
       my $refp = ref $l;
       if ($refp && $refp eq 'ARRAY')
         {
+          local $^W = 0;
           my $s = sprintf ($fmtstr, @$l);
           $s =~ s/\s+$//o;
           print $s, "\n";
