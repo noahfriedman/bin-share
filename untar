@@ -1,5 +1,5 @@
 #! /bin/sh
-# $Id: untar,v 1.5 2000/02/19 00:09:58 friedman Exp $
+# $Id: untar,v 1.6 2000/09/17 12:34:50 friedman Exp $
 
 for f in ${1+"$@"}; do
   case "$f" in
@@ -14,6 +14,9 @@ for f in ${1+"$@"}; do
      ;;
     *.zip | *.jar )
       ${UNZIP-unzip} -oL "$f"
+     ;;
+    *.rpm )
+      rpm2cpio "$f" | cpio -dimv --no-absolute-filenames
      ;;
   esac
 done
