@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1996-10-11
 
-# $Id: bash-login,v 1.11 1999/09/22 06:42:43 friedman Exp $
+# $Id: bash-login,v 1.12 2000/01/23 01:57:35 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -247,7 +247,7 @@ if { bash -norc -c : ; } 2> /dev/null ; then
     execflag=
     case "'"$loginp"':$BASH_VERSION" in
       t:1.*) execflag="-"  ;;
-      t:2.*) execflag="-l" ;;
+      t:*  ) execflag="-l" ;;
     esac
 
     no_exit_on_failed_exec=t
