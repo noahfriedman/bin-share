@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.40 2000/01/23 22:33:45 friedman Exp $
+# $Id: from,v 1.41 2000/01/26 12:28:25 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -898,16 +898,21 @@ sub my_ctime (;$)
 }
 
 
-my @base64_decoder;
-{
-  my $i = 0;
-  my $s = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  map { $base64_decoder[ord $_] = $i++ } split (//, $s);
-}
+my @base64_decode_vector;
 
 sub base64_decode ($)
 {
   return $_[0] unless (length ($_[0]) % 4 == 0);
+
+  if (!defined @base64_decode_vector)
+    {
+      my $i = 0;
+      my $s = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            . "abcdefghijklmnopqrstuvwxyz"
+            . "0123456789"
+            . "+/";
+      map { $base64_decode_vector[ord $_] = $i++ } split (//, $s);
+    }
 
   my @input = split (//, $_[0]);
   my $result = "";
@@ -923,7 +928,7 @@ sub base64_decode ($)
           $result .= chr (($n >> 8) & 0xff);
           last;
         }
-      $n += $base64_decoder[ord shift @input];
+      $n += $base64_decode_vector[ord shift @input];
       if (++$c == 4)
         {
           $result .= chr ($n >> 16);
