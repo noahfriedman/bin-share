@@ -1,82 +1,412 @@
 #!/bin/sh
-# $Id$
+# gnuedit --- gnuclient wrapper for remote or superuser editing
 
-# This is still under construction
+# Copyright (C) 2000 Noah S. Friedman
 
-exec ${PERL-perl} -Sx $0 ${1+"$@"}
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2000-01-14
+
+# $Id: gnuedit,v 1.1 2000/01/14 11:56:34 friedman Exp $
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, you can either send email to this
+# program's maintainer or write to: The Free Software Foundation,
+# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
+
+# Commentary:
+
+# This program has been tested with the XEmacs 21 variant of the gnuserv
+# package and the unbundled gnuserv 3.11 distribution for Emacs.
+
+# Code:
+
+exec ${PERL-perl} -wx "$0" ${1+"$@"}
 #!perl
 
+use 5.003;
+
+use Getopt::Long;
 use Fcntl;
+use POSIX qw(:errno_h);
 use Symbol;
+use strict;
 
-# This function assumes process is running as root at can change uids
-sub file_writable_by_uid ($$)
+my $verbose = $ENV{GNUEDIT_VERBOSE} || 0;
+my $progname = $0;
+$progname =~ s|.*/||;
+
+sub errmsg (;@)
 {
-  my ($file, $uid) = @_;
-
-  if (fork == 0)
-    {
-      # Set real and effect uid to $uid
-      $< = $> = $uid;
-      exit (-w $file);
-    }
-  wait;
-  return $?;
+  print STDERR join (": ", $progname, @_), "\n";
+  return undef;
 }
 
-sub copy_file ($$;$$$)
+sub verbose (;@)
 {
-  my ($from, $to, $perm, $uid, $uidperm) = @_;
+  print $progname, ": ", join (" ",  @_), "\n" if ($verbose);
+}
+
+sub set_file_stats ($$;$)
+{
+  my $file = shift;
+  my $statinfo = shift;
+  my $actions = shift || 1;
+
+  # Set file permissions
+  (chmod ($statinfo->[2], $file)
+   || return errmsg (sprintf ("chmod(%o)", $statinfo->[2]), $file, $!))
+    if ($actions & 1);
+
+  # Set atime/mtime
+  utime ($statinfo->[8], $statinfo->[9], $file) if ($actions & 2);
+  # Set owner/group
+  chown ($statinfo->[4], $statinfo->[5], $file) if ($actions & 4);
+
+  return 1;
+}
+
+sub copy_file ($$;$$)
+{
+  my ($from, $to, $preserve, $returnstatp) = @_;
   my $fh_from = gensym;
   my $fh_to   = gensym;
 
-  sysopen ($fh_from, $from, O_RDONLY) || return undef;
-  if (!sysopen ($fh_to, $to,
-                O_WRONLY | O_CREAT | O_EXCL | O_TRUNC,
-                $perm || 0600))
+  verbose ("copying", $from, "->", $to);
+
+  sysopen ($fh_from, $from, O_RDONLY) || return errmsg ("open", $from, $!);
+  if (!sysopen ($fh_to, $to, O_WRONLY | O_CREAT | O_EXCL | O_TRUNC, 0600))
     {
-      print STDERR "open: $to: $!\n";
       close ($fh_from);
+      errmsg ("open", $to, $!);
       return undef;
     };
 
   my $data;
-  while (my $len = sysread ($fh_from, $data, 65536))
+  while (my $len = sysread ($fh_from, $data, 2**20)) # 1mb buffer
     {
-      print $fh_to $data;
+      if (syswrite ($fh_to, $data, $len) != $len)
+        {
+          errmsg ("write", $to, $!);
+          close ($fh_from);
+          close ($fh_to);
+          return undef;
+        }
     }
 
-  my @tostat = stat ($fh_to);
+  my @fromstat = stat ($fh_from);
+  my @tostat   = stat ($fh_to) if ($returnstatp);
   close ($fh_from);
   close ($fh_to);
 
-  chown ($uid, $tostat[5], $to) || chmod ($uidperm&umask, $to);
+  return [ \@fromstat, \@tostat ] if ($returnstatp);
+
+  set_file_stats ($to, \@fromstat, ($preserve ? 1|2|4 : 1));
+  return 1;
+}
+
+sub copy_to_tmpfile ($$;$$$)
+{
+  my ($from, $to, $perm, $uid, $uidperm) = @_;
+
+  my $filestats = copy_file ($from, $to, undef, 1);
+  return undef unless (defined $filestats);
+
+  chown ($uid, $filestats->[1]->[5], $to) || chmod ($uidperm & umask, $to);
+  return 1;
+}
+
+
+sub make_backup_file_name ($;$)
+{
+  my $file = shift;
+  my $vc = lc (shift) || '';
+
+  return $file . "~" if ($vc eq 'never' || $vc eq 'simple');
+
+  my $dir = ".";
+  my $base = $file;
+  if (index ($file, "/") >= $[)
+    {
+      $base =~ s|.*/||o;
+      $dir = $file;
+      $dir =~ s|/[^/]*$||o;
+    }
+
+  my $dfh = gensym;
+  opendir ($dfh, $dir) || return errmsg ("opendir", $dir, "$!");
+  my $m = eval 'sub { m/^' . quotemeta ($base) . '\.~(\d+)~$/o && $1 }';
+  my $h = [sort { -($a <=> $b) } grep { $_ = &$m } readdir $dfh]->[0];
+  closedir ($dfh);
+
+  return join ("", $file, ".~", $h + 1, "~") if (defined $h);
+  join ("", $file, ($vc eq 'numbered' || $vc eq 't' ? ".~1~" : "~"));
+}
+
+sub backup_file ($$)
+{
+  my ($from, $to) = @_;
+  my $fromstat = xstat ($from);
+
+  # Backup by copying if file has multiple hard links
+  return copy_file ($from, $to, 1) if ($fromstat->[3] > 1);
+
+  # Backup by rename; new version will be in new file.
+  verbose ("renaming", $from, "->", $to);
+  rename ($from, $to) || errmsg ("rename", join (" ", $from, "->", $to), $!);
+}
+
+
+sub dereference_links ($)
+{
+  my $file = shift;
+  my @p = split (m|/|, $file);
+  my $link_count = 0;
+  for (my $j = 0; $j <= $#p; $j++)
+    {
+      my $k = join ("/", @p[0 .. $j]);
+      my $orig_component = $k;
+      while (my $l = readlink ($k))
+        {
+          $k = $l;
+          # Simple way of detecting symlink loops (it unfortunately causes
+          # the system to give up when there are simply too many levels,
+          # even if resolution would eventually occur).  This parameter is
+          # adjustable, of course.  Most unix kernels allow a depth of 8.
+          # (Linux 2.2.12 seems to allow a depth of only 4!)
+          return errmsg ($file, "Too many levels of symbolic links")
+            if ($link_count++ == 64);
+        }
+      next if ($k eq $orig_component);
+      if (substr ($k, 0, 1) eq "/")
+        {
+          # Absolute link.  Trash $p[0]-$p[$j+1] and replace with readlinked
+          # path components.  Set $j to -1 so that next iteration of loop
+          # will check array @p from start.
+          splice (@p, 0, $j + 1, split (m|/|, $k));
+          $j = -1;
+        }
+      else
+        {
+          # Insert partial (relative) path component into array in place of
+          # current element $p[$j]
+          splice (@p, $j, 1, split (m|/|, $k));
+          $j--;
+        }
+    }
+
+  # resolve relative pathname components
+  local $_ = join ("/", @p);
+  s|/\./|/|o         while (m|/\./|o);
+  s|//|/|o           while (m|//|o);
+  s|/[^/]+/\.\./|/|o while (m|/[^/]+/\.\./|o);
+  s|/[^/]+/\.\.$||o;
+  s|/.$||go;
+  return $_;
+}
+
+sub xunlink ($;$)
+{
+  my $file = shift;
+  my $ignore_if_nonexist = shift;
+
+  return undef if (defined $ignore_if_nonexist
+                   && $ignore_if_nonexist
+                   && ! -e $file);
+
+  verbose ("unlinking", $file);
+  unlink ($file) || return errmsg ("unlink", $file, $!);
+}
+
+sub xstat ($;$)
+{
+  my $file = shift;
+  my $noerrp = shift || 0;
+
+  my @statinfo = stat $file;
+  return \@statinfo if (defined @statinfo);
+  return undef if ($noerrp);
+  errmsg ("stat", (ref $file ? fileno ($file) : $file), $!);
+}
+
+sub spawn (@)
+{
+  if (fork == 0)
+    {
+      $SIG{__WARN__} = sub { 0; };
+      exec (@_) || errmsg ("exec", $_[0], $!);
+      exit (1);
+    }
+  wait;
+  return $? == 0;
+}
+
+# Return the directory name where file resides.
+sub file_directory ($)
+{
+  return "." unless (index ($_[0], "/") >= $[);
+  $_[0] =~ s|/[^/]*$||o;
+}
+
+# This function assumes process is running as root at can change uids
+sub files_writable_by_uid ($@)
+{
+  my $uid = shift;
+
+  if (fork == 0)
+    {
+      # Set real and effective uid to $uid
+      $< = $> = $uid;
+      my $i = 0;
+      foreach (@_) { $i++ if (-w) };
+      exit ($i);
+    }
+  wait;
+  return $? >= 255 ? $? - 255 : $?;
+}
+
+sub gnuedit_make_evalform ($$)
+{
+  my ($filename, $realfilename) = @_;
+
+  (my $basename     = $filename)     =~ s|.*/||o;
+  (my $realbasename = $realfilename) =~ s|.*/||o;
+
+  my $fn = "gnuedit-frob";
+  my $fmt = "(defun %s ()
+               (and (equal buffer-file-name \"%s\")
+                    (rename-buffer \"%s (%s)\" t))
+               (remove-hook \'find-file-hooks \'%s)
+               (fmakunbound \'%s))
+             (add-hook \'find-file-hooks \'%s)";
+  $fmt =~ s/\n\s+/ /go;
+
+  sprintf ($fmt, $fn, $realfilename, $basename, $realbasename, $fn, $fn, $fn);
+}
+
+
+sub gethostname ()
+{
+  my $host = $ENV{HOSTNAME};
+
+  return $host if (defined $host);
+  $host = `hostname`;
+  $host = `uname -n` if ($host eq "");
+  chop $host;
+  return $host;
+}
+
+
+sub gnuedit ($$$$)
+{
+  my ($uid, $host, $port, $files) = @_;
+
+  my $gnuclient = $ENV{GNUCLIENT_PROGRAM} || "gnuclient";
+  my @gnuclient_options = ("-h", $host, "-p", $port);
+
+  if ($uid == $< && $uid == $>)
+    {
+      exec ($gnuclient, @gnuclient_options, @$files)
+        || errmsg ("exec", $gnuclient, $!);
+      exit (1);
+    }
+
+  my $exit_status = 0;
+  my $tmpdir = $ENV{TMPDIR} || $ENV{TEMPDIR} || "/tmp";
+  my $tmpfile = "$tmpdir/gnuedit$$";
+
+  # If we are running as another user; edit file-by-file, checking whether
+  # we can edit directly or need to edit a temporary file.
+  for my $file (@$files)
+    {
+      my $realfile = (-l $file ? dereference_links ($file) : $file);
+      # If file is a symlink we want to make changes and backups to the
+      # real file, not the symlink.
+      verbose ("following symbolic link:", $file, "->", $realfile)
+        if ($realfile ne $file);
+
+      my $filestat = xstat ($realfile, 1);
+
+      # If file does not exist, use direct editing so user will be notified
+      # that the file is new (as well as being told if the parent directory
+      # is not writable); the file name might have been a typo.
+      if (!defined $filestat
+          || ($filestat->[4] == $uid
+              && files_writable_by_uid ($uid, file_directory ($realfile))))
+        {
+          # Pass realfile name to emacs if file would not be readable due
+          # to too many levels of symbolic links.
+          my $usefile = (!stat ($file) && $! == ELOOP) ? $realfile : $file;
+          $exit_status++
+            unless (spawn ($gnuclient, @gnuclient_options, $usefile));
+          next;
+        }
+
+      xunlink ($tmpfile, 1);
+      if (!copy_to_tmpfile ($realfile, $tmpfile, 0600, $uid, 0666))
+        {
+          $exit_status++;
+          next;
+        }
+      my $tmpfilestat = xstat ($tmpfile);
+
+      if (!spawn ($gnuclient, @gnuclient_options,
+                  "-eval", gnuedit_make_evalform ($file, $tmpfile),
+                  $tmpfile))
+        {
+          errmsg ($gnuclient, "exited abnormally; aborting changes") if ($? != 0);
+          xunlink ($tmpfile);
+          $exit_status++;
+          next;
+        }
+
+      my $newstat = xstat ($tmpfile);
+      if (!defined $newstat)
+        {
+          xunlink ($tmpfile) unless ($!+0 == ENOENT);
+          $exit_status++;
+          next;
+        }
+
+      if ($newstat->[7] == $tmpfilestat->[7]      # size
+          && $newstat->[9] == $tmpfilestat->[9])  # mtime
+        {
+          verbose ("no modifications made to", $tmpfile);
+          xunlink ($tmpfile);
+          next;
+        }
+
+      my $backfile = make_backup_file_name ($realfile, $ENV{VERSION_CONTROL});
+      backup_file ($realfile, $backfile)
+        && copy_file ($tmpfile, $realfile)
+        && set_file_stats ($realfile, $filestat, 1|4)
+        && xunlink ($tmpfile);
+    }
+
+  exit ($exit_status);
 }
 
 sub main
 {
   my $gnuserv_port_base = 21490;
-  my $uid = getpwnam ($ENV{LOGNAME} || $ENV{USER});
+  my $uid = getpwnam ($ENV{LOGNAME} || $ENV{USER} || getpwuid ($<));
+  my $gnuport = $ENV{GNU_PORT} || $gnuserv_port_base + $uid;
+  my $gnuhost = $ENV{GNU_HOST} || "localhost";
 
-  my $port = $ENV{GNU_PORT} || $gnuserv_port_base + $uid;
-  my $host = $ENV{GNU_HOST} || "localhost";
-
-  # If we are running as root and file to be edited is not a file normally
-  # writable by our login id, copy it to a tmp file that is writable.
-  if ($#ARGV == 0 && -f $ARGV[0]
-      && ($uid != $< || $uid != $>)
-      && ! file_writable_by_uid ($ARGV[0], $uid))
-    {
-      my $tmpfile = "/tmp/gnuedit$$";
-      unlink ($tmpfile);
-      copy_file ($ARGV[0], $tmpfile, 0600, $uid, 0666);
-      system ("gnuclient", "-h", $host, "-p", $port, $tmpfile);
-      unlink ($tmpfile);
-      exit (1);
-    }
-
-  exec ("gnuclient", "-h", $host, "-p", $port, @ARGV);
-  print STDERR "gnuclient: $!\n";
+  Getopt::Long::config ('bundling', 'autoabbrev');
+  GetOptions ("v|verbose", \$verbose);
+  gnuedit ($uid, $gnuhost, $gnuport, \@ARGV);
 }
 
 main ();
+
+# gnuedit ends here
