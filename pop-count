@@ -1,0 +1,48 @@
+#!/bin/sh
+# pop-count --- show number of pending messages on pop server
+# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Created: 1996-10-16
+# Public domain
+
+# $Id$
+
+umask 077
+
+host=${1-${POPSERVER-pop}}
+prot=${2-${POPPORT-pop3}}
+user=${3-$USER}
+POPPASS=${4-${POPPASS-'none'}}
+export POPPASS
+
+exec expect -n -f - -- $host $prot $user <<'__EOF__'
+  proc sendexpect {cmd} \
+  {
+    send "$cmd\r"
+    expect {
+        eof exit
+        timeout exit
+        -re "-ERR.*" exit
+        -re "\\+OK\[ \t]+(\[^\r]*)\r" { return $expect_out(1,string) }
+        -re "\\+OK.*" return
+      }
+  }
+
+  set host [lindex $argv 0]
+  set prot [lindex $argv 1]
+  set user [lindex $argv 2]
+  set pass $env(POPPASS)
+  unset env(POPPASS)
+
+  log_user 0
+  set timeout 10
+  spawn telnet $host $prot
+  expect "+OK"
+
+  sendexpect "USER $user"
+  sendexpect "PASS $pass"
+  set stat_result [sendexpect "STAT"]
+  puts [lindex $stat_result 0]
+  sendexpect "QUIT"
+__EOF__
+
+# pop-count ends here
