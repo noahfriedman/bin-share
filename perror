@@ -1,5 +1,5 @@
 #!/bin/sh
-exec ${PERL-perl} -Sx $0 ${1+"$@"}
+exec ${PERL-perl} -wSx $0 ${1+"$@"}
 #!perl
 
 # perror --- show system error messages from symbolic or numeric errno values
@@ -8,42 +8,79 @@ exec ${PERL-perl} -Sx $0 ${1+"$@"}
 # Created: 2002-03-16
 # Public domain
 
-# $Id$
+# $Id: perror,v 1.2 2002/05/22 22:34:30 friedman Exp $
 
 # Commentary:
 # Code:
 
 use POSIX qw(:errno_h);
 use strict;
-no strict qw(refs);
 
-sub strerror ($)
+my @errno_data;
+my %errno_data;
+
+sub init
 {
-  my $err = shift;
+  my $tags = $POSIX::EXPORT_TAGS{errno_h};
 
-  if ($err =~ /^\d+$/) {}
-  elsif ($err =~ /^e/i) { $err = eval { &{uc $err} } }
-  else { $err = eval { &{uc ("e" . $err) } } }
+  for my $errname (@$tags)
+    {
+      next if $errname eq q(errno);
 
-  POSIX::strerror ($err);
+      my $errnum = eval { no strict qw(refs); &$errname };
+      next unless defined $errnum;
+      local $! = $errnum;
+      my $errmsg = $! . "";
+
+      (my $altname = $errname) =~ s/^E//o;
+
+      my $data = [$errname, $errnum, $errmsg];
+      push @errno_data, $data;
+      $errno_data{$errnum}     = $data;
+      $errno_data{$errname}    = $data;
+      $errno_data{lc $errname} = $data;
+      $errno_data{$errmsg}     = $data;
+      $errno_data{lc $errmsg}  = $data;
+      $errno_data{$altname}    = $data;
+      $errno_data{lc $altname} = $data;
+    }
 }
 
-sub main ()
+sub printmatches
 {
-  my $onep = scalar @ARGV > 1;
+  my $data = shift;
+  map { printf "%s\t%d\t%s\n", @$_ }
+      sort { $a->[1] <=> $b->[1] } @$data;
+}
 
-  for my $err (@ARGV)
+sub main
+{
+  init ();
+  unless (@ARGV)
     {
-      my $str = strerror ($err);
-      if ($onep)
+      printmatches (\@errno_data);
+      exit (0);
+    }
+
+  my %match;
+  for my $arg (@ARGV)
+    {
+      if ($arg =~ m|^/(.*?)/$|o)
         {
-          printf "%s: %s\n", $err, $str;
+          my $pat = $1;
+          map { $match{$_} = $_
+                  if ($_->[0] =~ /$pat/i
+                      || $_->[1] =~ /$pat/i
+                      || $_->[2] =~ /$pat/i);
+              } @errno_data;
         }
       else
         {
-          print $str, "\n";
+          my $data = $errno_data{$arg};
+          $match{$data} = $data if defined $data;
         }
     }
+  printmatches ([values %match]) if %match;
 }
 
 main ();
