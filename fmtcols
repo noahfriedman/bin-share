@@ -9,7 +9,7 @@ exec ${PERL-perl} -wSx $0 ${1+"$@"}
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-08-02
 
-# $Id: fmtcols,v 2.7 2001/02/19 21:47:12 friedman Exp $
+# $Id: fmtcols,v 2.8 2001/04/02 09:02:31 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -92,8 +92,10 @@ sub read_input ($$@)
 
   map_over_file_contents
     sub {
+      my $lastpos = 0;
       while (${$_[0]} =~ m/(.*)\n/gmo)
         {
+          $lastpos = pos ${$_[0]};
           my @fields = split (/$fieldsep/o, $1, $numfields);
           my $i = 0;
 
@@ -107,7 +109,7 @@ sub read_input ($$@)
               $i++;
             }
         }
-      return pos ${$_[0]};
+      return $lastpos;
     }, @_;
   return \@line, \@maxwidth;
 }
@@ -129,7 +131,8 @@ sub print_output ($$$$$$)
                         "s");
       $i++;
     }
-  $fmts[$#fmts] = "%s" if (substr ($fmts[$#fmts], 1, 1) eq '-');
+  $fmts[$#fmts] = "%s" if (scalar @fmts > 0
+                           && substr ($fmts[$#fmts], 1, 1) eq '-');
   my $fmtstr = join ($outsep, @fmts);
 
   my $l;
