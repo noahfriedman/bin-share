@@ -2,8 +2,9 @@
 # rotate-log --- rotate accounting logs, optionally compressing old logs
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1992-02-10
-# Last modified: 1994-03-13
 # Public domain
+
+# $Id$
 
 # Commentary:
 # Code:
@@ -18,20 +19,27 @@ eq="'"
 usage="Usage: $progname {options} [logfile-name ...]
 
 Options are:
--c, --compress                Compress logs while rotating.
--C, --compress-method METHOD  Method to use for compressing; one of
-                              ${bq}compact$eq, ${bq}compress$eq, ${bq}gzip$eq.
-                              Default is ${bq}compress$eq.
+-c, --compress                Compress old logs while rotating.
+-C, --compress-active         Compress the active log (which will be
+                              rotated to log.0).  Normally this isn't done
+                              because it may cause a race condition if the
+                              file is still open, e.g. for process
+                              accounting, syslogs, etc.  Exercise caution
+                              using this option.
+                              This option implies --compress.
 -D, --debug                   Turn on shell debugging ($bq${bq}set -x$eq$eq).
 -d, --default-directory  DIR  Default directory for log files listed without
                               pathname (i.e. no "/" chars in name)
--g, --chgrp            GROUP  Change group ownership to GROUP on rotated logs.
+-g, --group, --chgrp   GROUP  Change group ownership to GROUP on rotated logs.
 -h, --help                    You're looking at it.
--m, --chmod             MODE  Change permissions to MODE on rotated logs.
+-M, --compress-method METHOD  Method to use for compressing; one of
+                              ${bq}compact$eq, ${bq}compress$eq, ${bq}gzip$eq.
+                              Default is ${bq}compress$eq.
+-m, --mode, --chmod     MODE  Change permissions to MODE on rotated logs.
 -n, --number-of-logs       N  Keep up to N old versions of log (default 7).
                               Rotated logs are numbered zero-origin.
--o, --chown            OWNER  Change owner of logs to OWNER (you should use
-                              OWNER.GROUP and avoid using --chgrp if the
+-o, --owner, --chown   OWNER  Change owner of logs to OWNER (you should use
+                              OWNER.GROUP and avoid using --group if the
                               ${bq}chown${eq} command supports this syntax).
 -v, --verbose                 Chatter away while working.
 "
@@ -87,10 +95,11 @@ shift_n_times='
 # Initialize variables.
 # Don't use `unset' since old bourne shells don't have this command.
 # Instead, assign them an empty value.
-chgrp_args=
-chmod_args=
-chown_args=
+chgrp=:
+chmod=:
+chown=:
 compressp=
+compress_activep=
 compress_method=compress
 debug=
 default_directory=.
@@ -104,15 +113,14 @@ verbose=
 # canonical name to match the value appended after the `=' character. 
 while test $# != 0; do
   case "$1" in 
-    -c | --compress )
-      compress=t
+    -C | --compress-active | --compress-a* )
+      compressp=t
+      compress_activep=t
       shift
      ;;
-    -C | --compress-method* | --compress-* )
-      compress_method=`(set - "$1" "$2"; eval "$get_option_argument")`
-      retval=$?
-      case $retval in 3 ) exit 1 ;; esac
-      eval "shift_num=$retval; $shift_n_times"
+    -c | --compress )
+      compressp=t
+      shift
      ;;
     -D | --debug | --deb* )
       debug=t
@@ -124,14 +132,20 @@ while test $# != 0; do
       case $retval in 3 ) exit 1 ;; esac
       eval "shift_num=$retval; $shift_n_times"
      ;;
-    -g | --chgrp* | --chg* )
-      chgrp_args=`(set - "$1" "$2"; eval "$get_option_argument")`
+    -g | --group | --g* | --chgrp* | --chg* )
+      chgrp="${CHGRP-chgrp} "`(set - "$1" "$2"; eval "$get_option_argument")`
       retval=$?
       case $retval in 3 ) exit 1 ;; esac
       eval "shift_num=$retval; $shift_n_times"
      ;;
-    -m | --chmod* | --chm* )
-      chmod_args=`(set - "$1" "$2"; eval "$get_option_argument")`
+    -M | --compress-method* | --compress-m* )
+      compress_method=`(set - "$1" "$2"; eval "$get_option_argument")`
+      retval=$?
+      case $retval in 3 ) exit 1 ;; esac
+      eval "shift_num=$retval; $shift_n_times"
+     ;;
+    -m | --mode | --m* | --chmod* | --chm* )
+      chmod="${CHMOD-chmod} "`(set - "$1" "$2"; eval "$get_option_argument")`
       retval=$?
       case $retval in 3 ) exit 1 ;; esac
       eval "shift_num=$retval; $shift_n_times"
@@ -142,8 +156,8 @@ while test $# != 0; do
       case $retval in 3 ) exit 1 ;; esac
       eval "shift_num=$retval; $shift_n_times"
      ;;
-    -o | --chown* | --cho* )
-      chown_args=`(set - "$1" "$2"; eval "$get_option_argument")`
+    -o | --owner | --o* | --chown* | --cho* )
+      chown="${CHOWN-chown} "`(set - "$1" "$2"; eval "$get_option_argument")`
       retval=$?
       case $retval in 3 ) exit 1 ;; esac
       eval "shift_num=$retval; $shift_n_times"
@@ -186,18 +200,18 @@ case $# in
    ;;
 esac
 
-orig_cwd=${PWD-`pwd`}
-max_log_number=`expr $number_of_logs - 1`  # make it zero-origin
-
 case "$compress_method" in
   compact )  compress_cmd='compact -f';  suffix='.C'  ;;
   compress ) compress_cmd='compress -f'; suffix='.Z'  ;;
   gzip )     compress_cmd='gzip';        suffix='.gz' ;;
   * )
-    echo "*** $progname: unknown compress-method $bq$compress_method$eq" 1>&2
+    echo "$progname: unknown compress-method $bq$compress_method$eq" 1>&2
     exit 1
    ;;
 esac   
+
+orig_cwd=${PWD-`pwd`}
+max_log_number=`expr $number_of_logs - 1`  # make it zero-origin
 
 for log in ${1+"$@"} ; do
   cd "$orig_cwd"
@@ -215,15 +229,11 @@ for log in ${1+"$@"} ; do
   if cd "$dirname" ; then
     :
   else
-    echo "*** $progname: skipping $bq$log$eq logs." 1>&2
+    echo "$progname: skipping $bq$log$eq logs." 1>&2
     continue
   fi
 
   if test ".$compressp" = '.t' ; then
-    case "$verbose" in t )
-      echo "Compressing uncompressed logs in $dirname..." ;;
-    esac
-
     num=$max_log_number
     while : ; do
       case $num in -1 ) break ;; esac
@@ -236,25 +246,9 @@ for log in ${1+"$@"} ; do
 
       num=`expr $num - 1`
     done
-
-    # Don't do this.  Things like accounting, syslogd, and so on might
-    # still have the file open, and all they'd do is corrupt the compressed
-    # file.  It'll get compressed the next time log rotation happens, and
-    # by then it probably won't be open anymore.
-    #$compress_cmd "$basename" \
-    # && test ".$verbose" = '.t' \
-    # && echo "$basename -> $basename$suffix"
-
-    case "$verbose" in t )
-      echo "Finished compressing $bq$log$eq logs." ;;
-    esac
   else
     suffix=
   fi
-
-  case "$verbose" in t )
-    echo "Rotating logs in directory $dirname..." ;;
-  esac
 
   num=$max_log_number
   nextnum=$number_of_logs
@@ -262,10 +256,6 @@ for log in ${1+"$@"} ; do
     case $num in
       -2 ) break ;;
       -1 )
-        # move `log' to `log.0'
-        # Note that logfile will not be compressed even if --compress was
-        # specified, so don't append $suffix.  See comments in relevent
-        # code above.
         oldfile="$basename"
         newfile="$basename.0"
        ;;
@@ -283,25 +273,30 @@ for log in ${1+"$@"} ; do
             echo "$oldfile -> $newfile" ;;
           esac
 
-          test ".$chmod_args" = . || chmod $chmod_args "$newfile"
-          test ".$chgrp_args" = . || chgrp $chgrp_args "$newfile"
-          test ".$chown_args" = . || chown $chown_args "$newfile"
+          $chmod "$newfile"
+          $chgrp "$newfile"
+          $chown "$newfile"
         }
 
     nextnum=$num
     num=`expr $num - 1`
   done
 
-  # Create new logfile
-  : > "$basename"
-  test ".$chmod_args" = . || chmod $chmod_args "$logfile"
-  test ".$chgrp_args" = . || chgrp $chgrp_args "$logfile"
-  test ".$chown_args" = . || chown $chown_args "$logfile"
+  # Create new logfile (or rather, append to it just in case some other
+  # random process has already created it and started writing into it)
+  : >> "$basename"
+  $chmod "$basename"
+  $chgrp "$basename"
+  $chown "$basename"
+
+  case "$compress_activep" in t)
+    $compress_cmd "$basename.0" \
+     && test ".$verbose" = '.t' \
+     && echo "$basename.0 -> $basename.0$suffix"
+  esac
 
   case "$verbose" in t )
-    echo "Created $basename"
-    echo "Finished rotating $bq$log$eq logs."
-   ;;
+    echo "Created $basename" ;;
   esac
 done
 
