@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@prep.ai.mit.edu>
 # Created: 1996-10-11
 
-# $Id: bash-login,v 1.1 1996/10/12 01:52:44 friedman Exp $
+# $Id: bash-login,v 1.2 1996/10/12 01:58:32 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -37,12 +37,13 @@
 # Code:
 
 # Directories where bash may exist.
+# These should be specified in reverse order of preference.
 pathdirs='
-  /opt/gnu/bin
-  /tools/ns/bin
-  /usr/local/gnu/bin
-  /usr/local/gnubin
   /usr/local/bin
+  /usr/local/gnubin
+  /usr/local/gnu/bin
+  /tools/ns/bin
+  /opt/gnu/bin
 '
 
 for d in $pathdirs; do
