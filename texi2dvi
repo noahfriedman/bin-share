@@ -1,6 +1,6 @@
 #! /bin/sh
 # texi2dvi --- produce DVI files from Texinfo/LaTeX sources.
-# $Id: texi2dvi,v 0.24 1999/01/07 23:04:26 karl Exp $
+# $Id: texi2dvi,v 0.25 1999/01/14 22:17:02 karl Exp $
 #
 # Copyright (C) 1992, 93, 94, 95, 96, 97, 98, 99 Free Software Foundation, Inc.
 #
@@ -19,24 +19,24 @@
 # program's maintainer or write to: The Free Software Foundation,
 # Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
 #
-# Original author: Noah Friedman <friedman@gnu.org>
+# Original author: Noah Friedman <friedman@gnu.org>.
 #
 # Please send bug reports, etc. to bug-texinfo@gnu.org.
 # If possible, please send a copy of the output of the script called with
 # the `--debug' option when making a bug report.
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 0.24 $'
+rcs_revision='$Revision: 0.25 $'
 rcs_version=`set - $rcs_revision; echo $2`
-
+program=`echo $0 | sed -e 's!.*/!!'`
 version="texi2dvi (GNU Texinfo 3.12-pretest) $rcs_version
 
-Copyright (C) 1998 Free Software Foundation, Inc.
+Copyright (C) 1999 Free Software Foundation, Inc.
 There is NO warranty.  You may redistribute this software
 under the terms of the GNU General Public License.
 For more information about these matters, see the files named COPYING."
 
-usage="Usage: $0 [OPTION]... FILE...
+usage="Usage: $program [OPTION]... FILE...
 
 Run each Texinfo or LaTeX FILE through TeX in turn until all
 cross-references are resolved, building all indices.  The directory
@@ -59,9 +59,9 @@ Options:
   -v, --version        Display version information and exit successfully.
   -V, --verbose        Report on what is done.
 
-The values of the BIBTEX, LATEX, MAKEINDEX, MAKEINFO, TEX, and
-TEXINDEX environment variables are used to run those commands, if they
-are set.
+The values of the BIBTEX, LATEX (or PDFLATEX), MAKEINDEX, MAKEINFO,
+TEX (or PDFTEX), and TEXINDEX environment variables are used to run
+those commands, if they are set.
 
 Email bug reports to <bug-texinfo@gnu.org>,
 general questions and discussion to <help-texinfo@gnu.org>."
@@ -107,7 +107,7 @@ set dummy "$@" "$arg_sep"; shift
 # 
 # Parse command line arguments.
 while test x"$1" != x"$arg_sep"; do
-  
+
   # Handle --option=value by splitting apart and putting back on argv.
   case "$1" in
     --*=*)
@@ -268,7 +268,7 @@ for command_line_filename in "$@"; do
 
   # Remove the temporary directories, unless debugging.
   if test -z "$debug"; then
-    trap "cd / && rm -rf $tmpdir && exit 1" 0 1 2 15
+    trap "cd / && rm -rf $tmpdir" 0 1 2 15
   fi
 
   # Expand macro commands in the original source file using Makeinfo.
@@ -355,7 +355,7 @@ for command_line_filename in "$@"; do
       cp $orig_xref_files $tmpdir_bak
     fi
 
-    # Run bibtex on current file.  
+    # Run bibtex on current file.
     # o Only once, and only for LaTeX.  Ensured by the value of ${bibtex}.
     # o Only if its input exists (the .log file).
     # o Only if needed by LaTeX file (there are `Citation' in the log file).
@@ -420,7 +420,7 @@ for command_line_filename in "$@"; do
 
     # Check if index or other such files changed.  Repeat code from
     # above, yuck.
-    # 
+    #
     definite_xref_files=
 
     # Get list of new xref files (indexes, tables and lists).  Find all
@@ -444,7 +444,7 @@ for command_line_filename in "$@"; do
 
     # If old and new list don't at least have the same file list, then one
     # file or another has definitely changed.
-    # 
+    #
     $verbose "Original xref files = `echo $orig_xref_files | sed 's|\./||g'`"
     $verbose "New xref files      = `echo $new_xref_files | sed 's|\./||g'`"
     if test "x$orig_xref_files" != "x$new_xref_files"; then
