@@ -1,0 +1,50 @@
+#!/usr/local/gnubin/gawk -f
+
+function get_valid_shells (valid_shells,    shellfile)
+{
+ shellfile = "/etc/shells" ;
+
+ while ((getline < shellfile) > 0)
+    if ( $$1 !~ "^#.*" )
+       valid_shells[$$1] = $$1 ;
+
+ close(shellfile);
+}
+
+function in_fs (homedir, fs)
+{
+ return match(homedir, "^" fs "/")
+}
+
+BEGIN {
+   FS = ":"
+   total = 0
+   get_valid_shells(valid_shells);
+   if (ARGC < 2 ) {
+      printf("Usage: %s [dir] {passwd-file}\n", ARGV[0]) > "/dev/stderr"
+      do_nothing_in_exit = 1;
+      exit 1
+   }
+   dir = ARGV[1];
+   ARGV[1] = "";   
+}
+
+{
+   split($0, fields, ":")
+   if (fields[7] == "") fields[7]="/bin/sh"
+
+   if (in_fs(fields[6], dir)) {
+      total++;
+      if (fields[7] in valid_shells)
+         active++
+   }
+}
+
+END {
+   if (! do_nothing_in_exit) {
+      printf("Total home directories in %s:   %d\n", dir, total);
+      printf("Total active directories in %s: %d\n", dir, active);
+   }
+}
+
+# eof

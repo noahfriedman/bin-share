@@ -1,0 +1,30 @@
+#!/bin/sh
+
+oIFS="${IFS}"; IFS=':'; set $*; IFS="${oIFS}"
+
+host="$1"; shift
+file="$1"; shift
+
+for i in ${1+"$@"} ; do
+   file="${file}:${i}"
+done
+
+oIFS="${IFS}"; IFS='@'; set $host; IFS="${oIFS}"
+if test $# -ne 1 ; then
+   shift
+   host="$1"; shift
+   for i in ${1+"$@"} ; do
+      host="${i}@${host}"
+   done
+fi
+
+oIFS="${IFS}"; IFS='.'; set $host; IFS="${oIFS}"
+
+rhost="$1"; shift
+for i in ${1+"$@"} ; do
+   rhost="${i}/${rhost}"
+done
+
+echo "/alex/${rhost}${file}"
+
+# eof

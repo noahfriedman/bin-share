@@ -1,7 +1,7 @@
 #!/bin/sh
 # mkhome -- make user directories.
 # Created 06-Mar-93 Noah Friedman <friedman@prep.ai.mit.edu>
-# Last modified 06-Mar-93
+# Last modified 25-Jun-93
 # Public domain.
 
 PATH="/usr/local/bin:/etc:/usr/etc:/usr/local/etc:${PATH}"
@@ -28,8 +28,7 @@ for name in ${1+"$@"} ; do
 done
 
 sedscript='/'"${re_namelist}"'/{
-              s/^[^:]*:[^:]*:\([^:]*\):\([^:]*\):[^:]*:\([^:]*\):.*/
-                 mkdir '\''\3'\'' ; chown '\''\1.\2'\'' '\''\3'\'' ;/
+              s/^[^:]*:[^:]*:\([^:]*\):\([^:]*\):[^:]*:\([^:]*\):.*/mkdir '\''\3'\'' ; chown '\''\1.\2'\'' '\''\3'\'' ;/
               s/\n//g
               s/^  *//g
               p
