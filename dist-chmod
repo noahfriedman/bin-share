@@ -1,8 +1,14 @@
 #!/bin/sh
+# $Id$
 
 chmod -R a+rw ${1+"$@"}
 
-find ${1+"$@"} -type d -print0 \
- | xargs --null --no-run-if-empty chmod 2777
+if find --version > /dev/null 2>&1 ; then
+  find ${1+"$@"} -type d -print0 \
+   | xargs --null --no-run-if-empty chmod 2777
+else
+  find ${1+"$@"} -type d -print \
+   | xargs chmod 2777
+fi
 
 # eof
