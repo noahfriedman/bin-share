@@ -4,12 +4,12 @@ exec ${PERL-perl} -wSx "$0" ${1+"$@"}
 
 # gnuedit --- gnuclient wrapper for remote or superuser editing
 
-# Copyright (C) 2000 Noah S. Friedman
+# Copyright (C) 2000, 2005 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2000-01-14
 
-# $Id: gnuedit,v 1.6 2002/12/04 07:13:02 friedman Exp $
+# $Id: gnuedit,v 1.7 2003/02/25 09:53:34 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -41,7 +41,9 @@ use POSIX qw(:errno_h);
 use Symbol;
 use strict;
 
-my $verbose = $ENV{GNUEDIT_VERBOSE} || 0;
+my $verbose = (defined $ENV{GNUEDIT_VERBOSE}
+               ? $ENV{GNUEDIT_VERBOSE}
+               : -t fileno (*STDIN{IO}));
 my $progname = $0;
 $progname =~ s|.*/||;
 
@@ -222,14 +224,7 @@ sub dereference_links ($)
         }
     }
 
-  # resolve relative pathname components
-  local $_ = join ("/", @p);
-  s|/\./|/|o         while (m|/\./|o);
-  s|//|/|o           while (m|//|o);
-  s|/[^/]+/\.\./|/|o while (m|/[^/]+/\.\./|o);
-  s|/[^/]+/\.\.$||o;
-  s|/.$||go;
-  return $_;
+  return expand_file_name (join ("/", @p));
 }
 
 # Mandatory args: file
@@ -507,6 +502,7 @@ sub main
      "r|remote-type=s", \$remote_type,
      "p|port=i",        \$gnuport,
      "u|username=s",    \$username,
+     "q|quiet",         sub { $verbose = 0 },
      "v|verbose",       \$verbose);
   exit (1) unless $succ;
 
