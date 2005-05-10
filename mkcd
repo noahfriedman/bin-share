@@ -1,0 +1,25 @@
+#!/bin/sh
+# $Id: mkcd,v 1.1 2005/03/15 03:53:32 friedman Exp $
+
+exec mkisofs                         \
+    -v -v                            \
+    -r                               \
+    -J                               \
+    -T                               \
+    -hide-rr-moved                   \
+    -hide-joliet-trans-tbl           \
+    -input-charset  iso8859-1        \
+    -output-charset iso8859-1        \
+    -pad                             \
+    -A ''                            \
+    -abstract ''                     \
+    -biblio ''                       \
+    -copyright ''                    \
+    -p ''                            \
+    -publisher ''                    \
+    -sysid ''                        \
+    -V ''                            \
+    -volset ''                       \
+    "$@"
+
+# mkcd ends here
