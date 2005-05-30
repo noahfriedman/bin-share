@@ -1,4 +1,12 @@
-#!/usr/bin/perl -w
+#!/bin/sh
+exec ${PERL-perl} -Sx $0 ${1+"$@"}
+#!perl
+
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2004-04-12
+# Public domain
+
+# $Id$
 
 use Socket;
 use strict;
@@ -45,3 +53,7 @@ sub main
 }
 
 main (@ARGV);
+
+# local variables:
+# mode: perl
+# end:
