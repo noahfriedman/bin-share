@@ -1,40 +1,48 @@
-#! /bin/sh
-# mkinstalldirs --- make directory hierarchy
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+#!/bin/sh
+# mkinstalldirs --- make directory hierarchy (portable `mkdir -p')
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1993-05-16
 # Public domain
 
-# $Id$
+# $Id: mkinstalldirs,v 1.10 1996/05/03 07:37:52 friedman Exp $
 
-errstatus=0
+errstat=0
+nl='
+'
 
-for file
+for arg
 do
-   set fnord `echo ":$file" | sed -ne 's/^:\//#/;s/^://;s/\// /g;s/^#/\//;p'`
-   shift
-
-   pathcomp=
-   for d
-   do
-     pathcomp="$pathcomp$d"
-     case "$pathcomp" in
-       -* ) pathcomp=./$pathcomp ;;
-     esac
-
-     if test ! -d "$pathcomp"; then
-        echo "mkdir $pathcomp" 1>&2
-
-        mkdir "$pathcomp" || lasterr=$?
-
-        if test ! -d "$pathcomp"; then
-  	  errstatus=$lasterr
-        fi
-     fi
-
-     pathcomp="$pathcomp/"
-   done
+  qdir=  dir=  qsub=  sub=//   # "//" can't appear normally
+  case $arg in
+    ./* | ../* | /* ) : ;;
+    * ) arg=./$arg ;;
+  esac
+  echo "$arg" \
+   | sed -n -e 's=///*=/=g;H;${g;s=#=:#:=g;s=/=###=g;:l' \
+            -e 's=^\(\n\)\(.*\)###=\1\2\1/\1=;t l' \
+            -e 's=:#:=#=g;s=^\n==p;}' \
+   | { read l; readstat=$?
+       while :; do
+         case $readstat:$l in
+           0:/ | [-1-9]*:* )
+             dir=$dir$sub  qdir=$qdir$qsub
+             if [ -n "$dir" ] && ! [ -d "$dir" ]; then
+               echo mkdir "$qdir"
+               mkdir "$dir"   || lasterr=$?
+               test -d "$dir" || { errstat=$lasterr; break; }
+             fi
+             test $readstat -ne 0 && break
+             qdir=$qdir/  dir=$dir/  qsub=  sub=// ;;
+           * ) case $sub in
+                 // ) sub=$l qsub=$l ;;
+                 *  ) sub=$sub$nl$l qsub=$qsub'\n'$l ;;
+               esac ;;
+         esac
+         read l; readstat=$?
+       done
+     }
 done
 
-exit $errstatus
+exit $errstat
 
 # mkinstalldirs ends here
