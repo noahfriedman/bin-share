@@ -1,6 +1,6 @@
 #! /bin/sh
 
-# $Id: wsnarf,v 1.5 2004/11/24 00:19:18 friedman Exp $
+# $Id: wsnarf,v 1.6 2005/05/30 21:56:01 friedman Exp $
 
 exec wget           \
   --convert-links   \
@@ -8,6 +8,7 @@ exec wget           \
   --no-parent       \
   --recursive       \
   --level=0         \
+  --page-requisites \
   "$@"
 
 # wsnarf ends here
