@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# $Id: wget,v 1.1 2005/03/13 19:07:43 friedman Exp $
+# $Id: wget,v 1.2 2005/05/30 21:55:43 friedman Exp $
 
 wget=`run-next -p $0 || echo false`
 
@@ -29,7 +29,6 @@ opts="--verbose
 if atleast 1 6; then
   opts="$opts \
         --html-extension
-        --page-requisites
         --waitretry=60
        "
 fi
