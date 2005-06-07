@@ -1,26 +1,25 @@
-#!/usr/local/bin/perl5 -w
+#!/bin/sh
+exec ${PERL-perl} -wSx "$0" "$@"
+#!perl     [perl will skip all lines in this file before this line]
 
 # ssh-pass --- cache login password for underlying ssh sessions
-# Author: Noah Friedman <friedman@inktomi.com>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 2003-02-13
+# Public domain.
 
-# $Id$
+# $Id: ssh-pass,v 1.1 2003/02/17 01:51:04 friedman Exp $
 
 # Commentary:
 
-# The seco `fornode' and `allssh' commands simplify administration by
-# performing the same command across a range of nodes, but this convenience
-# is lost if you must enter a password for every ssh connection.  For unix
-# hosts you can arrange ahead of time to use public key authentication
-# (with a hosts.equiv--like arrangement or via the ssh-agent session
-# manager).
+# The ssh-agent program can be used to perform public key authentication
+# without continually needing to provide a password for every connection.
 
 # But some routers and switches do not have any filesystem on which these
 # keys can be stored, even if they support the ssh protocol for
-# connections.  So you always have to enter a login password unless you
-# disable them entirely.
+# connections.  So you have to enter a login password every time, unless
+# you disable passwords entirely.
 
-# Therefore this wrapper will store a single password and provide it to any
+# This wrapper will store a single password and provide it to any
 # underlying ssh command which is invoked, so that a password need only be
 # entered once.
 
@@ -48,23 +47,21 @@
 # data passed in the environment to supply the password that was previously
 # cached.
 
-# Therefore a typical session might go something like this:
+# A typical session might go something like this:
 #
-#         $ ssh-pass fornode.pl -r foo1-10 ssh {} hostname
-#         Password to use for ssh sessions:
-#         Nodes: foo1 foo2 foo3 foo4 foo5 foo6 foo7 foo8 foo9 foo10
-#         10 nodes specified
-#         Command: hostname
-#         foo1 foo1.inktomi.com
-#         foo2 foo2.inktomi.com
-#         foo3 foo3.inktomi.com
-#         foo4 foo4.inktomi.com
-#         foo5 foo5.inktomi.com
-#         foo6 foo6.inktomi.com
-#         foo7 foo7.inktomi.com
-#         foo8 foo8.inktomi.com
-#         foo9 foo9.inktomi.com
-#         foo10 foo10.inktomi.com
+#         $ ssh-pass fornode -r foo1-10 ssh {} hostname
+#         Password to use for ssh sessions: ********
+#         foo1.splode.com
+#         foo2.splode.com
+#         foo3.splode.com
+#         foo4.splode.com
+#         foo5.splode.com
+#         foo6.splode.com
+#         foo7.splode.com
+#         foo8.splode.com
+#         foo9.splode.com
+#         foo10.splode.com
+#         $
 
 # Code:
 
