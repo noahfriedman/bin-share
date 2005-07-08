@@ -1,0 +1,87 @@
+#!/bin/sh
+exec ${PERL-perl} -wSx "$0" "$@"
+#!perl
+
+# mksparse --- create sparse file
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2005-07-08
+# Public domain
+
+# $Id$
+
+# Commentary:
+# Code:
+
+use strict;
+use Symbol;
+use Fcntl qw(:DEFAULT :seek);
+
+my %mult
+  = ( b => 512,
+
+      k   => 1024,                g   => 1024 ** 3,
+      kb  => 1024,                gb  => 1024 ** 3,
+      kib => 1000,                gib => 1000 ** 3,
+
+      m   => 1024 ** 2,           t   => 1024 ** 4,
+      mb  => 1024 ** 2,           tb  => 1024 ** 4,
+      mib => 1000 ** 2,           tib => 1000 ** 4,
+    );
+
+
+sub offset
+{
+  my $val = shift;
+
+  if ($val =~ /([a-z]+)$/i)
+    {
+      my $unit = $mult{lc $1};
+      $val =~ s///;
+      return int ($val * ($unit || 1));
+    }
+  return int ($val);
+}
+
+sub main
+{
+  (my $progname = $0) =~ s=.*/==;
+
+  unless (@_ == 2)
+    {
+      printf STDERR "Usage: %s [filename] [size{K|M|G|T|KiB|MiB|GiB}]\n",
+        $progname;
+      exit (1);
+    }
+
+  my $filename = shift;
+  my $off = offset (shift);
+
+  my $fh = gensym;
+  unless (sysopen ($fh, $filename, O_WRONLY|O_CREAT|O_EXCL, 0666))
+    {
+      printf STDERR "%s: %s: %s\n", $progname, $filename, $!;
+      exit (1);
+    }
+
+  unless ($off < 1 || sysseek ($fh, $off - 1, SEEK_SET))
+    {
+      printf STDERR "%s: lseek: %s\n", $progname, $!;
+      unlink ($filename);
+      exit (2);
+    }
+
+  my $s = "\0";
+  unless ($off < 1 || syswrite ($fh, $s))
+    {
+      printf STDERR "%s: write: %s\n", $progname, $!;
+      unlink ($filename);
+      exit (3);
+    }
+
+  close ($fh);
+  exit (0);
+}
+
+main (@ARGV);
+
+# eof
