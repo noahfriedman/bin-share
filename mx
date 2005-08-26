@@ -4,12 +4,17 @@
 # Created: 1999-07-24
 # Public domain
 
-# $Id$
+# $Id: mx,v 1.1 1999/07/24 10:21:49 friedman Exp $
 
 justone=
-case "$1" in
-  -1 ) shift; justone='1!d' ;;
-esac
+numeric=
+while :; do
+  case $1 in
+    -1 )  shift; justone='1!d' ;;
+    -ip ) shift; numeric=t     ;;
+    * ) break ;;
+  esac
+done
 
 dig "$1" mx \
  | sed -n -e '
