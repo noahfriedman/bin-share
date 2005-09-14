@@ -1,28 +1,38 @@
 #! /bin/sh
-# $Id: untar,v 1.8 2001/03/10 13:26:02 friedman Exp $
+# $Id: untar,v 1.9 2004/06/07 06:13:09 friedman Exp $
 
 for f in ${1+"$@"}; do
   case "$f" in
     *.t[ag]z | *.tar.gz | *.tar.[Zz] | *.xtar.gz | *.xtar.[Zz] | *.nif )
       ${GZIP-gzip} -dc "$f" | ${TAR-tar} -xpvf -
      ;;
+
     *.tbz | *.tbz2 | *.tar.bz2 | *.xtar.bz2 | *.tar.bz )
       ${BZIP2-bzip2} -dc "$f" | ${TAR-tar} -xpvf -
      ;;
+
     *.tar | *.xtar )
       ${TAR-tar} -xpvf "$f"
      ;;
+
     *.zip | *.jar )
       ${UNZIP-unzip} -o "$f"
      ;;
+
     *.rpm )
-      rpm2cpio "$f" | cpio -dimv --no-absolute-filenames
+      ${RPM2CPIO-rpm2cpio} "$f" | ${CPIO-cpio} -dimv --no-absolute-filenames
      ;;
+
     *.lzh )
-      lha x "$f"
+      ${LHA-lha} x "$f"
      ;;
+
     *.rar )
-      unrar x "$f"
+      ${UNRAR-unrar} x "$f"
+     ;;
+
+    *.a )
+      ${AR-ar} xv "$f"
      ;;
   esac
 done
