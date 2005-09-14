@@ -1,14 +1,58 @@
 #!/bin/sh
-# $Id$
 
-chmod -R a+rw ${1+"$@"}
+# dist-chmod --- fixup file/directory permissions recursively
+# Author: Noah Friedman <friedman@splode.com>
+# Public domain.
 
-if find --version > /dev/null 2>&1 ; then
-  find ${1+"$@"} -type d -print0 \
-   | xargs --null --no-run-if-empty chmod 2777
+# $Id: dist-chmod,v 1.2 1996/11/14 05:19:17 friedman Exp $
+
+setgid=
+bits=
+owner=
+verbose=
+
+while : ; do
+  case $1 in
+    -v    ) verbose=-v  ; set -x ; shift ;;
+    -w    ) bits=$2     ; shift  ; shift ;;
+    +s    ) setgid=,g+s ; shift  ;;
+    -s    ) setgid=,g-s ; shift  ;;
+    -[ou] ) owner=$2    ; shift  ; shift ;;
+    --*   ) :           ; shift  ; break ;;
+    -*    ) opts=$1   # split single-letter options and reparse
+            shift
+            set fnord `echo $opts | sed -e 's/^-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+            shift ;;
+    *     ) break ;;
+  esac
+done
+
+fmode=a+rw
+case $bits in
+  ''      ) :                      ;;
+  *[=+-]* ) fmode=$fmode,$bits     ;;
+  1       ) fmode=$fmode,o-w       ;;  # legacy dist-chmod1 behavior
+  2       ) fmode=$fmode,go-w      ;;  # legacy dist-chmod2 behavior
+  *       ) fmode=$fmode,${bits}-w ;;
+esac
+
+chmod $verbose -R $fmode ${1+"$@"}
+
+dmode=a+x$setgid,$fmode
+if find --version 2>&1 | grep 'GNU find' > /dev/null ; then
+  find ${1+"$@"} ! -type l -a -type d -print0 \
+   | xargs --null --no-run-if-empty chmod $verbose $dmode
 else
-  find ${1+"$@"} -type d -print \
-   | xargs chmod 2777
+  find ${1+"$@"} -type d -a ! -type l -print \
+   | xargs chmod $verbose $dmode
 fi
+
+case $owner in
+  ''  ) exit $? ;;
+  *:* ) : ;;
+  *.* ) owner=`echo "$owner" | sed -e 's/\./:/'` ;;
+esac
+
+chown $verbose -h -R $owner ${1+"$@"}
 
 # eof
