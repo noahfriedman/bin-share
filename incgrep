@@ -3,9 +3,9 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1996-01-29
 
-# Copyright (C) 1995, 1996, 2004 Noah S. Friedman
+# Copyright (C) 1995, 1996, 2004, 2005 Noah S. Friedman
 
-# $Id: incgrep,v 2.3 1996/03/03 22:54:01 friedman Exp $
+# $Id: incgrep,v 2.4 2004/06/05 05:04:43 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,7 +20,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, you can either send email to this
 # program's maintainer or write to: The Free Software Foundation,
-# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
+# Inc.; 51 Franklin Street, Fifth Floor; Boston, MA 02110-1301, USA.
 
 # Commentary:
 
@@ -38,13 +38,10 @@ includes='
 '
 
 if ($cc -v) > /dev/null 2>&1; then
-  version=`gcc -v 2>&1 \
-            | sed -ne '/gcc version/!d
-                       s/gcc version  *//
-                       p
-                      '`
+  version=`$cc -v 2>&1 \
+            | sed -ne '/gcc version/!d' -e 's/gcc version  *//p'`
   case "$version" in
-    2.95.* | 3.* )
+    2.95.* | [3-9].* )
       cpp=`$cc -print-prog-name=cpp`
      ;;
     2.* )
