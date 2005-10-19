@@ -1,5 +1,5 @@
 #! /bin/sh
-# $Id: untar,v 1.9 2004/06/07 06:13:09 friedman Exp $
+# $Id: untar,v 1.10 2005/09/14 05:02:54 friedman Exp $
 
 for f in ${1+"$@"}; do
   case "$f" in
@@ -32,7 +32,13 @@ for f in ${1+"$@"}; do
      ;;
 
     *.a )
-      ${AR-ar} xv "$f"
+      libdir=`basename "$f" .a`
+      case "$f" in
+        /* ) : ;;
+        *  ) f=../$f ;;
+      esac
+      mkdir -p $libdir
+      (cd $libdir && ${AR-ar} xv "$f")
      ;;
   esac
 done
