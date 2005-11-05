@@ -1,0 +1,94 @@
+#!/bin/sh
+exec ${PERL-perl} -wSx "$0" ${1+"$@"}
+#!perl
+
+# latest-rpms --- filter a list of packages and print only the latest versions
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2005-07-24
+# Public domain
+
+# $Id$
+
+# Commentary:
+# Code:
+
+use strict;
+use RPM2;
+use IO::Handle;
+use Getopt::Long;
+
+# Disable all digest and signature verification; this will significantly
+# speed up the reading in of package headers.
+my $rpmpkg_flags;
+map { $rpmpkg_flags |= RPM2->$_ }
+    qw(vsf_nohdrchk
+       vsf_nosha1header vsf_nosha1
+       vsf_nomd5header  vsf_nomd5
+       vsf_nodsaheader  vsf_nodsa
+       vsf_norsaheader  vsf_norsa);
+
+my @uniq_keys = (qw(name arch));
+my $verbose = -t fileno (STDERR);
+(my $progname = $0) =~ s=.*/==;
+
+sub rpm_uniq
+{
+  my ($list) = @_;
+  my $tick = 0;
+
+  if ($verbose)
+    {
+      $tick = scalar @$list;
+      STDERR->autoflush (1);
+    }
+
+  my @pkg;
+  my $i = 0;
+  select (STDERR);
+  map {
+    printf ("\r%s: reading file %d/%d ... ", $progname, ++$i, $tick) if $tick;
+    eval { my $rpm = RPM2->open_package ($_, $rpmpkg_flags);
+           $rpm->{filename} = $_; # open_package stores realpath; override
+           push @pkg, $rpm;
+         };
+    if ($@)
+      {
+        print "\n" if $tick;
+        print "$progname: $_: $@";
+
+      }
+  } @$list;
+
+  # Uniquify using latest version of package per package name/arch.
+  # This sort operation works correctly with unpadded version numbers
+  # because <=> and cmp are overloaded to examine rpm headers in detail,
+  # not just use lexicographic sorting.
+  my %name;
+  map { my $rpm = $_;
+        my $key = join (".", map { $rpm->tag ($_) } @uniq_keys);
+        $name{$key} = $_->{filename}
+      } sort { $a <=> $b } @pkg;
+  @pkg = sort values %name;
+
+  print scalar @pkg, " unique packages\n" if $tick;
+
+  select (STDOUT);
+  map { print $_, "\n" } @pkg;
+
+}
+
+sub main
+{
+  Getopt::Long::config ('bundling', 'autoabbrev');
+  GetOptions ("i|ignore-arch", sub { pop @uniq_keys },
+              "q|quiet",       sub { $verbose = 0 });
+
+  @ARGV = (map { chomp; $_ } <STDIN>) unless @ARGV;
+  rpm_uniq (\@ARGV)
+}
+
+main;
+
+# local variables:
+# mode: perl
+# end:
