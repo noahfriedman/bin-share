@@ -1,12 +1,12 @@
 #!/bin/sh
 # ludeconf --- configure autoconfiscated packages for installation in lude
 
-# Copyright (C) 1997, 98, 2000, 2003 Noah S. Friedman
+# Copyright (C) 1997, 98, 00, 03, 2005 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1997-06-03
 
-# $Id: ludeconf,v 2.9 2001/01/03 21:11:32 friedman Exp $
+# $Id: ludeconf,v 2.10 2003/02/21 05:16:43 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, you can either send email to this
 # program's maintainer or write to: The Free Software Foundation,
-# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
+# Inc.; 51 Franklin Street, Fifth Floor; Boston, MA 02110-1301, USA.
 
 # Commentary:
 # Code:
@@ -34,7 +34,7 @@ bq='`'
 eq="'"
 
 # This string is expanded by rcs automatically when this file is checked out.
-rcs_revision='$Revision: 2.9 $'
+rcs_revision='$Revision: 2.10 $'
 revision=`set fnord $rcs_revision; echo $3`
 
 usage="Usage: $progname {$progname-options} {-- {configure-options}}
@@ -121,29 +121,26 @@ lude_soft=${LUDE2_SOFTWARE}
 getopt='
   {
     optarg=
-    case "$1" in
+    case $1 in
       --*=* ) optarg=`echo "$1" | sed -e "1s/^[^=]*=//"` ; shift ;;
       -* )
-        case "${2+set}:$optarg_optional" in
-          set: ) optarg="$2" ; shift ; shift ;;
-          set:?* )
-            case "$2" in
-              -* ) shift ;;
-              * )  optarg="$2"; shift; shift ;;
-            esac
-           ;;
+        case ${2+set}:$optarg_optional in
+          set: ) optarg=$2 ; shift ; shift ;;
+          set:?* ) case $2 in
+                     -* ) shift ;;
+                     * )  optarg="$2"; shift; shift ;;
+                   esac ;;
           : )
-            option="$1"
-            case "$option" in
+            option=$1
+            case $option in
               --*=* ) option=`echo "$option" | sed -e "1s/=.*//;q"` ;;
             esac
-            echo "$progname: option $bq$option$eq requires argument." 1>&2
-            echo "$progname: use $bq--help$eq to list option syntax." 1>&2
-            exit 1
-           ;;
+            exec 1>&2
+            echo "$progname: option $bq$option$eq requires argument."
+            echo "$progname: use $bq--help$eq to list option syntax."
+            exit 1 ;;
           * ) shift ;;
-        esac
-       ;;
+        esac ;;
     esac
     optarg_optional=
   }'
@@ -157,115 +154,94 @@ getopt='
 # canonical name to match the value appended after the `=' character.
 while : ; do
   case $# in 0) break ;; esac
-  case "$1" in
+  case $1 in
     -C | --class* | --lude-class* | --cl* | --lude-c* )
-       eval "$getopt"
-       lude_class="$optarg"
-     ;;
+       eval "$getopt" ; lude_class=$optarg ;;
     -D | --depot* | --lude-depot* | --dep* | --lude-d* )
-       eval "$getopt"
-       lude_depot="$optarg"
-     ;;
+       eval "$getopt" ; lude_depot=$optarg ;;
     -M | --modification* | --lude-modification* | --mod* | --lude-m* )
-       eval "$getopt"
-       lude_mod="$optarg"
-     ;;
+       eval "$getopt" ; lude_mod=$optarg ;;
     -S | --soft* | --lude-soft* | --s* | --lude-s* )
-       eval "$getopt"
-       lude_soft="$optarg"
-     ;;
+       eval "$getopt" ; lude_soft=$optarg ;;
 
     -c | --cc* | --with-cc* )
        optarg_optional=t
        eval "$getopt"
-       case "$optarg" in
-         '' ) CC=gcc       ;;
-         * )  CC="$optarg" ;;
+       case $optarg in
+         '' ) CC=${CC-gcc} ;;
+         * )  CC=$optarg   ;;
        esac
-       export CC
-     ;;
+       export CC ;;
 
     --c++* | --with-c++* )
        optarg_optional=t
        eval "$getopt"
-       case "$optarg" in
-         '' ) CXX=g++      ;;
-         * )  CXX="$optarg" ;;
+       case $optarg in
+         '' ) CXX=${CXX-g++} ;;
+         * )  CXX=$optarg    ;;
        esac
-       export CXX
-     ;;
+       export CXX ;;
 
-    --configure* | --co* )
+    --configure* | --configu* )
+       eval "$getopt" ; configure_program=$optarg ;;
+
+    --config-shell* | --config-* )
        eval "$getopt"
-       configure_program="$optarg"
-     ;;
+       CONFIG_SHELL=$optarg
+       export CONFIG_SHELL ;;
 
     --debug | --deb* )
+      set -x
       debug=t
-      shift
-     ;;
+      shift ;;
     -h | --help | --h* | -\? )
       echo "$usage" 1>&2
-      exit 0
-     ;;
+      exit 0 ;;
     -N | --no-shared-install | --no-s* )
       shared_install_p=
-      shift
-     ;;
+      shift ;;
     -n | --no-exec | --no-e* )
       execp=
-      shift
-     ;;
+      shift ;;
     -v | --verbose | --verb* )
       verbose=t
-      shift
-     ;;
+      shift ;;
     -V | --version | --vers* )
       echo "$progname version $revision" 1>&2
-      exit 0
-     ;;
+      exit 0 ;;
     -x | --x* | --with-x* )
       optarg_optional=t
       eval "$getopt"
-      x11dir="$optarg"
-      configure_x=yes
-     ;;
+      x11dir=$optarg
+      configure_x=yes ;;
     -X | --no-x | --without-x )
       configure_x=no
-      shift
-     ;;
+      shift ;;
     -- )     # Stop option processing
       shift
-      break
-     ;;
+      break ;;
     -? | --* )
-      case "$1" in
+      case $1 in
         --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
         * )     arg="$1" ;;
       esac
       exec 1>&2
       echo "$progname: unknown or ambiguous option $bq$arg$eq"
       echo "$progname: Use $bq--help$eq for a list of options."
-      exit 1
-     ;;
+      exit 1 ;;
     -??* )
       # Split grouped single options into separate args and try again
-      optarg="$1"
+      optarg=$1
       shift
       set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
-      shift
-     ;;
-    * )
-      break
-     ;;
+      shift ;;
+    * ) break ;;
   esac
 done
 
-case "$debug" in t ) set -x ;; esac
-
 ##########
 
-case "$lude_depot" in
+case $lude_depot in
   '' )
     pwd=${PWD-`pwd`}
     case $pwd in
@@ -289,39 +265,33 @@ case "$lude_depot" in
           fi
         done
 
-        case "$lude_depot" in
-          '' )
-            echo "$progname: Cannot determine LUDE depot." 1>&2
-            exit 1
-           ;;
-        esac
-       ;;
-    esac
-   ;;
+        case $lude_depot in
+          '' ) echo "$progname: Cannot determine LUDE depot." 1>&2
+               exit 1 ;;
+        esac ;;
+    esac ;;
 esac
 
 sed_re_quote='s/\([][*.\\\/?|^$]\)/\\\1/g'
 
-case "$lude_soft" in
+case $lude_soft in
   '' )
     re=`{ cd "$lude_depot" && pwd; } | sed -e "$sed_re_quote"`
     lude_soft=`pwd | sed -e "s/^$re\///" -e 's/\/.*//'`
 
-    case "$lude_soft" in
+    case $lude_soft in
       '' | */* )
         echo "$progname: Cannot determine LUDE software package name." 1>&2
-        exit 1
-       ;;
-    esac
-   ;;
+        exit 1 ;;
+    esac ;;
 esac
 
-case "$lude_mod" in
+case $lude_mod in
   '' )
     re=`{ cd "$lude_depot/$lude_soft" && pwd; } | sed -e "$sed_re_quote"`
     lude_mod=`pwd | sed -e "s/^$re\/[^/]*\///" -e 's/\/.*//'`
 
-    case "$lude_mod" in
+    case $lude_mod in
       orig )
         exec 1>&2
         echo "$progname: ${bq}orig$eq: improper modification."
@@ -330,30 +300,27 @@ case "$lude_mod" in
        ;;
       '' | */* )
         echo "$progname: Can't determine LUDE software modification type." 1>&2
-        exit 1
-       ;;
-    esac
-   ;;
+        exit 1 ;;
+    esac ;;
 esac
 
-case "$lude_class" in
+case $lude_class in
   '' )
     re=`{ cd "$lude_depot/$lude_soft/src/$lude_mod" && pwd; } \
           | sed -e "$sed_re_quote"`
     lude_class=`pwd | sed -e "s/^$re\///" -e 's/\/.*//'`
 
-    case "$lude_class" in
+    case $lude_class in
       '' | */* )
         lude_class=`ludeclass`
         echo "$progname: warning: Can't autodetect LUDE software class." 1>&2
-        echo "$progname: warning: Defaulting to $bq$lude_class$eq." 1>&2
-       ;;
-    esac
+        echo "$progname: warning: Defaulting to $bq$lude_class$eq." 1>&2 ;;
+    esac ;;
 esac
 
 ##########
 
-case "$configure_program" in
+case $configure_program in
   '' )
     configure_program=./configure
     for dir in . ../../orig "$lude_depot/$lude_soft/src/orig" ; do
@@ -361,11 +328,10 @@ case "$configure_program" in
         configure_program="$dir/configure"
         break
       fi
-    done
-   ;;
+    done ;;
 esac
 
-case "$configure_x:$x11dir" in
+case $configure_x:$x11dir in
   no:* )
     set fnord --with-x-toolkit=no --without-x ${1+"$@"}
     shift
@@ -390,59 +356,51 @@ case "$configure_x:$x11dir" in
       done
     done
 
-    case "$x11dir" in
-      '' )
-        echo "$progname: warning: Can't find X headers and libraries" 1>&2
-       ;;
-    esac
-   ;;
+    case $x11dir in
+      '' ) echo "$progname: warning: Can't find X headers and libraries" 1>&2 ;;
+    esac ;;
 esac
 
-case "$x11dir" in
+case $x11dir in
   '' ) : ;;
-   * )
-     set fnord \
-         --with-x-toolkit-yes --with-x11 \
-         --x-includes="$x11dir/include" --x-libraries="$x11dir/lib" \
-         ${1+"$@"}
-     shift
-    ;;
+   * ) set fnord \
+           --with-x-toolkit-yes --with-x11 \
+           --x-includes="$x11dir/include" --x-libraries="$x11dir/lib" \
+           ${1+"$@"}
+       shift ;;
 esac
 
-case "$verbose" in
-  t )
-    set fnord --verbose ${1+"$@"}
-    shift
-   ;;
+case $verbose in
+  t ) set fnord --verbose ${1+"$@"} ; shift ;;
 esac
 
 ##########
 
-install_global_prefix="$lude_depot/$lude_soft/run/$lude_mod"
-install_prefix="$install_global_prefix/share"
-install_exec_prefix="$install_global_prefix/$lude_class"
+install_global_prefix=$lude_depot/$lude_soft/run/$lude_mod
+install_prefix=$install_global_prefix/share
+install_exec_prefix=$install_global_prefix/$lude_class
 
-case "$shared_install_p" in
+case $shared_install_p in
   t ) : ;;
-  * ) install_prefix="$install_exec_prefix" ;;
+  * ) install_prefix=$install_exec_prefix ;;
 esac
 
 set fnord \
+    ${CONFIG_SHELL+"$CONFIG_SHELL"} \
+    ${CONFIG_SHELL_OPTIONS} \
     "$configure_program" \
     --prefix="$install_prefix" \
     --exec-prefix="$install_exec_prefix" \
     ${1+"$@"}
 shift
 
-case "$verbose" in
-  t )
-    echo "$progname:" \
-         "depot=$lude_depot," \
-         "soft=$lude_soft," \
-         "modification=$lude_mod," \
-         "class=$lude_class"
-    echo ${1+"$@"}
-   ;;
+case $verbose in
+  t ) echo "$progname:" \
+           "depot=$lude_depot," \
+           "soft=$lude_soft," \
+           "modification=$lude_mod," \
+           "class=$lude_class"
+      echo ${1+"$@"} ;;
 esac
 
 # When doing an `exec' from some bourne shells (this has been observed in
@@ -458,9 +416,9 @@ esac
 # --no-exec option, but when you do, avoiding the use of `exec' usually
 # clears up the problem.
 
-case "$execp" in
-  t ) exec ${1+"$@"} ;;
-  * ) ${1+"$@"} ;;
+case $execp:$CONFIG_SHELL in
+  t:* | *:?* ) exec ${1+"$@"} ;;
+  * )          ${1+"$@"}      ;;
 esac
 
 # ludeconf ends here
