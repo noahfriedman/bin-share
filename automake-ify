@@ -1,0 +1,7 @@
+#!/bin/sh -x
+# $Id$
+
+aclocal \
+  && autoconf \
+  && autoheader \
+  && automake -a -c
