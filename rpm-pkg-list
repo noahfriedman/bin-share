@@ -1,11 +1,11 @@
 #!/bin/sh
-# $Id: rpm-pkg-list,v 1.1 2004/11/29 02:18:16 friedman Exp $
+# $Id: rpm-pkg-list,v 1.2 2005/11/22 20:38:38 friedman Exp $
 
 case $1 in
-  -size    | size    ) k='-k1,1n -k2,2'  ; shift ;;
-  -version | version ) k='-k3,3n -k2,2'  ; shift ;;
-  -name    | name    ) k='-k2,2  -k1,1n' ; shift ;;
-  * )                  k='-k2,2  -k1,1n'         ;;
+  -size    | size    ) k='-k1,1n -k2,2'        ; shift ;;
+  -version | version ) k='-k3,3  -k2,2 -k4,4'  ; shift ;;
+  -name    | name    ) k='-k2,2  -k3,3 -k4,4'  ; shift ;;
+  * )                  k='-k2,2  -k3,3 -k4,4'          ;;
 esac
 
 case $# in 0 ) set '*' ;; esac
