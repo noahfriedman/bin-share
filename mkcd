@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: mkcd,v 1.1 2005/05/10 03:26:32 friedman Exp $
+# $Id: mkcd,v 1.2 2005/10/25 18:04:22 friedman Exp $
 
 if ! [ -f .mkisofsrc ] && ! [ -f "$HOME/.mkisofsrc" ] ; then
   # If .mkisofsrc exists, don't override those settings on the command line.
@@ -14,7 +14,8 @@ if ! [ -f .mkisofsrc ] && ! [ -f "$HOME/.mkisofsrc" ] ; then
       -publisher '' \
       -sysid     '' \
       -V         '' \
-      -volset    ''
+      -volset    '' \
+      ${1+"$@"}
   shift
 fi
 

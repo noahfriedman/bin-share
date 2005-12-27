@@ -1,7 +1,18 @@
-#!/bin/sh -x
-# $Id$
+#!/bin/sh
+# $Id: automake-ify,v 1.1 2005/11/22 20:40:12 friedman Exp $
 
-aclocal \
-  && autoconf \
-  && autoheader \
-  && automake -a -c
+run()
+{
+  echo ${PS4-+} ${1+"$@"} 1>&2
+  ${1+"$@"} || exit $?
+}
+
+run aclocal
+
+if [ -d po ]; then
+  run glib-gettextize --force --copy
+fi
+
+run autoheader
+run automake --add-missing --copy
+run autoconf
