@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1993-09-26
 
-# $Id: mkpass,v 1.5 2006/01/13 21:19:47 friedman Exp $
+# $Id: mkpass,v 1.6 2006/01/13 21:25:23 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -173,6 +173,7 @@ sub crypt_des
   my ($pass, $salt) = @_;
 
   $salt = gensalt (2) unless defined $salt;
+  $salt =~ s/^\$1\$//; # strip md5 tag if using des
   return crypt ($pass, $salt);
 }
 
@@ -188,7 +189,16 @@ sub crypt_md5
     {
       $salt = '$1$' . $salt;
     }
-  return crypt ($pass, $salt);
+
+  my $result = crypt ($pass, $salt);
+  if (length $result == 13
+      && substr ($result, 0, 3) ne '$1$')
+    {
+      print STDERR "$progname: warning: system does not seem to support",
+                   " MD5 hashes; using DES instead.\n";
+      return crypt_des (@_);
+    }
+  return $result;
 }
 
 sub main
