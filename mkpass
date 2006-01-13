@@ -1,12 +1,12 @@
-#!/bin/sh
+#!/usr/bin/env perl
 # mkpass --- prompt for cleartext password and echo crypted result
 
-# Copyright (C) 1993, 1994, 1996, 1997 Noah S. Friedman
+# Copyright (C) 1993, 1994, 1996, 1997, 2005 Noah S. Friedman
 
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1993-09-26
 
-# $Id$
+# $Id: mkpass,v 1.4 1997/09/11 08:50:24 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,242 +21,208 @@
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, you can either send email to this
 # program's maintainer or write to: The Free Software Foundation,
-# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
+# Inc.; 51 Franklin Street, Fifth Floor; Boston, MA 02110-1301, USA.
 
 # Commentary:
 # Code:
 
-# Name by which this script was invoked.
-progname=`echo "$0" | sed -e 's/[^\/]*\///g'`
+use strict;
+use Getopt::Long;
+use POSIX;
 
-# To prevent hairy quoting and escaping later.
-bq='`'
-eq="'"
+$^W = 1;  # enable warnings
 
-usage="Usage: $progname {options} {cleartext}
+our $progname = $0;
+$progname =~ s|.*/||;
+
+our $salt;
+our $method;
+our $interactivep;
+
+my %crypt_fn = ( des => \&crypt_des,
+                 md5 => \&crypt_md5 );
+
+sub usage
+{
+  print "Usage: $progname {options} {cleartext}
 
 Options are:
 -D, --debug                  Enable debugging.
 -h, --help                   You're looking at it.
--s, --salt     SALT          Use two-letter SALT to encode cleartext.
+-i, --interactive            Prompt for input and confirmation even if
+                             standard input is not a terminal.
+
+-s, --salt     SALT          Use SALT to encode cleartext.
+                             Default is to generate a random sequence.
+                             SALT should be a 2-letter sequence for DES
+                             style encryption, or an 8-letter sequence
+                             optionally prefixed by \`\$1\$' for MD5 style.
+
+-m, --method   [md5|des]
+--md5                        Choose an encryption algorithm.
+--des                        Default depends on supplied SALT, or \`des'
+                             if no salt is supplied.
 
 If cleartext is not specified on the command line, it will be prompted for
 interactively.  Specifying the cleartext on the command line is less secure
-since someone may be able to see it with the ${bq}ps$eq command.
-You can also feed the cleartext password as input using a pipe.
-"
+since someone may be able to see it with the \`ps' command.
+You can also feed the cleartext password as input using a pipe.\n";
+  exit (1);
+}
 
-# Initialize variables.
-# Don't use `unset' since old bourne shells don't have this command.
-# Instead, assign them an empty value.
-debug=
-salt=
-passwd=
-
-# Usage: eval "$getopt"; value=$optarg
-# or     optarg_optional=t; eval "$getopt"; value=$optarg
-#
-# This function automatically shifts the positional args as appropriate.
-# The argument to an option is optional if the variable `optarg_optional'
-# is non-empty.  Otherwise, the argument is required and getopt will cause
-# the program to exit on an error.  optarg_optional is reset to be empty
-# after every call to getopt.  The argument (if any) is stored in the
-# variable `optarg'.
-#
-# Long option syntax is `--foo=bar' or `--foo bar'.  2nd argument
-# won't get used if first long option syntax was used.
-#
-# Note: because of broken bourne shells, using --foo=bar syntax can
-# actually screw the quoting of args that end with trailing newlines.
-# Specifically, most shells strip trailing newlines from substituted
-# output, regardless of quoting.
-getopt='
-  {
-    optarg=
-    case "$1" in
-      --*=* )
-        optarg=`echo "$1" | sed -e "1s/^[^=]*=//"`
-        shift
-       ;;
-      * )
-        case ${2+set} in
-          set )
-            optarg="$2"
-            shift
-            shift
-           ;;
-          * )
-            case "$optarg_optional" in
-              "" )
-                case "$1" in
-                  --*=* ) option=`echo "$1" | sed -e "1s/=.*//;q"` ;;
-                  * ) option="$1" ;;
-                esac
-                exec 1>&2
-                echo "$progname: option $bq$option$eq requires argument."
-                echo "$progname: use $bq--help$eq to list option syntax."
-                exit 1
-               ;;
-           esac
-           shift
-         ;;
-        esac
-     ;;
-    esac
-    optarg_optional=
-  }'
-
-# Parse command line arguments.
-# Make sure that all wildcarded options are long enough to be unambiguous.
-# It's a good idea to document the full long option name in each case.
-# Long options which take arguments will need a `*' appended to the
-# canonical name to match the value appended after the `=' character.
-while : ; do
-  case $# in 0) break ;; esac
-  case "$1" in
-    -D | --debug | --d* )
-      debug=-d
-      shift
-     ;;
-    -h | --help | --h* )
-      echo "$usage" 1>&2
-      exit 0
-     ;;
-    # Provided as an example of how to process options with arguments
-    -s | --salt* | --s* )
-      eval "$getopt"
-      salt=$optarg
-
-      # Not sure if '&' and '^' are valid; a few accounts on gnu.ai.mit.edu
-      # use them, but I haven't found instances anywhere else.
-      valid='A-Za-z0-9./'
-      case "$salt" in
-        [$valid][$valid] ) : ;;
-        * )
-          exec 1>&2
-          {
-            echo "$bq$salt$eq: Wrong size or invalid character(s)."
-            echo "Salt must contain exactly 2 characters from the set: $valid"
-          } | sed -e "s/^/$progname: /"
-          exit 1
-         ;;
-      esac
-     ;;
-    -- )     # Stop option processing
-      shift
-      break
-     ;;
-    -? | --* )
-      case "$1" in
-        --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
-        * )     arg="$1" ;;
-      esac
-      exec 1>&2
-      echo "$progname: unknown or ambiguous option $bq$arg$eq"
-      echo "$progname: Use $bq--help$eq for a list of options."
-      exit 1
-     ;;
-    -??* )
-      # Split grouped single options into separate args and try again
-      optarg="$1"
-      shift
-      set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` ${1+"$@"}
-      shift
-     ;;
-    * )
-      break
-     ;;
-  esac
-done
-
-case "$debug" in -d ) set -x ;; esac
-
-case $# in
-  0 )
-    if test -t 0 ; then
-      foo=`echo -n test`
-      case "$foo" in
-        "-n test" ) n=   c='\c' ;;
-        * )         n=-n c=     ;;
-      esac
-
-      umask 077
-      stty_settings=`stty -g 2> /dev/null`
-
-      reset_stty='
-        {
-          case "$stty_settings" in
-            "" ) stty echo 2> /dev/null ;;
-            * )  stty "$stty_settings" 2> /dev/null ;;
-          esac
-        }
-      '
-
-      trap '{
-              exitstat=$?
-
-              eval "$reset_stty"
-              echo 1>&2
-
-              trap "" 1 2 3 15
-              exit $exitstat
-            }' 1 2 3 15
-
-      stty -echo 2> /dev/null
-
-      while : ; do
-        # Must echo to stderr, because in all likelihood stdout is being
-        # subtituted by a shell command to get the resultant ciphertext.
-        # This is what comes of using an operating system that only has lame
-        # numeric return values.  feh!
-        exec 9>&1 1>&2
-
-        echo $n "Password:$c"
-        read passwd
-        echo
-
-        case "$passwd" in ?????????* )
-          echo "Warning: only first 8 characters will be used." ;;
-        esac
-
-        echo $n "Password (again):$c"
-        read passwd1
-        echo
-
-        case "$passwd" in "$passwd1") break ;; esac
-
-        echo
-        echo "Password mismatch; try again."
-      done
-
-      exec 1>&9 9>&-
-      eval "$reset_stty"
-    else
-      read passwd
-    fi
-   ;;
- 1)
-    passwd="$1"
-   ;;
- *)
-    echo "$usage" 1>&2
-    exit 1
-   ;;
-esac
-
+sub parse_options
 {
-  echo "$passwd"
-  echo "$salt"
-} | perl -e '
-  $p = <>; chop $p; $s = <>; chop $s;
-  if ("$s" eq "") {
-    srand (time ());
-    $sc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789./";
-    sub x { substr ($sc, int (rand () * 100000) % (length ($sc) + 1), 1); }
-    $s  = &x . &x;
-  }
-  print crypt($p, $s);
-'
-echo
+  $interactivep = -t STDIN;
+
+  Getopt::Long::config ('bundling', 'autoabbrev');
+  GetOptions ("s|salt=s",      \$salt,
+              "m|method=s",    \$method,
+              "md5",           sub { $method = 'md5' },
+              "des",           sub { $method = 'des' },
+              "i|interactive", \$interactivep,
+              "h|help",        \&usage);
+
+  $method = (defined $salt
+             ? (length ($salt) < 3
+                ? 'des'
+                : 'md5')
+             : 'des')
+    unless defined $method;
+
+  unless (exists $crypt_fn{$method})
+    {
+      print STDERR "$progname: $method: Unknown encryption method.\n";
+      exit (1);
+    }
+}
+
+
+sub input_noecho
+{
+  my ($prompt) = @_;
+  my $tty;
+  my $c_lflag;
+  my %trap_sigs = ( HUP  =>  1,
+                    INT  =>  2,
+                    QUIT =>  3,
+                    TERM => 15);
+  my %sig_orig;
+
+  # If stdin is a tty, disable echo while reading password.
+  if (-t STDIN)
+    {
+      $tty = POSIX::Termios->new;
+      my $fd = fileno (STDIN);
+
+      $tty->getattr ($fd);
+      $c_lflag = $tty->getlflag;
+
+      # Set up handlers to restore tty on typical signals
+      my $restore = sub {
+        $tty->setlflag ($c_lflag);
+        $tty->setattr (fileno (STDIN));
+        my $signum = $trap_sigs{$_[0]};
+        print STDERR "\nExiting on signal $signum (SIG$_[0])\n";
+        # 7th bit set indicates lower 6 bits represent a
+        # signal number (0x80 == 2**7)
+        exit (0x80 | $signum);
+      };
+      map { $sig_orig{$_} = $SIG{$_} || 'DEFAULT';
+            $SIG{$_} = $restore } keys %trap_sigs;
+
+      $tty->setlflag ($c_lflag & ~&POSIX::ECHO);
+      $tty->setattr ($fd);
+    }
+
+  # Temporarily disable buffering on stderr, which is where prompt is printed.
+  my $fh_orig = select (STDERR);
+  my $stderr_bufp = $|;
+  $| = 1;
+  $prompt = "Password:" unless defined $prompt;
+  print $prompt;
+  my $input = <STDIN>;
+  chomp $input if defined $input;
+  $| = $stderr_bufp;
+  select ($fh_orig);
+
+  # Restore echo afterward, if it was originally on;
+  # and restore signal handlers
+  print STDERR "\n" if $interactivep;
+  if ($tty)
+    {
+      $tty->setlflag ($c_lflag);
+      $tty->setattr (fileno (STDIN));
+      map { $SIG{$_} = $sig_orig{$_} } keys %trap_sigs;
+    }
+
+  return $input;
+}
+
+sub gensalt
+{
+  my $saltlen = shift;
+
+  my $sc = './0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+  my $sclen = length ($sc) + 1;
+
+  join ("", map { substr ($sc, int (rand () * 100000) % $sclen, 1) }
+                (0 .. $saltlen));
+}
+
+sub crypt_des
+{
+  my ($pass, $salt) = @_;
+
+  $salt = gensalt (2) unless defined $salt;
+  return crypt ($pass, $salt);
+}
+
+sub crypt_md5
+{
+  my ($pass, $salt) = @_;
+
+  if (! defined $salt)
+    {
+      $salt = '$1$' . gensalt (8);
+    }
+  elsif ($salt !~ /^\$1\$/)
+    {
+      $salt = '$1$' . $salt;
+    }
+  return crypt ($pass, $salt);
+}
+
+sub main
+{
+  parse_options;
+
+  my $pass;
+  if (defined $ARGV[0])
+    {
+      $pass = shift @ARGV;
+    }
+  elsif ($interactivep)
+    {
+      while (1)
+        {
+          $pass     = input_noecho ("Password:");
+          my $pass2 = input_noecho ("Confirm password:");
+          exit (1) unless defined $pass2;
+          last if $pass eq $pass2;
+          print STDERR "Input mismatch; please try again.\n\n";
+        }
+    }
+  else
+    {
+      $pass = <STDIN>;
+      exit (1) unless defined $pass;
+      chomp $pass;
+    }
+
+  my $crypt = $crypt_fn{$method};
+  print &$crypt ($pass, $salt), "\n";
+}
+
+main (@ARGV);
 
 # mkpass ends here
