@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1993-09-26
 
-# $Id: mkpass,v 1.4 1997/09/11 08:50:24 friedman Exp $
+# $Id: mkpass,v 1.5 2006/01/13 21:19:47 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -32,12 +32,10 @@ use POSIX;
 
 $^W = 1;  # enable warnings
 
-our $progname = $0;
-$progname =~ s|.*/||;
-
-our $salt;
-our $method;
-our $interactivep;
+my $progname;
+my $salt;
+my $method;
+my $interactivep;
 
 my %crypt_fn = ( des => \&crypt_des,
                  md5 => \&crypt_md5 );
@@ -72,6 +70,7 @@ You can also feed the cleartext password as input using a pipe.\n";
 
 sub parse_options
 {
+  ($progname = $0) =~ s|.*/||;
   $interactivep = -t STDIN;
 
   Getopt::Long::config ('bundling', 'autoabbrev');
