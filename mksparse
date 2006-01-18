@@ -1,16 +1,15 @@
-#!/bin/sh
-exec ${PERL-perl} -wSx "$0" "$@"
-#!perl
-
+#!/usr/bin/env perl
 # mksparse --- create sparse file
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2005-07-08
 # Public domain
 
-# $Id$
+# $Id: mksparse,v 1.1 2005/07/08 23:03:48 friedman Exp $
 
 # Commentary:
 # Code:
+
+$^W = 1;  # enable warnings
 
 use strict;
 use Symbol;
@@ -19,13 +18,17 @@ use Fcntl qw(:DEFAULT :seek);
 my %mult
   = ( b => 512,
 
-      k   => 1024,                g   => 1024 ** 3,
-      kb  => 1024,                gb  => 1024 ** 3,
-      kib => 1000,                gib => 1000 ** 3,
+      k   => 1024,                t   => 1024 ** 4,
+      kib => 1024,                tib => 1024 ** 4,
+      kb  => 1000,                tb  => 1000 ** 4,
 
-      m   => 1024 ** 2,           t   => 1024 ** 4,
-      mb  => 1024 ** 2,           tb  => 1024 ** 4,
-      mib => 1000 ** 2,           tib => 1000 ** 4,
+      m   => 1024 ** 2,           p   => 1024 ** 5,
+      mib => 1024 ** 2,           pib => 1024 ** 5,
+      mb  => 1000 ** 2,           pb  => 1000 ** 5,
+
+      g   => 1024 ** 3,           e   => 1024 ** 6,
+      gib => 1024 ** 3,           eib => 1024 ** 6,
+      gb  => 1000 ** 3,           eb  => 1000 ** 6,
     );
 
 
@@ -48,7 +51,39 @@ sub main
 
   unless (@_ == 2)
     {
-      printf STDERR "Usage: %s [filename] [size{K|M|G|T|KiB|MiB|GiB}]\n",
+      printf STDERR "Usage: %s [filename] [size{unit}]
+
+The size parameter can be an integral or fractional (decimal) quantity,
+though the actual file size will be truncated to the nearest whole byte.
+
+The optional unit can be specified as one of the following:
+
+                      k  |  m  |  g  |  t  |  p  |  e
+                     KiB | MiB | GiB | TiB | PiB | EiB
+
+    which are interpreted as a multiple of 2**(10n) = 1024**n.
+    For example, 4MiB = 4 * 1024**2 = 4194304 bytes.
+
+           k = kibi = 2**10 (n=1)        t = tebi = 2**40 (n=4)
+           m = mebi = 2**20 (n=2)        p = pebi = 2**50 (n=5)
+           g = gibi = 2**30 (n=3)        e = ebi  = 2**60 (n=6)
+
+    or the following SI metric units:
+
+                        KB | MB | GB | TB | PB | EB
+
+    which are interpreted as multiples of 10**(3n) = 1000**n.
+    For example, 4GB = 4 * 1000**3 = 4000000000 bytes.
+
+           K = Kilo = 10**3 (n=1)        T = Tera = 10**12 (n=4)
+           M = Mega = 10**6 (n=2)        P = Peta = 10**15 (n=5)
+           G = Giga = 10**9 (n=3)        E = Exa  = 10**18 (n=6)
+
+    Additionally, the unit \`b' (\"blocks\") will multiply the size
+    by 512 (2**9), which is a traditional blocksize for many systems.
+
+See http://en.wikipedia.org/wiki/Binary_prefix for more information on the
+difference between SI (decimal) and binary prefix definitions.\n",
         $progname;
       exit (1);
     }
@@ -83,5 +118,9 @@ sub main
 }
 
 main (@ARGV);
+
+# local variables:
+# mode: perl
+# end:
 
 # eof
