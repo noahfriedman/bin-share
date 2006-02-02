@@ -1,0 +1,60 @@
+#!/bin/sh
+# mrdesktop --- wrapper for rdesktop
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2005-08-10
+# Public domain
+
+# $Id$
+
+# Commentary:
+#
+# When a client connects to a windows 2000/2003 terminal server and has no
+# permanent client access license associated with it, the server will issue
+# a temporary license.  This license will eventually expire and the client
+# will no longer be able to connect.  This script adds a "generation
+# number" to the client name (normally the host name) periodically to avoid
+# using an expired temporary license.  The generation number is determined
+# from the current date and time.
+#
+# Code:
+
+hostname=${HOSTNAME-`uname -n`}
+host=`echo "$HOSTNAME" | sed -e 's/\..*//'`
+
+sec_per_day=86400
+days_per_license=60  # might be 90? play it safe
+epoch=1117584000     # 2005-06-01 00:00:00 UTC
+now=`date -u +%s`
+
+# expr is more likely to be installed than dc
+#gen=`echo "$now $epoch - $sec_per_day $days_per_license 1 - * / p" | dc`
+#gen=`expr \( $now - $epoch \) / \( $sec_per_day \* \( $days_per_license - 1 \) \)`
+gen=$(( (now - epoch) / (sec_per_day * (days_per_license - 1)) ))
+client=$host'$'$gen'$'
+
+#geom=`xrdb-symbol-value WIDTH HEIGHT | sed -ne '1h;2H;$x;$s/\n/x/;$p'`
+geom=`xrdb -symbols -screen \
+       | sort \
+       | sed -e /-DHEIGHT=/h \
+             -e /-DWIDTH=/H  \
+             -e '$!d'        \
+             -e x            \
+             -e 's/^.*=\(.*\)\n.*=\(.*\)/\2x\1/'`
+
+depth=`xrdb -symbols -screen | sed -n -e '/-DPLANES=/s///p'`
+
+case $geom in
+  18??x* | [2-9]???x* ) geom=1600x1200 ;;
+  1600x1200 )           geom=1400x1050 ;;
+  1400x1050 )           geom=1280x960  ;; # use a 4:3 geometry
+  1280x1024 )           geom=1152x864  ;; # note 1280x1024 is 5:4, not 4:3
+  1152x864  )           geom=1024x768  ;;
+  1024x768  )           geom=800x600   ;;
+   800x600  )           geom=640x480   ;;
+esac
+
+rdesktop -n ${RDESKTOP_CLIENT-$client} \
+         -g ${RDESKTOP_GEOM-$geom} \
+         -u ${RDESKTOP_USER-${LOGNAME-$USER}} \
+         -a ${RDESKTOP_DEPTH-$depth} \
+         ${1+"$@"} &

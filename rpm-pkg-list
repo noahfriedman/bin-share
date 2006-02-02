@@ -1,11 +1,20 @@
 #!/bin/sh
-# $Id: rpm-pkg-list,v 1.2 2005/11/22 20:38:38 friedman Exp $
+# $Id: rpm-pkg-list,v 1.3 2005/12/13 10:51:52 friedman Exp $
+
+fields='
+  size
+  name
+  version-release
+  arch
+  installtime
+'
 
 case $1 in
-  -size    | size    ) k='-k1,1n -k2,2'        ; shift ;;
-  -version | version ) k='-k3,3  -k2,2 -k4,4'  ; shift ;;
-  -name    | name    ) k='-k2,2  -k3,3 -k4,4'  ; shift ;;
-  * )                  k='-k2,2  -k3,3 -k4,4'          ;;
+  -size    | size    ) k='-k1,1n -k2,2'             ; shift ;;
+  -version | version ) k='-k3,3  -k2,2 -k4,4'       ; shift ;;
+  -name    | name    ) k='-k2,2  -k3,3 -k4,4'       ; shift ;;
+  -date    | date    ) k='-k5,5n -k2,2 -k3,3 -k4,4' ; shift ;;
+  * )                  k='-k2,2  -k3,3 -k4,4'               ;;
 esac
 
 case $# in 0 ) set '*' ;; esac
@@ -13,10 +22,14 @@ case $# in 0 ) set '*' ;; esac
 a=
 case $* in *[*?]* ) a=-a ;; esac # faster if no globbing
 
-fmt='%{SIZE} %{NAME} %{VERSION}-%{RELEASE} %{ARCH}\n'
+fmt=`echo $fields | sed -e 's/\([A-Za-z0-9:][A-Za-z0-9:]*\)/%{\1}/g'`
+datefmt=${DATEFMT-'%Y/%m/%d:%H:%M:%S'}
 
-rpm --qf "$fmt" -q $a ${1+"$@"} \
+rpm --qf "$fmt\n" -q $a ${1+"$@"} \
  | sort -f $k \
+ | perl -na -e 'use POSIX;
+                $F[4] = strftime ("'"$datefmt"'", localtime($F[4]));
+                print "@F\n"' \
  | fmtcols -Nw
 
 # eof
