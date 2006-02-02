@@ -1,35 +1,191 @@
-#!/bin/sh
-# $Id: rpm-pkg-list,v 1.3 2005/12/13 10:51:52 friedman Exp $
+#!/usr/bin/env perl
+# rpm-pkg-list --- summarize installed rpm packages
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2004-11-29
+# Public domain
 
-fields='
-  size
-  name
-  version-release
-  arch
-  installtime
-'
+# $Id$
 
-case $1 in
-  -size    | size    ) k='-k1,1n -k2,2'             ; shift ;;
-  -version | version ) k='-k3,3  -k2,2 -k4,4'       ; shift ;;
-  -name    | name    ) k='-k2,2  -k3,3 -k4,4'       ; shift ;;
-  -date    | date    ) k='-k5,5n -k2,2 -k3,3 -k4,4' ; shift ;;
-  * )                  k='-k2,2  -k3,3 -k4,4'               ;;
-esac
+# Commentary:
+# Code:
 
-case $# in 0 ) set '*' ;; esac
+$^W = 1; # enable warnings
 
-a=
-case $* in *[*?]* ) a=-a ;; esac # faster if no globbing
+use strict;
+use POSIX;
+use Symbol;
+use Getopt::Long;
 
-fmt=`echo $fields | sed -e 's/\([A-Za-z0-9:][A-Za-z0-9:]*\)/%{\1}/g'`
-datefmt=${DATEFMT-'%Y/%m/%d:%H:%M:%S'}
+my $sortby = [];
+my $reverse_sort;
+my $header;
+my $progname;
 
-rpm --qf "$fmt\n" -q $a ${1+"$@"} \
- | sort -f $k \
- | perl -na -e 'use POSIX;
-                $F[4] = strftime ("'"$datefmt"'", localtime($F[4]));
-                print "@F\n"' \
- | fmtcols -Nw
+my %field
+  = ( size              => { column  => 0,
+                             sort    => 1,
+                             numeric => 1,
+                           },
+      name              => { column  => 1,
+                             sort    => 0,
+                           },
+      'version-release' => { column  => 2,
+                             sort    => 2,
+                           },
+      arch              => { column  => 3,
+                             sort    => 3,
+                           },
+      installtime       => { column  => 4,
+                             sort    => 4,
+                             numeric => 1,
+                             fmt     => \&fmtdate,
+                           },
+    );
 
-# eof
+my %field_alias
+  = ( date        => q(installtime),      time => q(installtime),
+      installdate => q(installtime),
+      version     => q(version-release),  ver  => q(version-release),
+      release     => q(version-release),  rel  => q(version-release),
+      package     => q(name),             pkg  => q(name),
+    );
+
+my $datefmt = $ENV{DATEFMT} || '%Y/%m/%d:%H:%M:%S' ;
+
+sub fieldnames
+{
+  my $f = @_ ? { @_ } : \%field;
+  sort { $f->{$a}->{column} <=> $f->{$b}->{column} } keys %$f;
+}
+
+sub fielderr
+{
+  print join (": ", $progname, @_), "\n",
+        "Valid field names are:\n\t",
+        join ("\n\t", fieldnames()), "\n";
+  exit (1);
+}
+
+sub fmtdate
+{
+  strftime ($datefmt, localtime ($_[0]));
+}
+
+
+sub cmd
+{
+  my (@cmd) = @_;
+
+  my $fh = gensym;
+  open ($fh, "-|") || exec @cmd;
+  return $fh;
+}
+
+sub rpmq
+{
+  local $/ = undef;
+  local $_;
+
+  my @field = fieldnames ();
+  map { s/([a-z0-9:]+)/%{$1}/gi } @field;
+
+  my $fmt = join ("|", @field) . "\n";
+  my @cmd = (qw(rpm --nodigest --nosignature),
+             ("@_" =~ /\*/ ? '-qa' : '-q'),
+             '--qf', $fmt, @_);
+  #print STDERR "$progname: @cmd\n";
+  my $fh = cmd (@cmd);
+
+  my @lines = map { [split (/\|/, $_)] } split (/\n/, <$fh>);
+  close ($fh);
+
+  return \@lines;
+}
+
+sub sortlines
+{
+  my ($lines) = @_;
+
+  my %f = %field;
+  map { delete $f{$_} } @$sortby;
+
+  my @field = (@$sortby, fieldnames (%f));
+  #print "sortby = ", join (" ", @field), "\n";
+
+  my @sorted = sort
+    { my @keys = @field;
+      my $res = 0;
+      my ($x, $y) = $reverse_sort ? ($b, $a) : ($a, $b);
+      while ($res == 0 && @keys)
+        {
+          my $key = shift @keys;
+          my $i = $field{$key}->{column};
+          my $np = $field{$key}->{numeric};
+          $res = ($np
+                  ? $x->[$i] <=> $y->[$i]
+                  : $x->[$i] cmp $y->[$i]);
+          last if $res;
+        }
+      $res;
+    } @$lines;
+  return \@sorted;
+}
+
+sub fmtlines
+{
+  my ($lines) = @_;
+  my @fn = map { $field{$_}->{fmt} } fieldnames ();
+  my @width = (0) x @fn;
+
+  map { for (my $i = 0; $i < @fn; $i++)
+          {
+            my $f = $fn[$i];
+            $_->[$i] = &$f ($_->[$i]) if $f;
+            $width[$i] = length $_->[$i]
+              if length $_->[$i] > $width[$i];
+          }
+      } @$lines;
+  return ($lines, \@width);
+}
+
+sub printlines
+{
+  my ($lines, $width) = @_;
+  my @field = fieldnames ();
+
+  my $fmtstr = join ("  ",
+                     map { my $w = $width->[$field{$_}->{column}];
+                           sprintf ("%%%ds", ($field{$_}->{numeric}
+                                              ? $w : -$w));
+                         } @field) . "\n";
+
+  printf $fmtstr, map { uc $_ } @field
+    if $header;
+  map { printf $fmtstr, @$_ } @$lines;
+}
+
+sub main
+{
+  ($progname = $0) =~ s=.*/==;
+
+  Getopt::Long::config ('bundling', 'autoabbrev');
+  GetOptions ("d|datefmt=s", \$datefmt,
+              "H|header",    \$header,
+              "r|reverse",   \$reverse_sort,
+              "s|sort=s",    sub { push @$sortby, $_[1] });
+
+  $sortby = [qw(name version-release arch)] unless @$sortby;
+  $sortby = [map { $field_alias{$_}
+                     || (exists $field{$_} && $_)
+                     || fielderr ($_, "Unrecognized field name")
+                 } map { split (/[\s,]+/, $_) } @$sortby];
+
+  @ARGV = ('*') unless @ARGV;
+  printlines (fmtlines (sortlines (rpmq (@ARGV))));
+}
+
+main;
+
+# local variables:
+# mode: perl
+# end:
