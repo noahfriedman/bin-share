@@ -1,13 +1,10 @@
-#!/bin/sh
-exec ${PERL-perl} -wSx "$0" ${1+"$@"}
-#!perl
-
+#!/usr/bin/env perl
 # latest-rpms --- filter a list of packages and print only the latest versions
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2005-07-24
 # Public domain
 
-# $Id$
+# $Id: latest-rpms,v 1.1 2005/11/05 16:28:48 friedman Exp $
 
 # Commentary:
 # Code:
@@ -16,6 +13,8 @@ use strict;
 use RPM2;
 use IO::Handle;
 use Getopt::Long;
+
+$^W = 1;  # enable warnings
 
 # Disable all digest and signature verification; this will significantly
 # speed up the reading in of package headers.
@@ -35,18 +34,27 @@ sub rpm_uniq
 {
   my ($list) = @_;
   my $tick = 0;
+  my $uptick = 0;
 
   if ($verbose)
     {
-      $tick = scalar @$list;
       STDERR->autoflush (1);
+      $tick = scalar @$list;
+      # print a status on the number of read files every 5% of the total
+      # number of files to read, or per 100 files, whichever is smaller.
+      # This is to avoid flooding slow terminals.
+      $uptick = int($tick * .05) || 1;
+      $uptick = 100 if $uptick > 100;
     }
 
   my @pkg;
   my $i = 0;
   select (STDERR);
   map {
-    printf ("\r%s: reading file %d/%d ... ", $progname, ++$i, $tick) if $tick;
+    if ($tick && (++$i % $uptick == 0))
+      {
+        printf "\r%s: reading file %d/%d ... ", $progname, $i, $tick;
+      }
     eval { my $rpm = RPM2->open_package ($_, $rpmpkg_flags);
            $rpm->{filename} = $_; # open_package stores realpath; override
            push @pkg, $rpm;
