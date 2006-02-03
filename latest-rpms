@@ -4,13 +4,14 @@
 # Created: 2005-07-24
 # Public domain
 
-# $Id: latest-rpms,v 1.1 2005/11/05 16:28:48 friedman Exp $
+# $Id: latest-rpms,v 1.2 2006/02/03 05:59:56 friedman Exp $
 
 # Commentary:
 # Code:
 
 use strict;
 use RPM2;
+use Symbol;
 use IO::Handle;
 use Getopt::Long;
 
@@ -63,7 +64,6 @@ sub rpm_uniq
       {
         print "\n" if $tick;
         print "$progname: $_: $@";
-
       }
   } @$list;
 
@@ -91,7 +91,20 @@ sub main
   GetOptions ("i|ignore-arch", sub { pop @uniq_keys },
               "q|quiet",       sub { $verbose = 0 });
 
-  @ARGV = (map { chomp; $_ } <STDIN>) unless @ARGV;
+  if (@ARGV == 0)
+    {
+      local $/ = undef;
+      @ARGV = split (/[\r\n]+/, <STDIN>);
+    }
+  elsif (@ARGV == 1 && -d $ARGV[0])
+    {
+      my $dir = $ARGV[0];
+      my $dh = gensym;
+      opendir ($dh, $dir) || die "$progname: $dir: $!";
+      @ARGV = grep { /\.rpm$/ } readdir ($dh);
+      closedir ($dh);
+      map { $_ = $dir . "/" . $_ } @ARGV unless $dir eq ".";
+    }
   rpm_uniq (\@ARGV)
 }
 
