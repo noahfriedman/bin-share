@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id$
+# $Id: rpm-pkg-list,v 1.5 2006/02/02 17:52:45 friedman Exp $
 
 # Commentary:
 # Code:
@@ -20,11 +20,13 @@ my $sortby = [];
 my $reverse_sort;
 my $header;
 my $progname;
+my $fmtsize = 0;
 
 my %field
   = ( size              => { column  => 0,
                              sort    => 1,
                              numeric => 1,
+                             fmt     => \&fmtsize,
                            },
       name              => { column  => 1,
                              sort    => 0,
@@ -66,9 +68,31 @@ sub fielderr
   exit (1);
 }
 
+sub capitalize
+{
+  join ("-", map { ucfirst $_ } split (/-/, $_[0]));
+}
+
 sub fmtdate
 {
   strftime ($datefmt, localtime ($_[0]));
+}
+
+sub fmtsize
+{
+  return $_[0] unless $fmtsize;
+
+  my $size   = shift;
+  my @suffix = ('', qw(K M G T P E));
+
+  while ($size > $fmtsize)
+    {
+      $size /= $fmtsize;
+      shift @suffix;
+    }
+
+  my $fmtstr = $size < 100 && $suffix[0] ne '' ? "%.1f%s" : "%d%s" ;
+  return sprintf ($fmtstr, $size, $suffix[0]);
 }
 
 
@@ -96,7 +120,9 @@ sub rpmq
   #print STDERR "$progname: @cmd\n";
   my $fh = cmd (@cmd);
 
-  my @lines = map { [split (/\|/, $_)] } split (/\n/, <$fh>);
+  $_ = <$fh>;
+  s/^package .*? is not installed\n//gm;
+  my @lines = map { [split (/\|/, $_)] } split (/\n/, $_);
   close ($fh);
 
   return \@lines;
@@ -159,7 +185,7 @@ sub printlines
                                               ? $w : -$w));
                          } @field) . "\n";
 
-  printf $fmtstr, map { uc $_ } @field
+  printf $fmtstr, map { capitalize ($_) } @field
     if $header;
   map { printf $fmtstr, @$_ } @$lines;
 }
@@ -169,10 +195,12 @@ sub main
   ($progname = $0) =~ s=.*/==;
 
   Getopt::Long::config ('bundling', 'autoabbrev');
-  GetOptions ("d|datefmt=s", \$datefmt,
-              "H|header",    \$header,
-              "r|reverse",   \$reverse_sort,
-              "s|sort=s",    sub { push @$sortby, $_[1] });
+  GetOptions ("d|datefmt=s",      \$datefmt,
+              "H|header",         \$header,
+              "h|human-readable", sub { $fmtsize = 1024 },
+              "si",               sub { $fmtsize = 1000 },
+              "r|reverse",        \$reverse_sort,
+              "s|sort=s",         sub { push @$sortby, $_[1] });
 
   $sortby = [qw(name version-release arch)] unless @$sortby;
   $sortby = [map { $field_alias{$_}
