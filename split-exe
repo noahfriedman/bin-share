@@ -1,0 +1,15 @@
+#!/bin/sh
+# $Id$
+
+for exe in ${1+"$@"}; do
+  name=`basename $exe`
+  mkdir $name.sections
+
+  set x `objdump -h $exe | sed -ne '/^ *[0-9]* \(\.[^ ]*\) .*/!d;s//\1/p'`
+  shift
+
+  for section in ${1+"$@"}; do
+    echo $name: $section
+    objcopy -O binary --only-section=$section $exe $name.sections/_$section
+  done
+done
