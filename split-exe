@@ -1,15 +1,21 @@
 #!/bin/sh
-# $Id$
+# $Id: split-exe,v 1.1 2006/03/03 23:30:54 friedman Exp $
+
+ofmt="-O binary"
+case $1 in
+  -O ) ofmt="-O $2"; shift; shift ;;
+esac
 
 for exe in ${1+"$@"}; do
   name=`basename $exe`
-  mkdir $name.sections
+  mkdir -p $name.sections
 
   set x `objdump -h $exe | sed -ne '/^ *[0-9]* \(\.[^ ]*\) .*/!d;s//\1/p'`
   shift
 
   for section in ${1+"$@"}; do
     echo $name: $section
-    objcopy -O binary --only-section=$section $exe $name.sections/_$section
+    outname=`echo $section | sed -e 's/^\./_/'`
+    objcopy $ofmt --only-section=$section $exe $name.sections/$outname
   done
 done
