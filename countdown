@@ -4,7 +4,7 @@
 # Created: 2006-05-20
 # Public domain
 
-# $Id$
+# $Id: countdown,v 1.1 2006/05/21 22:47:27 friedman Exp $
 
 # Commentary:
 # Code:
@@ -34,7 +34,7 @@ sub compute_deadline
       # We use timelocal, not timegm, since the stamp is in local time.
       return timelocal (reverse @ts);
     }
-  elsif (/(\d+:\d+(?::\d+}))/) # 21:55 or 21:55:00
+  elsif (/(\d+:\d+(?::\d+|))/) # 21:55 or 21:55:00
     {
       my @tm = split (/[.:]+/, $1);
       my @ts = localtime (time);
@@ -47,7 +47,11 @@ sub compute_deadline
     }
   else
     {
-      use Date::Parse;
+      # We use an eval and test so that the script doesn't die when the
+      # module can't be loaded at compile-time.
+      # Die at run-time if the module is actually needed but isn't found.
+      eval "use Date::Parse";
+      die if $@;
       return str2time ($_);
     }
   return;
