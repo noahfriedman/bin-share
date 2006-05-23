@@ -4,7 +4,7 @@
 # Created: 2006-05-20
 # Public domain
 
-# $Id: countdown,v 1.1 2006/05/21 22:47:27 friedman Exp $
+# $Id: countdown,v 1.2 2006/05/22 21:16:08 friedman Exp $
 
 # Commentary:
 # Code:
@@ -139,6 +139,7 @@ sub main
       exit (1);
     }
 
+  $0 = join (" ", $progname, @ARGV);
   display (compute_deadline (@ARGV), $verbose);
 }
 
