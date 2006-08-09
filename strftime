@@ -1,0 +1,61 @@
+#!/usr/bin/env perl
+# $Id$
+
+$^W = 1;  # enable warnings
+
+use strict;
+use POSIX qw(strftime localtime gmtime);
+use Getopt::Long;
+
+my %fmt_named =
+  ( default  => "%c",                       # uses current locale
+    seconds  => "%s",                       # gnu extension
+
+    iso8601  => "%Y-%m-%d %H:%M:%S",
+    iso      => q(iso8601),
+
+    date     => "%a %b %e %H:%M:%S %Z %Y",  # date(1) format
+    date1    => q(date),
+
+    rfc822   => "%a, %d %b %Y %H:%M:%S %z",
+    mbox     => "%a %b %e %H:%M:%S %Y",     # mbox envelope format
+    envelope => q(mbox),
+
+    perforce => "%Y/%m/%d:%H:%M:%S",
+    p4       => q(perforce),
+
+    full     => join ("\n",
+                      "%A, %d %B %Y  %l:%M%P (%H:%M:%S %Z)",
+                      "Day %j; weekday %w of week %U",
+                      "%s epoch seconds",
+                     ),
+  );
+
+my $fmt   = "default";
+my $time  = time;
+my $utc_p = 0 ;
+
+local *ztime = \&localtime;
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  Getopt::Long::config (qw(bundling auto_abbrev require_order));
+  GetOptions ("l|localtime"    => sub { *ztime = \&localtime },
+              "g|gmtime|u|utc" => sub { *ztime = \&gmtime    },
+              "f|fmt|format=s" => \$fmt,
+             );
+}
+
+sub main
+{
+  parse_options (\@_);
+
+  my @tminfo = ztime ($time);
+  $fmt = $fmt_named{$fmt} while ($fmt !~ /%/ && exists $fmt_named{$fmt});
+  print strftime ($fmt, @tminfo), "\n";
+}
+
+main (@ARGV);
+
+# eof
