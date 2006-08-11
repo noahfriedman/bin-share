@@ -1,26 +1,24 @@
-#!/bin/sh
-exec ${PERL-perl} -wSx $0 ${1+"$@"}
-#!perl
-
+#!/usr/bin/env perl
 # slowcat --- write output slowly, emulating physical serial terminal
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2003-01-01
 # Public domain
 
-# $Id: slowcat,v 2.1 2003/01/02 13:02:37 friedman Exp $
+# $Id: slowcat,v 2.2 2003/05/13 10:27:27 friedman Exp $
 
 # Commentary:
 # Code:
 
-use 5.003;
+$^W = 1; # enable warnings
+
 use strict;
 use Getopt::Long;
 use Symbol;
 
 (my $progname = $0) =~ s|.*/||;
 
-my $bits_per_sec  = 9600;
+my $bits_per_sec  = $ENV{BAUD} || 9600;
 # Due to HZ resolution in most kernels, it is unlikely that select will
 # return in a shorter period of time than 10ms.
 my $usec_interval_min = 10000;
@@ -35,10 +33,14 @@ sub slowcat ($$$)
   my $bytes_per_call = 0;
   my $sleep_interval;
 
+  # Try to find a balance between the granularity of the sleep interval and
+  # some roughly integral number of bytes to output with each call.  If the
+  # former is too large or the latter too fractional, the output will look
+  # choppy, especially at slower speeds.
   while ($bytes_per_call < 1
          || ($bytes_per_call - int ($bytes_per_call) >= .009))
     {
-      $sleep_interval = $usec_interval++ / 1000000;
+      $sleep_interval = ($usec_interval++) / 1000000;
       $bytes_per_call = $bytes_per_sec * $sleep_interval;
     }
   $bytes_per_call = int ($bytes_per_call);
@@ -69,6 +71,9 @@ sub main ()
               "b|bps=i",            \$bits_per_sec,
               "i|sleep-interval=i", \$usec_interval);
 
+  # We need to be able to output at least 1 byte at a time.
+  $bits_per_sec = 8 if $bits_per_sec < 8;
+
   unless (@ARGV)
     {
       slowcat (*STDIN{IO}, $bits_per_sec, $usec_interval);
@@ -87,9 +92,5 @@ sub main ()
 }
 
 main ();
-
-# local variables:
-# mode: perl
-# end:
 
 # slowcat ends here
