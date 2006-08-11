@@ -1,11 +1,20 @@
 #!/usr/bin/env perl
+# strftime --- parse and display dates in flexible format
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2006-08-08
+# Public domain.
+
 # $Id$
+
+# Commentary:
+# Code:
 
 $^W = 1;  # enable warnings
 
 use strict;
 use POSIX qw(strftime localtime gmtime);
 use Getopt::Long;
+use Pod::Usage;
 
 my %fmt_named =
   ( default  => "%c",                       # uses current locale
@@ -24,9 +33,9 @@ my %fmt_named =
     perforce => "%Y/%m/%d:%H:%M:%S",
     p4       => q(perforce),
 
-    full     => join ("\n",
+    full     => join ("%n",
                       "%A, %d %B %Y  %l:%M%P (%H:%M:%S %Z)",
-                      "Day %j; weekday %w of week %U",
+                      "day %j; weekday %w of week %U",
                       "%s epoch seconds",
                      ),
   );
@@ -37,20 +46,60 @@ my $utc_p = 0 ;
 
 local *ztime = \&localtime;
 
+my @time_parser_list =
+  ( [ "Time::ParseDate" => \&Time::ParseDate::parsedate ],
+    [ "Date::Parse"     => \&Date::Parse::str2time      ], );
+my $tmparse;
+
+sub parse_time
+{
+  local $_ = join (" ", @_);
+
+  return      $_  if /^[0-9]+$/;
+  return hex ($_) if /^(?:0x)?[0-9a-f]+$/i;
+
+  unless (defined $tmparse)
+    {
+      for my $elt (@time_parser_list)
+        {
+          my ($module, $fn) = @$elt;
+          eval "use $module";
+          next if ($@ ne "");
+          $tmparse = $fn;
+          last;
+        }
+    }
+
+  my $result = &$tmparse ($_) if (defined $tmparse);
+  unless (defined $result)
+    {
+      (my $progname = $0) =~ s=.*/==;
+      print STDERR "$progname: $_: cannot parse date specification\n";
+      exit (1);
+    }
+  return $result;
+}
+
 sub parse_options
 {
+  my $help = -1;
+
   local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
   Getopt::Long::config (qw(bundling auto_abbrev require_order));
-  GetOptions ("l|localtime"    => sub { *ztime = \&localtime },
+  GetOptions ("h|help|usage+"  => \$help,
+              "l|localtime"    => sub { *ztime = \&localtime },
               "g|gmtime|u|utc" => sub { *ztime = \&gmtime    },
               "f|fmt|format=s" => \$fmt,
              );
+
+  pod2usage(-exitstatus => 0, -verbose => $help) if $help >= 0;
 }
 
 sub main
 {
   parse_options (\@_);
 
+  $time = parse_time (@_) if @_;
   my @tminfo = ztime ($time);
   $fmt = $fmt_named{$fmt} while ($fmt !~ /%/ && exists $fmt_named{$fmt});
   print strftime ($fmt, @tminfo), "\n";
@@ -58,4 +107,83 @@ sub main
 
 main (@ARGV);
 
-# eof
+__END__
+
+=head1 NAME
+
+strftime - parse and display dates in flexible format
+
+=head1 SYNOPSIS
+
+ strftime {-h|--help}
+          {-l|--localtime}
+          {-g|--gmtime|-u|--utc}
+          {-f|--format FMT}
+          [timestamp]
+
+ The -h option may be repeated up to 3 times for increased verbosity.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<-h>, B<--help>
+
+Usage information.
+May be repeated 1-3 times for more verbosity.
+
+=item B<-l>, B<--localtime>
+
+Interpret timestamp in local timezone.
+
+=item B<-u>, B<--utc>
+
+Interpret timestamp in UTC timezone.
+
+=item B<-g>, B<--gmtime>
+
+Same as B<--utc>.
+
+=item B<-f>, B<--format=>I<FMT>
+
+Use I<FMT> as the strftime(3)-format output template.
+
+I<FMT> can also be one of a predefined set of names for some canned formats, including:
+C<seconds>,
+C<iso8601>,
+C<date>,
+C<rfc822>,
+C<perforce>,
+and
+C<full>.
+
+=back
+
+=head1 DESCRIPTION
+
+This program is similar to the date(1) program but varies in a few respects:
+
+=over 4
+
+=over 4
+
+=item * The system time cannot be set.
+
+=item * The input time spec can be epoch seconds in decimal or hex.
+
+=item * There are various predefined (named) output formats.
+
+=back
+
+=back
+
+If no I<timestamp> is specified, the current time is assumed.
+
+Otherwise, the format of the timestamp specified can be a number of
+different formats, similar to those which are understood by the
+GNU date's B<-d> option.  Specifically, see those formats recognized by the
+Date::Parse or Time::ParseDate modules, if available.  At the very least,
+the input can be in the form of the number of seconds since
+S<< Jan 1, 1970 12:00am GMT. >>
+
+=cut
