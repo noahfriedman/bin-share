@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: automake-ify,v 1.1 2005/11/22 20:40:12 friedman Exp $
+# $Id: automake-ify,v 1.2 2005/12/27 05:08:27 friedman Exp $
 
 run()
 {
@@ -14,5 +14,9 @@ if [ -d po ]; then
 fi
 
 run autoheader
-run automake --add-missing --copy
+
+if [ -f Makefile.am ]; then
+  run automake --add-missing --copy
+fi
+
 run autoconf
