@@ -1,14 +1,16 @@
 #! /bin/sh
 
-# $Id: wsnarf,v 1.6 2005/05/30 21:56:01 friedman Exp $
+# $Id: wsnarf,v 1.7 2005/06/01 13:07:38 friedman Exp $
 
-exec wget           \
-  --convert-links   \
-  --force-html      \
-  --no-parent       \
-  --recursive       \
-  --level=0         \
-  --page-requisites \
-  "$@"
+exec wget            \
+  --convert-links    \
+  --backup-converted \
+  --force-html       \
+  --no-parent        \
+  --recursive        \
+  --level=0          \
+  --page-requisites  \
+  --reject 'index.*\??=*' \
+  ${1+"$@"}
 
 # wsnarf ends here
