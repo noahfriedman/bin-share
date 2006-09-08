@@ -1,26 +1,21 @@
-#!/bin/sh
-exec ${PERL-perl} -Swx $0 ${1+"$@"}
-#!perl
-
+#!/usr/bin/env perl
 # run-next --- run next instance of program in path after specified directory
-
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-09-07
-# Public domain
+# Public domain.
 
-# $Id: run-next,v 1.9 2001/09/09 07:30:42 friedman Exp $
+# $Id: run-next,v 1.10 2003/11/20 18:49:20 friedman Exp $
 
 # Commentary:
 
 # This script can be used by front-end wrapper scripts in a user's personal
 # path to set environment variables, manipulate args, etc. before calling
 # the real program which resides in a directory specified somewhere later
-# in the user's path.  For example, a front end to the mozilla browser
-# could be written as:
+# in the user's path.  For example, a front end to a program could be
+# written as:
 #
 #         #!/bin/sh
-#         HOME=$HOME/etc/www/netscape
-#         export HOME
+#         export LD_PRELOAD=...
 #         exec run-next $0 ${1+"$@"}
 #
 # This script looks at the full path of the specified argument and will
@@ -28,12 +23,12 @@ exec ${PERL-perl} -Swx $0 ${1+"$@"}
 
 # Code:
 
-use 5.003;
+$^W = 1;  # enable warnings
+
 use strict;
 use Getopt::Long;
 
-my $progname = $0;
-$progname =~ s|.*/||;
+(my $progname = $0) =~ s|.*/||;
 
 my $opt_print = 0;
 my $opt_skip = 1;
@@ -55,11 +50,25 @@ Options are:
 
 sub err
 {
-  my $fatalp = shift;
+  my $fatal = shift;
   my $msg = join (": ", $progname, @_);
   print STDERR $msg, (substr ($msg, -1, 1) eq "\n"? "" : "\n");
-  exit (1) if $fatalp;
+  exit ($fatal) if $fatal;
   return undef;
+}
+
+# Use the `access' syscall if available; this is more reliable than just
+# checking the mode bits on the file since other ACLs might apply.
+# Some perl ports don't have the POSIX module, so we use an exception
+# handler to catch that error and examine mode bits as a last resort.
+sub executable_p
+{
+  eval {
+    require POSIX; import POSIX; # runtime; 'use' would be compile-time
+    return 1 if access ($_[0], &X_OK);
+    return 0;
+  };
+  return (-f $_[0] && -x _ && -s _); # _ reuses last stat struct
 }
 
 sub main
@@ -80,7 +89,7 @@ sub main
   my $seen = 0;
   my $execdir;
   my $dir;
-  foreach $dir (split (/:/, $ENV{PATH}))
+  for my $dir (split (/:/, $ENV{PATH}))
     {
       $dir =~ s/\/$//g; # strip any trailing slashes (xemacs subprocesses)
       $dir = "." if ($dir eq "");
@@ -88,7 +97,7 @@ sub main
       next unless ($found_progdir);
       next if (exists $progdirs{$dir});
       my $f = join ("/", $dir, $prog);
-      next unless (-x $f && -f $f);
+      next unless executable_p ($f);
       $progdirs{$dir} = $seen++;
       next unless ($seen > $opt_skip);
       $execdir = $dir;
@@ -120,11 +129,6 @@ sub main
   exec ($execprog, @ARGV) || err (1, $execprog, "$!");
 }
 
-main ();
-
-# local variables:
-# mode: perl
-# eval: (auto-fill-mode 1)
-# end:
+main;
 
 # run-next ends here
