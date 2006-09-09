@@ -1,8 +1,8 @@
 #!/bin/sh
 
-# $Id: wget,v 1.2 2005/05/30 21:55:43 friedman Exp $
+# $Id: wget,v 1.3 2005/06/01 13:08:03 friedman Exp $
 
-wget=`run-next -p $0 || echo false`
+wget=`run-next -p "$0" || echo :`
 
 # So many web servers out there discriminate against wget's default user-agent,
 # so fabricate a different one.
@@ -12,7 +12,11 @@ cookies=$HOME/etc/misc/.wget/cookies.txt
 
 # Get major and minor version numbers for wget
 eval `$wget --version \
-        | sed -ne '1s/^.*get \([0-9]*\)\.\([0-9]*\).*/vmajor=\1 vminor=\2/ip'`
+        | sed -ne '1s/^.*get \([0-9]*\)\.\([0-9]*\).*/vmajor=\1 vminor=\2/p'`
+
+case $vmajor:$vminor in
+  : | *: | :* ) exit 1 ;;
+esac
 
 atleast() { [ $vmajor -eq $1 ] && [ $vminor -ge $2 ] || [ $vmajor -gt $1 ]; }
 
@@ -63,6 +67,6 @@ fi
 exec $wget \
   --user-agent="$user_agent" \
   --execute 'robots = off' \
-  $opts "$@"
+  $opts ${1+"$@"}
 
 # wget ends here
