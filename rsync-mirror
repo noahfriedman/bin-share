@@ -1,17 +1,32 @@
 #!/bin/sh
-# $Id$
+# $Id: rsync-mirror,v 1.1 1998/11/09 03:23:59 friedman Exp $
 
-exec rsync \
-      --delete \
-      --devices \
-      --force \
-      --group \
-      --hard-links \
-      --links \
-      --owner \
-      --perms \
-      --recursive \
-      --sparse \
-      --times \
-      --verbose \
-      ${1+"$@"}
+RSYNC_RSH=${RSYNC_RSH-rsh}
+export RSYNC_RSH
+
+set x \
+	--owner		\
+	--group		\
+	--perms		\
+	--times		\
+			\
+	--hard-links	\
+	--links		\
+	--devices	\
+			\
+	--delete	\
+	--force		\
+			\
+	--recursive	\
+	--verbose	\
+	${1+"$@"}
+shift
+
+case $* in
+  *-inplace* ) : ;;
+  *          ) set x --sparse ${1+"$@"} ; shift ;;
+esac
+
+exec ${RSYNC-rsync} ${1+"$@"}
+
+# eof
