@@ -4,10 +4,10 @@
 # Created: 1997-05-27
 # Public domain.
 
-# $Id: apropos-command,v 1.3 2000/01/13 19:48:00 friedman Exp $
+# $Id: apropos-command,v 1.4 2000/01/14 11:56:34 friedman Exp $
 
 # Reinvoke with perl if available.
-{ ${PERL-perl} -v; } > /dev/null 2>&1 && exec ${PERL-perl} -Sx $0 ${1+"$@"}
+{ ${PERL-perl} -v; } > /dev/null 2>&1 && exec ${PERL-perl} -Sx "$0" ${1+"$@"}
 
 # bourne shell; portable, but much slower and less functional.
 # It may even fail if the `-x' test flag is not supported.
@@ -48,12 +48,15 @@
             {
               # Skip shared libraries (which are often marked executable)
               # unless user specifically put `lib' in the search pattern
-              next if ($file =~ /^lib.*\.(a|so|la)/o && $pattern !~ /lib/o);
+              next if ($file =~ /^lib.*\.(?:a|so|la)/o && $pattern !~ /lib/o);
+              # Same for windows/cygwin dlls
+              next if ($file =~ /\.dll(?:\.|$)/o && $pattern !~ /\.dll/o);
               # Skip backup and autosave files unless explicitly searched
               next if ($file =~ /[~#]$/o && $pattern !~ /[~#]/o);
             }
           my $f = join ("/", $dir, $file);
-          $files{"$file\n"} = undef if (-f $f && -x $f);
+          # `_' reuses previous stat struct, saves syscall
+          $files{"$file\n"} = undef if (-f $f && -x _);
         }
       closedir (D);
     }
