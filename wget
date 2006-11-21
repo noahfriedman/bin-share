@@ -1,12 +1,12 @@
 #!/bin/sh
 
-# $Id: wget,v 1.3 2005/06/01 13:08:03 friedman Exp $
+# $Id: wget,v 1.4 2006/09/09 01:31:35 friedman Exp $
 
 wget=`run-next -p "$0" || echo :`
 
-# So many web servers out there discriminate against wget's default user-agent,
-# so fabricate a different one.
-user_agent='Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.7.8) Gecko/20050513 Fedora/1.0.4-1.3.1 Firefox/1.0.4'
+# Many websites block wget based on user agent.  So fabricate a different one.
+#user_agent='Mozilla/5.0 (Windows; U; Windows NT 5.2; en-US; rv:1.8.1) Gecko/20061010 Firefox/2.0'
+user_agent='Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.8.1) Gecko/20061010 Firefox/2.0'
 
 cookies=$HOME/etc/misc/.wget/cookies.txt
 
