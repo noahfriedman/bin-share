@@ -4,7 +4,7 @@
 # Created: 2006-08-08
 # Public domain.
 
-# $Id$
+# $Id: strftime,v 1.2 2006/08/11 23:46:16 friedman Exp $
 
 # Commentary:
 # Code:
@@ -13,6 +13,7 @@ $^W = 1;  # enable warnings
 
 use strict;
 use POSIX qw(strftime localtime gmtime);
+use Time::Local;
 use Getopt::Long;
 use Pod::Usage;
 
@@ -33,6 +34,8 @@ my %fmt_named =
     perforce => "%Y/%m/%d:%H:%M:%S",
     p4       => q(perforce),
 
+    rcs      => sub { ($_[5] < 100 ? "%y" : "%Y") . ".%m.%d.%H.%M.%S" },
+
     full     => join ("%n",
                       "%A, %d %B %Y  %l:%M%P (%H:%M:%S %Z)",
                       "day %j; weekday %w of week %U",
@@ -44,12 +47,33 @@ my $fmt   = "default";
 my $time  = time;
 my $utc_p = 0 ;
 
-local *ztime = \&localtime;
+local *time2tm;
+local *tm2time;
 
 my @time_parser_list =
   ( [ "Time::ParseDate" => \&Time::ParseDate::parsedate ],
     [ "Date::Parse"     => \&Date::Parse::str2time      ], );
 my $tmparse;
+
+# TODO: add more cheesy parsers
+sub cheesy_date_parser
+{
+  local $_ = shift;
+
+  # ISO-8601 date format: YYYY-MM-DD HH:MM:SS-hh:mm
+  # (where hh:mm is the timezone offset from UTC)
+  # This parsing doesn't attempt to convert the originating time zone to
+  # the local time.
+  return tm2time ($6 + 0,                           # sec
+                  $5 + 0,                           # min
+                  $4 + 0,                           # hours
+                  $3 + 0,                           # mday
+                  ($2 + 0 > 0    ? $2 - 1    : 0),  # mon
+                  ($1 + 0 < 1000 ? $1 + 1900 : $1)) # year
+    if /(\d+)\D(\d+)\D(\d+)\D+(\d+)\D(\d+)\D(\d+)/;
+
+  return;
+}
 
 sub parse_time
 {
@@ -71,6 +95,7 @@ sub parse_time
     }
 
   my $result = &$tmparse ($_) if (defined $tmparse);
+  $result = cheesy_date_parser ($_) unless defined $result;
   unless (defined $result)
     {
       (my $progname = $0) =~ s=.*/==;
@@ -80,6 +105,12 @@ sub parse_time
   return $result;
 }
 
+sub set_timefns
+{
+  *time2tm = $utc_p ? \&gmtime : \&localtime;
+  *tm2time = $utc_p ? \&timegm : \&timelocal;
+}
+
 sub parse_options
 {
   my $help = -1;
@@ -87,8 +118,8 @@ sub parse_options
   local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
   Getopt::Long::config (qw(bundling auto_abbrev require_order));
   GetOptions ("h|help|usage+"  => \$help,
-              "l|localtime"    => sub { *ztime = \&localtime },
-              "g|gmtime|u|utc" => sub { *ztime = \&gmtime    },
+              "l|localtime"    => sub { $utc_p = 0 },
+              "g|gmtime|u|utc" => sub { $utc_p = 1 },
               "f|fmt|format=s" => \$fmt,
              );
 
@@ -98,10 +129,13 @@ sub parse_options
 sub main
 {
   parse_options (\@_);
+  set_timefns ();
 
   $time = parse_time (@_) if @_;
-  my @tminfo = ztime ($time);
-  $fmt = $fmt_named{$fmt} while ($fmt !~ /%/ && exists $fmt_named{$fmt});
+  my @tminfo = time2tm ($time);
+  $fmt = $fmt_named{$fmt} while (!ref $fmt && $fmt !~ /%/ && exists $fmt_named{$fmt});
+  $fmt = &$fmt (@tminfo) if ref $fmt eq 'CODE';
+
   print strftime ($fmt, @tminfo), "\n";
 }
 
