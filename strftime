@@ -4,7 +4,7 @@
 # Created: 2006-08-08
 # Public domain.
 
-# $Id: strftime,v 1.2 2006/08/11 23:46:16 friedman Exp $
+# $Id: strftime,v 1.3 2006/11/29 04:54:23 friedman Exp $
 
 # Commentary:
 # Code:
@@ -60,6 +60,9 @@ sub cheesy_date_parser
 {
   local $_ = shift;
 
+  return      $_  if /^[0-9]+$/;
+  return hex ($_) if /^(?:0x)?[0-9a-f]+$/i;
+
   # ISO-8601 date format: YYYY-MM-DD HH:MM:SS-hh:mm
   # (where hh:mm is the timezone offset from UTC)
   # This parsing doesn't attempt to convert the originating time zone to
@@ -70,7 +73,7 @@ sub cheesy_date_parser
                   $3 + 0,                           # mday
                   ($2 + 0 > 0    ? $2 - 1    : 0),  # mon
                   ($1 + 0 < 1000 ? $1 + 1900 : $1)) # year
-    if /(\d+)\D(\d+)\D(\d+)\D+(\d+)\D(\d+)\D(\d+)/;
+    if /(\d{2,4})\D(\d\d)\D(\d\d)\D+(\d\d)\D(\d\d)\D(\d\d)/;
 
   return;
 }
@@ -79,8 +82,9 @@ sub parse_time
 {
   local $_ = join (" ", @_);
 
-  return      $_  if /^[0-9]+$/;
-  return hex ($_) if /^(?:0x)?[0-9a-f]+$/i;
+  # Try this first since we have a few special cases
+  my $result = cheesy_date_parser ($_);
+  return $result if defined $result;
 
   unless (defined $tmparse)
     {
@@ -93,9 +97,7 @@ sub parse_time
           last;
         }
     }
-
-  my $result = &$tmparse ($_) if (defined $tmparse);
-  $result = cheesy_date_parser ($_) unless defined $result;
+  $result = &$tmparse ($_) if defined $tmparse;
   unless (defined $result)
     {
       (my $progname = $0) =~ s=.*/==;
@@ -186,6 +188,7 @@ I<FMT> can also be one of a predefined set of names for some canned formats, inc
 C<seconds>,
 C<iso8601>,
 C<date>,
+C<rcs>,
 C<rfc822>,
 C<perforce>,
 and
