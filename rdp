@@ -4,7 +4,7 @@
 # Created: 2005-08-10
 # Public domain
 
-# $Id$
+# $Id: mrdesktop,v 1.1 2006/02/02 17:49:46 friedman Exp $
 
 # Commentary:
 #
@@ -57,4 +57,7 @@ rdesktop -n ${RDESKTOP_CLIENT-$client} \
          -g ${RDESKTOP_GEOM-$geom} \
          -u ${RDESKTOP_USER-${LOGNAME-$USER}} \
          -a ${RDESKTOP_DEPTH-$depth} \
+         -K -P \
          ${1+"$@"} &
+
+# eof
