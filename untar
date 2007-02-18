@@ -1,5 +1,5 @@
 #! /bin/sh
-# $Id: untar,v 1.10 2005/09/14 05:02:54 friedman Exp $
+# $Id: untar,v 1.11 2005/10/19 00:46:39 friedman Exp $
 
 for f in ${1+"$@"}; do
   case "$f" in
@@ -7,7 +7,7 @@ for f in ${1+"$@"}; do
       ${GZIP-gzip} -dc "$f" | ${TAR-tar} -xpvf -
      ;;
 
-    *.tbz | *.tbz2 | *.tar.bz2 | *.xtar.bz2 | *.tar.bz )
+    *.tbz | *.tbz2 | *.tar.bz2 | *.xtar.bz2 | *.tar.bz | *.cbt )
       ${BZIP2-bzip2} -dc "$f" | ${TAR-tar} -xpvf -
      ;;
 
@@ -15,7 +15,7 @@ for f in ${1+"$@"}; do
       ${TAR-tar} -xpvf "$f"
      ;;
 
-    *.zip | *.jar )
+    *.zip | *.jar | *.cbz )
       ${UNZIP-unzip} -o "$f"
      ;;
 
@@ -27,7 +27,7 @@ for f in ${1+"$@"}; do
       ${LHA-lha} x "$f"
      ;;
 
-    *.rar )
+    *.rar | *.cbr )
       ${UNRAR-unrar} x "$f"
      ;;
 
