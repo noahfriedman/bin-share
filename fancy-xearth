@@ -5,7 +5,7 @@
 # Created: 1996-03-05
 # Public domain
 
-# $Id: fancy-xearth,v 1.8 1999/11/09 06:20:11 friedman Exp $
+# $Id: fancy-xearth,v 1.9 2001/03/18 13:41:53 friedman Exp $
 
 # Commentary:
 # Code:
@@ -19,7 +19,7 @@ export DISPLAY
   # there is more than one; if the display does not refer to a specific
   # screen (e.g. set to ":0", then the default screen should be selected.
   # To get information about a different screen, set DISPLAY to that screen.
-  xrdb_syms="`xrdb -symbols -screen`"
+  xrdb_syms=`xrdb -symbols -screen`
 
   sedfilt='s/-D.*//
            s/[ 	][ 	]*/ /g
@@ -35,8 +35,8 @@ export DISPLAY
 
 # Set X cursor to resemble star trek enterprise
 {
-  cursorfile="/tmp/ent-d.xbm$$"
-  maskfile="/tmp/ent-m.xbm$$"
+  cursorfile=/tmp/ent-d.xbm$$
+  maskfile=/tmp/ent-m.xbm$$
   trap 'rm -f "$cursorfile" "$maskfile" 2> /dev/null' 0 1 2 3 15
 
   cat > "$cursorfile" <<'__EOF_CURSORFILE__'
@@ -72,25 +72,48 @@ __EOF_MASKFILE__
 }
 
 {
-  case "$1" in
-    xearth | xplanet ) prog=$1; shift ;;
+  case $1 in
+    xearth | xplanet | xplanetbg ) prog=$1; shift ;;
     * )
       prog=xearth
       if { xplanetbg -version > /dev/null 2>&1; } 2> /dev/null; then
+        prog=xplanetbg
+      elif { xplanet -version > /dev/null 2>&1; } 2> /dev/null; then
         prog=xplanet
-      fi
-     ;;
+      fi ;;
   esac
 }
 
-case "$prog" in
+case $prog in
   xplanet )
-    prog=xplanetbg
-    case "$1" in
+    case $1 in
+      -once ) shift; set fnord -num_times    1        ${1+"$@"}; shift ;;
+      *     )        set fnord -wait      3600  -fork ${1+"$@"}; shift ;;
+    esac
+
+    # Assumes display has a 4:3 aspect ratio
+    xpos=`expr $width / 4`
+    ypos=`expr $height / 3`
+
+    set fnord \
+        -projection orthographic \
+        -radius 12 \
+        -north orbit \
+        -center +$xpos+$ypos \
+        -starfreq .0015 \
+        -light_time \
+        -searchdir $HOME/etc/images/xplanet \
+        -config default \
+        ${1+"$@"}
+    shift
+
+    $prog ${1+"$@"} ;;
+
+  xplanetbg )
+    case $1 in
       -once )
         prog=xplanet
-        shift
-       ;;
+        shift ;;
     esac
 
     # Assumes display has a 4:3 aspect ratio
@@ -108,11 +131,11 @@ case "$prog" in
         ${1+"$@"}
     shift
 
-    case "$prog" in
+    case $prog in
       xplanet ) $prog ${1+"$@"} ;;
       * ) $prog -wait 3600 -nice 19 ${1+"$@"} > /dev/null 2>&1 0<&1 & ;;
-    esac
-   ;;
+    esac ;;
+
   xearth )
     # Run xearth with computed offset and other parameters.
     # This should background itself unless this script is called with
@@ -122,7 +145,7 @@ case "$prog" in
              } 2> /dev/null` || exit 1
 
     # Align using galactic axis if available.
-    #case "$version" in
+    #case $version in
     #  1.0 ) rot=21       ;;
     #  *   ) rot=galactic ;;
     #esac
