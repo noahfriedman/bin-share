@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.5 2006/02/02 17:52:45 friedman Exp $
+# $Id: rpm-pkg-list,v 1.6 2006/02/23 01:55:13 friedman Exp $
 
 # Commentary:
 # Code:
@@ -22,6 +22,13 @@ my $header;
 my $progname;
 my $fmtsize = 0;
 
+# Meaning of fields:
+#  * column  - column number in output.
+#  * sort    - default sort precedence.
+#  * numeric - sort column numerically rather than lexicographically.
+#  * fmt     - pretty-print result; colummn width is computed based on this, but not necessarily sorting.
+#  * prefmt  - filter result, before sorting occurs; result might be transformed again by fmt function.
+#  * qf      - actual query format string for rpm -q command corresponding to field name.
 my %field
   = ( size              => { column  => 0,
                              sort    => 1,
@@ -42,14 +49,46 @@ my %field
                              numeric => 1,
                              fmt     => \&fmtdate,
                            },
+
+      repository        => { column  => 5,
+                             sort    => 5,
+                             prefmt  => \&fmtrepo,
+                             qf      => join (":",
+                                              '%|dsaheader?{%{dsaheader:pgpsig}}',
+                                              '{%|rsaheader?{%{rsaheader:pgpsig}}',
+                                              '{%|siggpg?{%{siggpg:pgpsig}}',
+                                              '{%|sigpgp?{%{sigpgp:pgpsig}}',
+                                              '{(none)}|}|}|}|',
+                                             ),
+                           },
     );
 
 my %field_alias
-  = ( date        => q(installtime),      time => q(installtime),
+  = ( date        => q(installtime),      time  => q(installtime),
       installdate => q(installtime),
-      version     => q(version-release),  ver  => q(version-release),
-      release     => q(version-release),  rel  => q(version-release),
-      package     => q(name),             pkg  => q(name),
+      version     => q(version-release),  ver   => q(version-release),
+      release     => q(version-release),  rel   => q(version-release),
+      package     => q(name),             pkg   => q(name),
+      repo        => q(repository),       depot => q(repository),
+    );
+
+my %repo_fingerprint
+  = ( '4f2a6fd2' => 'fedora-core',
+      '1ac70ce6' => 'fedora-extras',
+
+      '9c800aca' => 'SuSE',
+      '3d25d3d9' => 'SuSE-security',
+
+      'e42d547b' => 'freshrpms',
+      '66534c2b' => 'atrpms',
+      '1aa78495' => 'dries',
+
+      '6b8d79e6' => 'dag',
+      'a109b1ec' => 'livna',
+      'ff6382fa' => 'kde-redhat',
+      '22b2951d' => 'mhensler-suspend2',
+
+      '(none)'   => '(unknown)',  # unsigned, so dont know what repo it came from
     );
 
 my $datefmt = $ENV{DATEFMT} || '%Y/%m/%d:%H:%M:%S' ;
@@ -60,12 +99,36 @@ sub fieldnames
   sort { $f->{$a}->{column} <=> $f->{$b}->{column} } keys %$f;
 }
 
+sub fieldqf
+{
+  local $_ = shift;
+
+  return $field{$_}->{qf}
+    if exists $field{$_} && $field{$_}->{qf};
+
+  s/([a-z0-9:]+)/%{$1}/gi;
+  return $_;
+}
+
 sub fielderr
 {
   print join (": ", $progname, @_), "\n",
         "Valid field names are:\n\t",
         join ("\n\t", fieldnames()), "\n";
   exit (1);
+}
+
+sub field_prefmt_list
+{
+  my $any = 0;
+
+  my @prefmt = map { my $f = $field{$_}->{prefmt};
+                     $any = 1 if $f;
+                     $f;
+                   } fieldnames ();
+  return unless $any;
+  return @prefmt if wantarray;
+  return \@prefmt;
 }
 
 sub capitalize
@@ -95,6 +158,23 @@ sub fmtsize
   return sprintf ($fmtstr, $size, $suffix[0]);
 }
 
+sub fmtrepo
+{
+  local $_ = $_[0];
+  s/.*Key ID.*(........)$/$1/;
+  return $repo_fingerprint{$_} if exists $repo_fingerprint{$_};
+
+  # do a more extensive search and memoize the result so we don't have to
+  # search again for other packages with this same key.
+  my $try = rpmsigkey ($_);
+  if ($try ne '')
+    {
+      $repo_fingerprint{$_} = $try;
+      return $try;
+    }
+  $repo_fingerprint{$_} = $_;
+}
+
 
 sub cmd
 {
@@ -105,29 +185,58 @@ sub cmd
   return $fh;
 }
 
-sub rpmq
+sub rpmout
 {
   local $/ = undef;
   local $_;
 
-  my @field = fieldnames ();
-  map { s/([a-z0-9:]+)/%{$1}/gi } @field;
-
-  my $fmt = join ("|", @field) . "\n";
-  my @cmd = (qw(rpm --nodigest --nosignature),
+  my @cmd = ($ENV{RPMCMD} || 'rpm',
+             qw(--nodigest --nosignature),
              ("@_" =~ /\*/ ? '-qa' : '-q'),
-             '--qf', $fmt, @_);
+             @_);
   #print STDERR "$progname: @cmd\n";
   my $fh = cmd (@cmd);
-
   $_ = <$fh>;
-  s/^package .*? is not installed\n//gm;
-  my @lines = map { [split (/\|/, $_)] } split (/\n/, $_);
   close ($fh);
-
-  return \@lines;
+  return $_;
 }
 
+sub rpmq
+{
+  my @qf = map { fieldqf ($_) } fieldnames ();
+  my $fmt = join ("\x1", @qf) . "\n";
+
+  local $_ = rpmout ('--qf', $fmt, @_);
+  s/^package .*? is not installed\n//gm;
+
+  my @prefmt = field_prefmt_list ();
+  if (@prefmt)
+    {
+      return [map { my @f = split (/\x1/, $_);
+                    for (my $i = 0; $i < @f; $i++)
+                      {
+                        my $fn = $prefmt[$i];
+                        $f[$i] = &$fn ($f[$i]) if $fn;
+                      }
+                    \@f;
+                  } split (/\n/, $_)];
+    }
+  else
+    {
+      return [map { [split (/\x1/, $_)] } split (/\n/, $_)];
+    }
+}
+
+sub rpmsigkey
+{
+  my $fmt = '%{name}-%{version}-%{release} %{summary}';
+  local $_ = rpmout ('--qf', $fmt, '--whatprovides', "gpg($_[0])");
+  return "" if /no package provides/;
+  s/gpg\(/(/;
+  return $_;
+}
+
+
 sub sortlines
 {
   my ($lines) = @_;
@@ -136,7 +245,7 @@ sub sortlines
   map { delete $f{$_} } @$sortby;
 
   my @field = (@$sortby, fieldnames (%f));
-  #print "sortby = ", join (" ", @field), "\n";
+  #print STDERR "sortby = ", join (" ", @field), "\n";
 
   my @sorted = sort
     { my @keys = @field;
@@ -160,8 +269,11 @@ sub sortlines
 sub fmtlines
 {
   my ($lines) = @_;
-  my @fn = map { $field{$_}->{fmt} } fieldnames ();
-  my @width = (0) x @fn;
+  my @fieldnames = fieldnames ();
+  my @fn = map { $field{$_}->{fmt} } @fieldnames;
+  my @width = ($header
+               ? map { length $_ } @fieldnames
+               : (0) x @fn);
 
   map { for (my $i = 0; $i < @fn; $i++)
           {
