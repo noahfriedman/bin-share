@@ -1,12 +1,13 @@
 #!/bin/sh
 # make-backup-file-name -- print the next numbered emacs-style backup file
 #                          name for a given file on disk
-# Author: Noah Friedman <friedman@prep.ai.mit.edu>
+# Author: Noah Friedman <friedman@splode.com>
 # Created: 1994-01-14
-# Last modified: 1994-03-09
 # Public domain
 
-# Comments:
+# $Id$
+
+# Commentary:
 
 # Usage: make-backup-file-name [filename]
 #
@@ -19,33 +20,39 @@
 # Code:
 
 name=$1
-case "$VERSION_CONTROL" in
-   never | simple ) result=$name~ ;;
-   * )
-     set `for f in "$name".~*~ ; do 
-             echo "$f"
-          done \
-           | sed -ne 's/~$//
-                      s/.*\.~//
-                      p' \
-           | sort -nr` > /dev/null
-     highest=$1
-     case "$highest" in
-        '*' | '' ) highest=0 ;;
-     esac
-     case "$VERSION_CONTROL" in
-        nil | existing )
-           case "$highest" in
-             0 ) result=$name~ ;;
-           esac
-        ;;
-        t | numbered | * )
-           next=`expr $highest + 1`
-           result=$name.~$next~
-        ;;
-     esac
-   ;;
+
+case $VERSION_CONTROL in
+  never | simple )
+    result=$name~ ;;
+
+  * )
+    highest=`for f in "$name".~*~ ; do
+               echo "$f"
+             done \
+              | sed -e 's/~$//' \
+                    -e 's/.*\.~//' \
+                    -e 's/\..*//' \
+              | sort -n -r \
+              | sed -n \
+                    -e 1p \
+                    -e q`
+
+    case $highest in
+       '*' | '' ) highest=0 ;;
+    esac
+
+    case $VERSION_CONTROL in
+      nil | existing )
+        case $highest in
+          0 ) result=$name~ ;;
+        esac ;;
+
+      t | numbered | * )
+        next=`expr $highest + 1`
+        result=$name.~$next~ ;;
+    esac ;;
 esac
+
 echo "$result"
 
 # make-backup-file-name ends here
