@@ -1,14 +1,48 @@
 #! /bin/sh
-# $Id$
+# $Id: xauth-copy,v 1.2 2007/07/16 19:14:25 friedman Exp $
 
-rhost=$1
-shift
+run()
+{
+  echo + ${1+"$@"} 1>&2
+  ${1+"$@"}
+}
 
-case $# in
-  0 )
-    set fnord $DISPLAY
-    shift
-   ;;
-esac
+run_xauth()
+{
+   XAUTH=${XAUTH-xauth}
+  RXAUTH=${RXAUTH-$XAUTH}
+   REMSH=${REMSH-ssh}
 
-xauth extract - ${1+"$@"} | ${RSH-rsh} $rhost ${RXAUTH-xauth} merge -
+  file=$1
+  shift
+
+  case $file in
+    *:* )
+      host=`echo "$file" | sed -e 's/^\([^:]*\):.*/\1/'`
+      file=`echo "$file" | sed -e 's/^[^:]*://'`
+      run "$REMSH" "$host" "$RXAUTH" -f "$file" ${1+"$@"} ;;
+    * )
+      run "$XAUTH" -f "$file" ${1+"$@"} ;;
+  esac
+}
+
+main()
+{
+   key=${1-$DISPLAY}
+  from=${2-$HOME/.Xauthority}
+    to=${3-$HOME/etc/misc/.Xauthority}
+
+  case $key in
+    localhost:* | localhost.*:* ) key=`echo "$key" | sed -e 's/.*:/unix:/'` ;;
+  esac
+
+  data=`run_xauth "$from" nextract - "$key"`
+  case $data in
+    '' ) exit 1 ;;
+  esac
+  echo "$data" | run_xauth "$to" nmerge -
+}
+
+main ${1+"$@"}
+
+# eof
