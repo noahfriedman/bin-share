@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.6 2006/02/23 01:55:13 friedman Exp $
+# $Id: rpm-pkg-list,v 1.7 2007/07/17 00:59:40 friedman Exp $
 
 # Commentary:
 # Code:
@@ -75,6 +75,13 @@ my %field_alias
 my %repo_fingerprint
   = ( '4f2a6fd2' => 'fedora-core',
       '1ac70ce6' => 'fedora-extras',
+      '30c9ecf8' => 'fedora-test',
+      '1cddbca9' => 'fedora-rawhide',
+      '731002fa' => 'fedora-legacy',
+
+      'db42a60e' => 'redhat',
+      '897da07a' => 'redhat-beta',
+      'e418e3aa' => 'redhat-rawhide',
 
       '9c800aca' => 'SuSE',
       '3d25d3d9' => 'SuSE-security',
