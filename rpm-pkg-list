@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.7 2007/07/17 00:59:40 friedman Exp $
+# $Id: rpm-pkg-list,v 1.8 2007/07/21 00:04:37 friedman Exp $
 
 # Commentary:
 # Code:
@@ -90,6 +90,7 @@ my %repo_fingerprint
       '66534c2b' => 'atrpms',
       '1aa78495' => 'dries',
 
+      'ba392878' => 'splode',
       '6b8d79e6' => 'dag',
       'a109b1ec' => 'livna',
       'ff6382fa' => 'kde-redhat',
