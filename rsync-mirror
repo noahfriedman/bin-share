@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: rsync-mirror,v 1.2 2006/09/18 23:28:59 friedman Exp $
+# $Id: rsync-mirror,v 1.3 2006/11/01 01:50:29 friedman Exp $
 
 RSYNC_RSH=${RSYNC_RSH-rsh}
 export RSYNC_RSH
@@ -23,9 +23,12 @@ set x \
 	--group		\
 	--perms		\
 	--times		\
+	${RSYNC_NOACLS-"--acls"} \
+	${RSYNC_NOXATTR-"--xattrs"} \
 			\
 	--hard-links	\
 	--links		\
+        --specials      \
 			\
 	--delete	\
 	--force		\
