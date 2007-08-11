@@ -1,0 +1,36 @@
+#!/bin/sh
+# $Id$
+
+# Like `ldd', but just print the immediate shared library dependency names
+# of the specified elf object.  `ldd' does a recursive traversal of the
+# object and all its dependencies' dependencies, and prints out the full
+# list of dependencies and their resolved filesystem path.
+
+needed()
+{
+  readelf=${READELF-readelf}
+  readelf -d "$1" \
+    | sed -e '/NEEDED/!d' \
+          -e 's/^.*NEEDED.*Shared library: *//' \
+          -e 's/\[\(.*\)\]/\1/'
+}
+
+main()
+{
+  case $# in
+    0 ) echo "Usage: $0 [files ...]" 1>&2
+        exit 1 ;;
+
+    1 ) needed "$1" ;;
+
+    * ) for f in ${1+"$@"}; do
+          echo "$f:"
+          needed "$1" | sed -e 's/^/	/'
+          echo
+        done ;;
+  esac
+}
+
+main ${1+"$@"}
+
+# eof
