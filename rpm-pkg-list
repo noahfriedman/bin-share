@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.8 2007/07/21 00:04:37 friedman Exp $
+# $Id: rpm-pkg-list,v 1.9 2007/08/03 06:56:04 friedman Exp $
 
 # Commentary:
 # Code:
@@ -95,6 +95,7 @@ my %repo_fingerprint
       'a109b1ec' => 'livna',
       'ff6382fa' => 'kde-redhat',
       '22b2951d' => 'mhensler-suspend2',
+      'a9464aa9' => 'pidgin',
 
       '(none)'   => '(unknown)',  # unsigned, so dont know what repo it came from
     );
