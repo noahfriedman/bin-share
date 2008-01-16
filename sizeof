@@ -1,0 +1,30 @@
+#!/bin/sh
+# sizeof -- print size of standard C types
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2007-03-23
+# Public domain.
+
+# $Id$
+
+# Commentary:
+# Code:
+
+cd ${TMPDIR-/tmp} || exit 1
+
+file="sizeof$$"
+trap 'rm -f $file $file.[co]' 0 1 2 3 15
+
+cat > $file.c <<__EOF__
+  #include <stdio.h>
+  #include <sys/types.h>
+
+  main ()
+  {
+    printf ("%ld\n", sizeof ($*));
+    return 0;
+  }
+__EOF__
+
+${CC-cc} $CFLAGS $file.c -o $file && ./$file
+
+# eof
