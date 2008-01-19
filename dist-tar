@@ -1,5 +1,5 @@
 #! /bin/sh
-# $Id: dist-tar,v 1.1 1997/09/23 19:27:42 friedman Exp $
+# $Id: dist-tar,v 1.2 2005/11/29 17:04:59 friedman Exp $
 
 LC_COLLATE=C
 export LC_COLLATE
@@ -7,6 +7,11 @@ export LC_COLLATE
 if ${TAR-tar} --version 2>&1 | grep 'GNU tar' > /dev/null; then
   gnutar=t
 fi
+
+case ${DIST_TAR_ZIP-gzip} in
+  gzip  ) zip=gzip  z=gz ;;
+  bzip2 ) zip=bzip2 z=bz2 ;;
+esac
 
 for dir in ${1+"$@"} ; do
   # Protect against accidental trailing slash, i.e. if someone does
@@ -16,18 +21,18 @@ for dir in ${1+"$@"} ; do
     */ ) dir=`echo "$dir" | sed -e 's=/$==g'` ;;
   esac
 
-  echo "dist-tar: packing $dir.tar.gz"
+  echo "dist-tar: packing $dir.tar.$z"
 
   { case $gnutar in
       t ) find "$dir" -print \
            | sort \
            | ${TAR-tar} --no-recursion -T - -cvf - \
-           | gzip --best > "$dir.tar.gz" ;;
+           | $zip --best > "$dir.tar.$z" ;;
 
       * ) ${TAR-tar} -cvf - "$dir" \
-           | gzip --best > "$dir.tar.gz" ;;
+           | $zip --best > "$dir.tar.$z" ;;
     esac
-  } && touch -r "$dir" "$dir.tar.gz" \
+  } && touch -r "$dir" "$dir.tar.$z" \
     && rm -rf "$dir"
 done
 
