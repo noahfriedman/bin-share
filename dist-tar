@@ -1,5 +1,5 @@
 #! /bin/sh
-# $Id: dist-tar,v 1.2 2005/11/29 17:04:59 friedman Exp $
+# $Id: dist-tar,v 1.3 2008/01/19 07:40:35 friedman Exp $
 
 LC_COLLATE=C
 export LC_COLLATE
@@ -9,8 +9,9 @@ if ${TAR-tar} --version 2>&1 | grep 'GNU tar' > /dev/null; then
 fi
 
 case ${DIST_TAR_ZIP-gzip} in
-  gzip  ) zip=gzip  z=gz ;;
-  bzip2 ) zip=bzip2 z=bz2 ;;
+  gzip  ) zip=gzip  z=gz   ;;
+  bzip2 ) zip=bzip2 z=bz2  ;;
+  lzma  ) zip=lzma  z=lzma ;;
 esac
 
 for dir in ${1+"$@"} ; do
