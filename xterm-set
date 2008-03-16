@@ -4,7 +4,7 @@
 # Created: 1991-06-26
 # Public domain
 
-# $Id: xterm-set,v 2.2 2001/01/03 21:11:02 friedman Exp $
+# $Id: xterm-set,v 2.3 2006/03/17 16:53:12 friedman Exp $
 
 # Commentary:
 
@@ -62,8 +62,14 @@ my %ctlseq = (
  '132col'                  => [ 803, "\e[?3h", "", "Switch to 132 columns"],
  '80col'                   => [ 804, "\e[?3l", "", "Switch to 80 columns"],
 
- 'height'                  => [ 805, "\e[8;%s;;t", "lines", "Set window height in lines"],
- 'width'                   => [ 806, "\e[8;;%s;t", "cols",  "Set window width in columns"],
+ 'width'                   => [ 805, "\e[8;;%st", "cols",  "Set window width in columns"],
+ 'height'                  => [ 806, "\e[8;%s;t", "lines", "Set window height in lines"],
+
+ 'xsize'                   => [ 807, "\e[4;;%st", "", "Set window width in pixels"],
+ 'ysize'                   => [ 808, "\e[4;%s;t", "", "Set window height in pixels"],
+
+ 'xpos'                    => [ 809, "\e[3;%s;t", "", "Set windows's X coordinate"],
+ 'ypos'                    => [ 810, "\e[3;;%st", "", "Move window"],
 
  'fixcurses'               => [ 901, "\e[?41h", "", "Work around curses bugs"],
  'no-fixcurses'            => [ 902, "\e[?41l", "", "Do not work around curses bugs"],
