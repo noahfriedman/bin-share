@@ -1,12 +1,12 @@
 #!/usr/bin/env perl
 # mkpass --- prompt for cleartext password and echo crypted result
 
-# Copyright (C) 1993, 1994, 1996, 1997, 2005 Noah S. Friedman
+# Copyright (C) 1993, 1994, 1996, 1997, 2005, 2008 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1993-09-26
 
-# $Id: mkpass,v 1.6 2006/01/13 21:25:23 friedman Exp $
+# $Id: mkpass,v 1.7 2006/01/13 22:19:06 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -37,8 +37,25 @@ my $salt;
 my $method;
 my $interactivep;
 
-my %crypt_fn = ( des => \&crypt_des,
-                 md5 => \&crypt_md5 );
+my %crypt_salt
+  = ( des    => { prefix => '',
+                  len    => 2,
+                },
+
+      md5    => { prefix => '$1$',
+                  len    => 8,
+                },
+
+      sha256 => { prefix => '$5$',
+                  len    => 16,
+                },
+
+      sha512 => { prefix => '$6$',
+                  len    => 16,
+                },
+    );
+
+my $opt_methods = join ("|", sort keys %crypt_salt);
 
 sub usage
 {
@@ -53,13 +70,15 @@ Options are:
 -s, --salt     SALT          Use SALT to encode cleartext.
                              Default is to generate a random sequence.
                              SALT should be a 2-letter sequence for DES
-                             style encryption, or an 8-letter sequence
-                             optionally prefixed by \`\$1\$' for MD5 style.
+                             style encryption, an 8-letter sequence
+                             optionally prefixed by \`\$1\$' for MD5 style,
+                             Or a 16-letter sequence for SHA256/SHA512.
 
--m, --method   [md5|des]
---md5                        Choose an encryption algorithm.
---des                        Default depends on supplied SALT, or \`des'
+-m, --method   [$opt_methods]
+                             Choose an encryption algorithm.
+                             Default depends on supplied SALT, or \`des'
                              if no salt is supplied.
+--[$opt_methods]	Use corresponding method.
 
 If cleartext is not specified on the command line, it will be prompted for
 interactively.  Specifying the cleartext on the command line is less secure
@@ -76,8 +95,7 @@ sub parse_options
   Getopt::Long::config ('bundling', 'autoabbrev');
   GetOptions ("s|salt=s",      \$salt,
               "m|method=s",    \$method,
-              "md5",           sub { $method = 'md5' },
-              "des",           sub { $method = 'des' },
+              (map { $_, sub { $method = $_[0] }, } keys %crypt_salt),
               "i|interactive", \$interactivep,
               "h|help",        \&usage);
 
@@ -88,13 +106,12 @@ sub parse_options
              : 'des')
     unless defined $method;
 
-  unless (exists $crypt_fn{$method})
+  unless (exists $crypt_salt{$method})
     {
       print STDERR "$progname: $method: Unknown encryption method.\n";
       exit (1);
     }
 }
-
 
 sub input_noecho
 {
@@ -165,38 +182,32 @@ sub gensalt
   my $sclen = length ($sc) + 1;
 
   join ("", map { substr ($sc, int (rand () * 100000) % $sclen, 1) }
-                (0 .. $saltlen));
+                (1 .. $saltlen));
 }
 
-sub crypt_des
+sub crypt_with_method
 {
-  my ($pass, $salt) = @_;
+  my ($method, $pass, $salt) = @_;
 
-  $salt = gensalt (2) unless defined $salt;
-  $salt =~ s/^\$1\$//; # strip md5 tag if using des
-  return crypt ($pass, $salt);
-}
-
-sub crypt_md5
-{
-  my ($pass, $salt) = @_;
+  my $prefix  = $crypt_salt{$method}->{prefix};
+  my $saltlen = $crypt_salt{$method}->{len};
 
   if (! defined $salt)
     {
-      $salt = '$1$' . gensalt (8);
+      $salt = $prefix . gensalt ($saltlen);
     }
-  elsif ($salt !~ /^\$1\$/)
+  else
     {
-      $salt = '$1$' . $salt;
+      $salt =~ s/^\$\d+\$//;
+      $salt = $prefix . $salt;
     }
 
   my $result = crypt ($pass, $salt);
   if (length $result == 13
-      && substr ($result, 0, 3) ne '$1$')
+      && substr ($result, 0, 3) ne $prefix)
     {
       print STDERR "$progname: warning: system does not seem to support",
-                   " MD5 hashes; using DES instead.\n";
-      return crypt_des (@_);
+                   " $method hashes; used DES instead.\n";
     }
   return $result;
 }
@@ -228,8 +239,7 @@ sub main
       chomp $pass;
     }
 
-  my $crypt = $crypt_fn{$method};
-  print &$crypt ($pass, $salt), "\n";
+  print crypt_with_method ($method, $pass, $salt), "\n";
 }
 
 main (@ARGV);
