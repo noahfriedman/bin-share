@@ -1,9 +1,9 @@
 #! /bin/sh
-# $Id$
+# $Id: soa-serial,v 1.2 2003/11/16 03:18:51 friedman Exp $
 
 # multiline is a dig 9.x option; ignore error in older versions because
 # they print soa entries in multiline format already anyway.
-dig "$1" soa +multiline 2> /dev/null \
+dig ${1+"$@"} soa +multiline 2> /dev/null \
  | sed -ne "/^$dom.*SOA/{
               :l
               /;.*serial/!{
