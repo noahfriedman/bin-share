@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.55 2007/07/17 01:06:18 friedman Exp $
+# $Id: from,v 1.56 2008/04/01 14:20:05 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -235,6 +235,7 @@ sub parse_options ()
                                                 $opt_match_regexp = $_[1]; },
               "U|user=s",                 \$opt_user,
               "u|unread-only",            \$opt_unread_only,
+              "utf8|utf-8",               \$opt_utf8,
               # For debugging
               "w|warnings",               \$^W);
 
@@ -242,6 +243,7 @@ sub parse_options ()
   set_me_match () unless (defined $opt_me_match);
   # User might have set opt_pass in fromrc using a backquoted substitution
   chop $opt_pass if (substr ($opt_pass, -1, 1) eq "\n");
+  push @rfc1522_charset, 'utf-8' if $opt_utf8;
 }
 
 sub main ()
@@ -968,17 +970,20 @@ sub qp_decode ($)
 # For a description of the windows codepages see emacs 22's
 # lisp/international/codepage.el
 # cp1252 is identical to iso-8859-1.
-my $rfc1522_charset = join ("|", qw(iso-8859-1 windows-1252 us-ascii));
+@rfc1522_charset = (qw(iso-8859-1 windows-1252 us-ascii));
+my $rfc1522_charset_re;
 
 sub parse_rfc1522 ($)
 {
   my $input = shift;
   my $result = "";
 
+  $rfc1522_charset_re = join ("|", @rfc1522_charset) unless $rfc1522_charset_re;
+
   # Perl regexp notes:
   #   *?     provides non-greedy matching
   #   (?:re) provides grouping without creating a saved register
-  while ($input =~ m/(.*?)=\?(?:$rfc1522_charset)\?([^?]).*?\?([^?]*)\?=/gcio)
+  while ($input =~ m/(.*?)=\?(?:$rfc1522_charset_re)\?([^?]).*?\?([^?]*)\?=/gcio)
     {
       $result .= $1;
       my $encoding = lc ($2);
