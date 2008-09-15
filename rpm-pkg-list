@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.10 2007/11/30 05:27:00 friedman Exp $
+# $Id: rpm-pkg-list,v 1.11 2008/03/26 23:37:18 friedman Exp $
 
 # Commentary:
 # Code:
@@ -73,12 +73,19 @@ my %field_alias
     );
 
 my %repo_fingerprint
-  = ( '4f2a6fd2' => 'fedora-core',
+  = (
+      # only used for fedora 8/9 updates
+      '48b5d596' => 'fedora-8or9',
+      '48b5da95' => 'fedora-8or9-test',
+
+      # These fedora keys are discontinued as of 9/2008
+      '4f2a6fd2' => 'fedora-core',
       '1ac70ce6' => 'fedora-extras',
       '30c9ecf8' => 'fedora-test',
       '1cddbca9' => 'fedora-rawhide',
       '731002fa' => 'fedora-legacy',
 
+      # Note: these redhat keys should be discontinued as of 9/2008
       'db42a60e' => 'redhat',
       '897da07a' => 'redhat-beta',
       'e418e3aa' => 'redhat-rawhide',
@@ -239,10 +246,11 @@ sub rpmq
 
 sub rpmsigkey
 {
-  my $fmt = '%{name}-%{version}-%{release} %{summary}';
+  my $fmt = '%{summary}';
   local $_ = rpmout ('--qf', $fmt, '--whatprovides', "gpg($_[0])");
   return "" if /no package provides/;
   s/gpg\(/(/;
+  s/\).*/) $_[0]/;
   return $_;
 }
 
