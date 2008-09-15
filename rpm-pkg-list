@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.11 2008/03/26 23:37:18 friedman Exp $
+# $Id: rpm-pkg-list,v 1.12 2008/09/15 00:52:37 friedman Exp $
 
 # Commentary:
 # Code:
@@ -75,8 +75,8 @@ my %field_alias
 my %repo_fingerprint
   = (
       # only used for fedora 8/9 updates
-      '48b5d596' => 'fedora-8or9',
-      '48b5da95' => 'fedora-8or9-test',
+      '6df2196f' => 'fedora-8or9',
+      'df9b0ae9' => 'fedora-8or9-test',
 
       # These fedora keys are discontinued as of 9/2008
       '4f2a6fd2' => 'fedora-core',
