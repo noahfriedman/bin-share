@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.12 2008/09/15 00:52:37 friedman Exp $
+# $Id: rpm-pkg-list,v 1.13 2008/09/15 19:08:03 friedman Exp $
 
 # Commentary:
 # Code:
@@ -40,6 +40,7 @@ my %field
                            },
       'version-release' => { column  => 2,
                              sort    => 2,
+                             compare => \&cmp_version_release,
                            },
       arch              => { column  => 3,
                              sort    => 3,
@@ -64,12 +65,12 @@ my %field
     );
 
 my %field_alias
-  = ( date        => q(installtime),      time  => q(installtime),
-      installdate => q(installtime),
-      version     => q(version-release),  ver   => q(version-release),
-      release     => q(version-release),  rel   => q(version-release),
-      package     => q(name),             pkg   => q(name),
-      repo        => q(repository),       depot => q(repository),
+  = ( date        => q(installtime),      time      => q(installtime),
+      installdate => q(installtime),      installed => q(installtime),
+      version     => q(version-release),  ver       => q(version-release),
+      release     => q(version-release),  rel       => q(version-release),
+      package     => q(name),             pkg       => q(name),
+      repo        => q(repository),       depot     => q(repository),
     );
 
 my %repo_fingerprint
@@ -255,6 +256,47 @@ sub rpmsigkey
 }
 
 
+# Break down a version string (x.y.z) into individual fields and compare
+# each corresponding field.
+# For corresponding fields that are both numeric, use `<=>'.
+# If either or both are non-numeric, use `cmp'.
+# Return [-1,0,1] for the overall comparison.
+sub cmp_version
+{
+  my @a = split (/[.]/, $_[0]);
+  my @b = split (/[.]/, $_[1]);
+  my $j = (@a < @b ? @a : @b);
+  for (my $i = 0; $i < $j; $i++)
+    {
+      my $cmp = ($a[$i] =~ /^\d+$/ && $b[$i] =~ /^\d+$/
+                 ? $a[$i] <=> $b[$i]
+                 : $a[$i] cmp $b[$i]);
+      return $cmp if $cmp != 0;
+    }
+  # If all the components up to $j are identical, then the shorter array is
+  # 'less' than the larger one.
+  return -1 if @a  < @b;
+  return  0 if @a == @b;
+  return  1 if @a  > @b;
+}
+
+# Split version-release string at hyphen and compare each separately
+# according to `cmp_version' (which see).
+sub cmp_version_release
+{
+  my @a = split (/[-]/, $_[0], 2);
+  my @b = split (/[-]/, $_[1], 2);
+  my $j = (@a < @b ? @a : @b);
+  for (my $i = 0; $i < $j; $i++)
+    {
+      my $cmp = cmp_version ($a[$i], $b[$i]);
+      return $cmp if $cmp != 0;
+    }
+  return -1 if @a  < @b;
+  return  0 if @a == @b;
+  return  1 if @a  > @b;
+}
+
 sub sortlines
 {
   my ($lines) = @_;
@@ -273,10 +315,18 @@ sub sortlines
         {
           my $key = shift @keys;
           my $i = $field{$key}->{column};
-          my $np = $field{$key}->{numeric};
-          $res = ($np
-                  ? $x->[$i] <=> $y->[$i]
-                  : $x->[$i] cmp $y->[$i]);
+          my $cmp = $field{$key}->{compare};
+          if ($cmp)
+            {
+              $res = &$cmp ($x->[$i], $y->[$i]);
+            }
+          else
+            {
+              my $np = $field{$key}->{numeric};
+              $res = ($np
+                      ? $x->[$i] <=> $y->[$i]
+                      : $x->[$i] cmp $y->[$i]);
+            }
           last if $res;
         }
       $res;
