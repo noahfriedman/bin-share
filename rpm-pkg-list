@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.13 2008/09/15 19:08:03 friedman Exp $
+# $Id: rpm-pkg-list,v 1.14 2008/09/17 23:48:58 friedman Exp $
 
 # Commentary:
 # Code:
@@ -93,6 +93,9 @@ my %repo_fingerprint
 
       '9c800aca' => 'SuSE',
       '3d25d3d9' => 'SuSE-security',
+
+      '49c8885a' => 'rpmfusion-free',
+      'b1981b68' => 'rpmfusion-nonfree',
 
       'e42d547b' => 'freshrpms',
       '66534c2b' => 'atrpms',
