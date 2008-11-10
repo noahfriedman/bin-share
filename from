@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.56 2008/04/01 14:20:05 friedman Exp $
+# $Id: from,v 1.57 2008/08/21 03:58:48 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -980,15 +980,25 @@ sub parse_rfc1522 ($)
 
   $rfc1522_charset_re = join ("|", @rfc1522_charset) unless $rfc1522_charset_re;
 
-  # Perl regexp notes:
-  #   *?     provides non-greedy matching
-  #   (?:re) provides grouping without creating a saved register
-  while ($input =~ m/(.*?)=\?(?:$rfc1522_charset_re)\?([^?]).*?\?([^?]*)\?=/gcio)
+  while ($input =~ m/(.*?)=\?($rfc1522_charset_re)\?([^?]).*?\?([^?]*)\?=/gcio)
     {
       $result .= $1;
-      my $encoding = lc ($2);
-      $result .= qp_decode ($3)     if ($encoding eq 'q');
-      $result .= base64_decode ($3) if ($encoding eq 'b');
+      my $charset = lc ($2);
+      my $encoding = lc ($3);
+
+      my $decoded = ($encoding eq 'q'
+                     ? qp_decode ($4)
+                     : ($encoding eq 'b'
+                        ? base64_decode ($4)
+                        : $4));
+      if ($opt_utf8)
+        {
+          use Encode;
+          #$decoded = decode ($charset, $decoded);
+          $decoded = encode ('utf8', $decoded);
+        }
+
+      $result .= $decoded;
     }
   return $input if ($result eq "");
   return $result . substr ($input, pos $input);
