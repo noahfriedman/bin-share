@@ -3,7 +3,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Public domain.
 
-# $Id
+# $Id$
 
 # Commentary:
 # Code:
@@ -21,6 +21,7 @@ Options are:
 -n, --name         NAME		   Set server desktop-name.
 -d, --display      VNCDISPLAY      Set server display number.
 -g, --geometry     WIDTHxHEIGHT    Set server size.
+-D, --depth        DEPTH           Set framebuffer depth: 8, 16, or 24
 "
 
 # Usage: eval "$getopt"; value=$optarg
@@ -62,6 +63,7 @@ getopt='
   }'
 
 geom=1024x768
+depth=24
 name=Xvnc
 
 # Parse command line arguments.
@@ -77,9 +79,13 @@ while : ; do
       echo "$usage" 1>&2
       exit 0 ;;
 
-    -d | --display* | --d* )
+    -d | --display* | --di* )
       eval "$getopt"
       XVNCDISPLAY=$optarg ;;
+
+    -D | --depth* | --de* )
+      eval "$getopt"
+      depth=$optarg ;;
 
     -g | --geometry* | --g* )
       eval "$getopt"
@@ -173,7 +179,7 @@ esac
 set fnord ${Xvnc-vncserver} \
           :$displaynum \
           -geometry $geom \
-          -depth 24 \
+          -depth $depth \
           -name $name \
           ${1+"$@"}
 shift
