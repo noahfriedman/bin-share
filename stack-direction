@@ -4,7 +4,7 @@
 # Created: 2002-10-09
 # Public domain.
 
-# $Id$
+# $Id: stack-direction,v 2.1 2002/10/09 22:16:20 friedman Exp $
 
 # Commentary:
 
@@ -22,8 +22,8 @@ file="stackdir$$"
 trap 'rm -f "$file" "${file}".[acos]' 0 1 2 3 15
 
 {
-  echo 'sub (char *a) { char b; exit (&b < a); }'
-  echo 'main () { char a; sub (&a); }'
+  echo 'int sub (char *a) { char b; return (&b < a); }'
+  echo 'int main () { char a; return sub (&a); }'
 } > "${file}.c"
 
 ${CC-cc} $CFLAGS "${file}.c" -o "./$file" || exit 1
