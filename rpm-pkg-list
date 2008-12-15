@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.14 2008/09/17 23:48:58 friedman Exp $
+# $Id: rpm-pkg-list,v 1.15 2008/11/08 05:21:59 friedman Exp $
 
 # Commentary:
 # Code:
@@ -75,6 +75,8 @@ my %field_alias
 
 my %repo_fingerprint
   = (
+      '4ebfc273' => 'fedora-10',
+
       # only used for fedora 8/9 updates
       '6df2196f' => 'fedora-8or9',
       'df9b0ae9' => 'fedora-8or9-test',
