@@ -1,0 +1,128 @@
+#!/usr/bin/env perl
+# flickr-scrape-set --- scrape flickr web sets for image urls
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2009-01-28
+# Public domain
+
+# $Id$
+
+# Commentary:
+# Code:
+
+$^W = 1; # enable warnings
+
+use LWP;
+use URI;
+use strict;
+
+# Probably needs more error checking, but I don't want to turn this into
+# another full-blown lwp-request script.
+sub http_get
+{
+  my $url = shift;
+
+  my $request = HTTP::Request->new ('GET');
+  my $ua      = LWP::UserAgent->new;
+  my $uri     = URI->new ($url);
+
+  $request->url ($uri);
+  my $response = $ua->request ($request);
+
+  return $response->content;
+}
+
+# Get all of the top pages of the set, if there are continuations.
+# Returns an array of the html content of each
+sub set_pages
+{
+  my ($first) = @_;
+  $first .= "/" unless $first =~ m=/$=;
+
+  my $base = $first;
+  $base =~ s=^(.*?//.*?)/.*=$1=;
+
+  my @to_process = ($first);
+  my @pages;
+  my %mapped = ($first => 1);
+
+  while (@to_process)
+    {
+      my $page = shift @to_process;
+      my $content = http_get ($page);
+      push @pages, $content;
+
+      while ($content =~ m|\G.*?href="(/[^"]*/?page=\d+)"|sg)
+        {
+          my $new = $base . $1;
+          push @to_process, $new unless exists $mapped{$new};
+          $mapped{$new} = 1;
+        }
+    }
+
+  return \@pages;
+}
+
+# Return a list of all individual image pages in the set
+sub set_links
+{
+  my ($pages) = @_;
+  local $_;
+  my @href;
+
+  map {
+    while (m|\G.*?href="([^"]*/set-\d+/)"|sg)
+      {
+        push @href, $1;
+      }
+  } @$pages;
+
+  return \@href;
+}
+
+# Take the image page urls and get the download page for the specified size
+sub size_url
+{
+  my ($size, $href) = @_;
+  my @osize;
+
+  for my $url (@$href)
+    {
+      my $s = $url;
+      $s =~ s=/in/set-=/sizes/$size/in/set-=;
+      push @osize, $s;
+    }
+  return \@osize;
+}
+
+# Scrape the download page and get the actual image url
+sub image_url
+{
+  my ($page_url) = @_;
+
+  my $content = http_get ($page_url);
+  return join (".", $1, $2)
+    if $content =~ m|="([^"]+)_d\.(jpg)"|;
+}
+
+sub main
+{
+  my ($set_url, $size) = @_;
+
+  return unless defined $set_url; # todo: write usage fn
+  $size = 'o' unless defined $size;
+
+  my $base = $set_url;
+  $base =~ s=^(.*?//.*?)/.*=$1=;
+
+  my $pages = set_pages ($set_url);
+  my $links = set_links ($pages);
+  my $orig_size_url = size_url ($size, $links);
+
+  map { $_ = $base . $_ } @$orig_size_url;   # Modify array by side effect
+  map { print image_url ($_), "\n" } @$orig_size_url;
+}
+
+#@ARGV = ("http://flickr.com/photos/inoah/sets/72157612135568290/", 'o') unless @ARGV;
+main (@ARGV);
+
+# eof
