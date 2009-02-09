@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: elf-needed,v 1.1 2007/08/11 00:35:32 friedman Exp $
+# $Id: elf-needed,v 1.2 2008/07/14 18:23:58 friedman Exp $
 
 # Like `ldd', but just print the immediate shared library dependency names
 # of the specified elf object.  `ldd' does a recursive traversal of the
@@ -11,6 +11,7 @@ needed()
   readelf=${READELF-readelf}
   readelf -d "$1" \
     | sed -e '/RUNPATH/{s/.*runpath: \[\(.*\)\]/RUNPATH=\1/p;}' \
+          -e '/RPATH/{s/.*rpath: \[\(.*\)\]/RPATH=\1/p;}' \
           -e '/NEEDED/!d' \
           -e 's/^.*NEEDED.*Shared library: *//' \
           -e 's/\[\(.*\)\]/\1/'
