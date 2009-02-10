@@ -1,27 +1,10 @@
 #!/usr/bin/env perl
 # mkpass --- prompt for cleartext password and echo crypted result
-
-# Copyright (C) 1993, 1994, 1996, 1997, 2005, 2008 Noah S. Friedman
-
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1993-09-26
+# Public domain
 
-# $Id: mkpass,v 1.7 2006/01/13 22:19:06 friedman Exp $
-
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2, or (at your option)
-# any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, you can either send email to this
-# program's maintainer or write to: The Free Software Foundation,
-# Inc.; 51 Franklin Street, Fifth Floor; Boston, MA 02110-1301, USA.
+# $Id: mkpass,v 1.8 2008/04/16 00:35:37 friedman Exp $
 
 # Commentary:
 # Code:
@@ -33,7 +16,10 @@ use POSIX;
 $^W = 1;  # enable warnings
 
 my $progname;
+($progname = $0) =~ s|.*/||;
+
 my $salt;
+my $cost;
 my $method;
 my $interactivep;
 
@@ -46,12 +32,30 @@ my %crypt_salt
                   len    => 8,
                 },
 
+      # glibc 2.7 and later
       sha256 => { prefix => '$5$',
                   len    => 16,
                 },
 
+      # glibc 2.7 and later
       sha512 => { prefix => '$6$',
                   len    => 16,
+                },
+
+      # NetBSD, FreeBSD, Solaris 9 and later
+      bsdbf  => { prefix => '$2a$',
+                  len    => 16,
+                  cost   => \&bsdbf_cost,
+                  encode => \&base64_encode,
+                },
+
+      # Solaris.  See /etc/security/crypt.conf
+      # The salt can be arbitrarily long for this implementation, but the
+      # function fails on larger salts as the number of rounds increases.
+      sunmd5 => { prefix => '$md5$',
+                  len    => sub { 16 },  # default, but exact not required
+                  cost   => sub { sprintf ("rounds=%d\$", $_[0] || 904) },
+                  encode => sub { $_[0] . '$dummy' },
                 },
     );
 
@@ -59,7 +63,7 @@ my $opt_methods = join ("|", sort keys %crypt_salt);
 
 sub usage
 {
-  print "Usage: $progname {options} {cleartext}
+  print STDERR "Usage: $progname {options} {cleartext}
 
 Options are:
 -D, --debug                  Enable debugging.
@@ -74,6 +78,10 @@ Options are:
                              optionally prefixed by \`\$1\$' for MD5 style,
                              Or a 16-letter sequence for SHA256/SHA512.
 
+-c, --cost     COST          \"Cost\" (e.g. number of rounds) for some algorithms.
+                             This is only used for some algorithms,
+                             e.g. \`bsdbf' or \`sunmd5'.
+
 -m, --method   [$opt_methods]
                              Choose an encryption algorithm.
                              Default depends on supplied SALT, or \`des'
@@ -87,13 +95,18 @@ You can also feed the cleartext password as input using a pipe.\n";
   exit (1);
 }
 
+sub diag
+{
+  print STDERR join (": ", $progname, @_), "\n";
+}
+
 sub parse_options
 {
-  ($progname = $0) =~ s|.*/||;
   $interactivep = -t STDIN;
 
   Getopt::Long::config ('bundling', 'autoabbrev');
   GetOptions ("s|salt=s",      \$salt,
+              "c|cost=i",      \$cost,
               "m|method=s",    \$method,
               (map { $_, sub { $method = $_[0] }, } keys %crypt_salt),
               "i|interactive", \$interactivep,
@@ -108,7 +121,7 @@ sub parse_options
 
   unless (exists $crypt_salt{$method})
     {
-      print STDERR "$progname: $method: Unknown encryption method.\n";
+      diag ($method, "Unknown encryption method.");
       exit (1);
     }
 }
@@ -123,28 +136,29 @@ sub input_noecho
                     QUIT =>  3,
                     TERM => 15);
   my %sig_orig;
+  my $fd = fileno (STDIN);
 
   # If stdin is a tty, disable echo while reading password.
   if (-t STDIN)
     {
       $tty = POSIX::Termios->new;
-      my $fd = fileno (STDIN);
-
       $tty->getattr ($fd);
       $c_lflag = $tty->getlflag;
 
       # Set up handlers to restore tty on typical signals
       my $restore = sub {
         $tty->setlflag ($c_lflag);
-        $tty->setattr (fileno (STDIN));
+        $tty->setattr ($fd);
         my $signum = $trap_sigs{$_[0]};
-        print STDERR "\nExiting on signal $signum (SIG$_[0])\n";
+        print STDERR "\n";
+        diag ("Exiting on signal $signum (SIG$_[0])");
         # 7th bit set indicates lower 6 bits represent a
         # signal number (0x80 == 2**7)
         exit (0x80 | $signum);
       };
       map { $sig_orig{$_} = $SIG{$_} || 'DEFAULT';
-            $SIG{$_} = $restore } keys %trap_sigs;
+            $SIG{$_} = $restore
+          } keys %trap_sigs;
 
       $tty->setlflag ($c_lflag & ~&POSIX::ECHO);
       $tty->setattr ($fd);
@@ -167,7 +181,7 @@ sub input_noecho
   if ($tty)
     {
       $tty->setlflag ($c_lflag);
-      $tty->setattr (fileno (STDIN));
+      $tty->setattr ($fd);
       map { $SIG{$_} = $sig_orig{$_} } keys %trap_sigs;
     }
 
@@ -177,12 +191,37 @@ sub input_noecho
 sub gensalt
 {
   my $saltlen = shift;
+  $saltlen = &$saltlen if (ref $saltlen eq 'CODE');
 
   my $sc = './0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-  my $sclen = length ($sc) + 1;
+  my $sclen = length ($sc);
 
-  join ("", map { substr ($sc, int (rand () * 100000) % $sclen, 1) }
+  join ("", map { substr ($sc, (1 + int (rand () * 100000)) % $sclen, 1) }
                 (1 .. $saltlen));
+}
+
+sub base64_encode
+{
+  local $_ = pack ("u", $_[0]);
+  s/^.//mg;              # remove first char of each line
+  s/\n//g;               # remove newlines
+  tr|` -_|AA-Za-z0-9+/|; # `# help emacs
+  my $padding = (3 - length($_[0]) % 3) % 3;   # pad end
+  s/.{$padding}$/'=' x $padding/e if $padding;
+  return $_;
+}
+
+sub bsdbf_cost
+{
+  my $c = $_[0] || 8;
+
+  if ($c < 4 || $c > 63)
+    {
+      diag ($c, "Cost out of range [04, 63]");
+      exit (1);
+    }
+
+  sprintf ("%02d\$", $c);
 }
 
 sub crypt_with_method
@@ -191,23 +230,40 @@ sub crypt_with_method
 
   my $prefix  = $crypt_salt{$method}->{prefix};
   my $saltlen = $crypt_salt{$method}->{len};
+  my $encfn   = $crypt_salt{$method}->{encode};
+  my $costfn  = $crypt_salt{$method}->{cost};
 
-  if (! defined $salt)
+  if ($costfn)
     {
-      $salt = $prefix . gensalt ($saltlen);
+      if (ref $costfn eq 'CODE')
+        {
+          $prefix .= &$costfn ($cost);
+        }
+      else
+        {
+          $prefix .= $costfn;
+        }
     }
-  else
+
+  if (! defined $salt) { $salt = gensalt ($saltlen)  }
+  else                 { $salt =~ s/^\$.*?\$//       }
+
+  if (!ref $saltlen && length ($salt) != $saltlen)
     {
-      $salt =~ s/^\$\d+\$//;
-      $salt = $prefix . $salt;
+      diag ("salt \"$salt\" is not $saltlen characters as required for \"$method\" hash.");
+      exit (1);
     }
+
+  $salt = &$encfn ($salt) if defined $encfn;
+  $salt = $prefix . $salt;
 
   my $result = crypt ($pass, $salt);
-  if (length $result == 13
-      && substr ($result, 0, 3) ne $prefix)
+  if (! defined $result
+      || (length $result == 13
+          && substr ($result, 0, length $prefix) ne $prefix))
     {
-      print STDERR "$progname: warning: system does not seem to support",
-                   " $method hashes; used DES instead.\n";
+      diag ("error", "$method hashes not supported, or some overflow occured.");
+      exit (1);
     }
   return $result;
 }
@@ -229,7 +285,7 @@ sub main
           my $pass2 = input_noecho ("Confirm password:");
           exit (1) unless defined $pass2;
           last if $pass eq $pass2;
-          print STDERR "Input mismatch; please try again.\n\n";
+          diag ("Input mismatch; please try again.\n");
         }
     }
   else
