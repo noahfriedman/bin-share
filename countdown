@@ -4,7 +4,7 @@
 # Created: 2006-05-20
 # Public domain
 
-# $Id: countdown,v 1.2 2006/05/22 21:16:08 friedman Exp $
+# $Id: countdown,v 1.3 2006/05/23 09:23:36 friedman Exp $
 
 # Commentary:
 # Code:
@@ -34,7 +34,7 @@ sub compute_deadline
       # We use timelocal, not timegm, since the stamp is in local time.
       return timelocal (reverse @ts);
     }
-  elsif (/(\d+:\d+(?::\d+|))/) # 21:55 or 21:55:00
+  elsif (/^(\d+:\d+(?::\d+|))/) # 21:55 or 21:55:00
     {
       my @tm = split (/[.:]+/, $1);
       my @ts = localtime (time);
