@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.15 2008/11/08 05:21:59 friedman Exp $
+# $Id: rpm-pkg-list,v 1.16 2008/12/15 06:25:55 friedman Exp $
 
 # Commentary:
 # Code:
@@ -37,6 +37,7 @@ my %field
                            },
       name              => { column  => 1,
                              sort    => 0,
+                             compare => \&cmp_hyphenated_fields,
                            },
       'version-release' => { column  => 2,
                              sort    => 2,
@@ -285,12 +286,13 @@ sub cmp_version
   return  1 if @a  > @b;
 }
 
-# Split version-release string at hyphen and compare each separately
+# Split string at hyphens and compare each field separately
 # according to `cmp_version' (which see).
-sub cmp_version_release
+sub cmp_hyphenated_fields
 {
-  my @a = split (/[-]/, $_[0], 2);
-  my @b = split (/[-]/, $_[1], 2);
+  my $f = defined $_[2] ? $_[2] : 0 ;
+  my @a = split (/[-]/, $_[0], $f);
+  my @b = split (/[-]/, $_[1], $f);
   my $j = (@a < @b ? @a : @b);
   for (my $i = 0; $i < $j; $i++)
     {
@@ -300,6 +302,12 @@ sub cmp_version_release
   return -1 if @a  < @b;
   return  0 if @a == @b;
   return  1 if @a  > @b;
+}
+
+# version-release string should only have 2 fields.
+sub cmp_version_release
+{
+  return cmp_hyphenated_fields ($_[0], $_[1], 2);
 }
 
 sub sortlines
