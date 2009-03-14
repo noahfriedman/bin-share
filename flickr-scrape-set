@@ -4,7 +4,7 @@
 # Created: 2009-01-28
 # Public domain
 
-# $Id: flickr-scrape-set,v 1.1 2009/01/29 07:19:19 friedman Exp $
+# $Id: flickr-scrape-set,v 1.2 2009/02/01 03:38:06 friedman Exp $
 
 # Commentary:
 
@@ -192,7 +192,7 @@ sub image_url
 
   my $content = http_get ($page_url, $headers);
   return join (".", $1, $2)
-    if $content =~ m|="([^"]+)_d\.(jpg)"|;
+    if $content =~ m/="([^"]+)_d\.(jpg|png|gif)"/;
 }
 
 sub main
