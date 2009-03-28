@@ -4,7 +4,7 @@
 # Created: 1991-06-26
 # Public domain
 
-# $Id: xterm-set,v 2.3 2006/03/17 16:53:12 friedman Exp $
+# $Id: xterm-set,v 2.4 2008/03/16 03:34:40 friedman Exp $
 
 # Commentary:
 
@@ -121,6 +121,8 @@ my %ctlseq = (
 );
 
 # Aliases
+$ctlseq{rows}           = 'height';
+$ctlseq{cols}           = 'width';
 $ctlseq{wob}            = 'reverse-video';
 $ctlseq{bow}            = 'normal-video';
 $ctlseq{fg}             = 'foreground-color';
