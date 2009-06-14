@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: rsync-mirror,v 1.5 2007/08/07 21:54:57 friedman Exp $
+# $Id: rsync-mirror,v 1.6 2007/08/11 22:54:07 friedman Exp $
 
 RSYNC_RSH=${RSYNC_RSH-rsh}
 export RSYNC_RSH
@@ -15,7 +15,11 @@ case $* in
 esac
 
 case ${UID-`id -u`} in
-  0 ) set x --devices ${1+"$@"} ; shift ;;
+  0 ) set x --devices   \
+            --acls      \
+            --xattrs    \
+            ${1+"$@"}
+      shift ;;
 esac
 
 set x \
