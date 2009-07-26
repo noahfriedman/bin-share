@@ -1,0 +1,71 @@
+#!/usr/bin/perl
+
+use strict;
+no strict qw(subs);
+
+(my $progname = $0) =~ s=.*/==;
+
+sub err
+{
+  printf STDERR "%s: %s\n", $progname, join (": ", @_);
+  return 0;
+}
+
+sub msg
+{
+  print join (": ", @_), "\n";
+  return 1;
+}
+
+sub xrename_safe
+{
+  my ($from, $to) = @_;
+  return 0 if ($from eq $to);
+
+  return err ("rename", join (" -> ", $from, $to), "file already exists")
+    if (-e $to);
+
+  return msg (join (" -> ", $from, $to))
+    if (rename ($from, $to));
+
+  err ("rename", join (" -> ", $from, $to), $!);
+}
+
+sub main
+{
+  my $actually_do_it = 0;
+  if ($_[0] eq '-y')
+    {
+      $actually_do_it = 1;
+      shift;
+    }
+
+  my $re = shift;
+
+  for my $from (@_)
+    {
+      my ($dirname, $basename) = ("", $from);
+
+      if ($from =~ /^(.*\/)/)
+        {
+          $dirname = $1;
+          $basename = substr ($from, length $dirname);
+        }
+
+      eval "\$basename =~ $re";
+      my $to = $dirname . $basename;
+
+      if ($actually_do_it)
+        {
+          xrename_safe ($from, $to);
+        }
+      else
+        {
+          msg ("PROPOSED", join (" -> ", $from, $to));
+        }
+    }
+}
+
+main (@ARGV);
+
+# eof
