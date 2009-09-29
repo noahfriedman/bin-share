@@ -1,0 +1,129 @@
+#!/usr/bin/env perl
+# cyrus-cmd --- my administrative interface for cyrus-imapd
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2009-09-28
+# Public domain
+
+# $Id$
+
+# Commentary:
+
+# I wrote this because I wanted to be able to issue a few mailbox-related
+# commands on the command line, and cyradm has a cumbersome interactive
+# interface.
+
+# Code:
+
+$^W = 1; # enable warnings
+
+package Cyr;
+
+use Cyrus::IMAP::Admin;
+use strict;
+
+(my $progname = $0) =~ s=.*/==;
+
+# Args: host => host, user => user, pass => passwd
+sub new
+{
+  my $class = shift;
+  my $self = { @_ };
+  bless $self, (ref ($class) || $class);
+
+  my $conn = Cyrus::IMAP::Admin->new ($self->{host} || 'localhost');
+  $self->{conn} = $conn;
+
+
+  my $auth = { -mechanism => 'login',
+               -service   => 'imap',
+               -user      => $self->{user} || $ENV{LOGNAME},
+               -authz     => $self->{user} || $ENV{LOGNAME},
+               -password  => $self->{pass},
+               -minssf    => 0,
+               -maxssf    => 10000,
+             };
+
+  $self->{conn}->authenticate( %$auth);
+  $self->errcheck ("authenticate");
+  return $self;
+}
+
+sub errcheck
+{
+  my $self = shift;
+  my $err = $self->{conn}->error;
+  return unless $err;
+
+  print STDERR join (": ", $progname, @_, $err), "\n";
+  exit (1);
+}
+
+sub lm
+{
+  my $self = shift;
+  my $conn = $self->{conn};
+
+  @_ = 'INBOX.*' unless @_;
+  map { my @result = $conn->listmailbox ($_);
+        map { print $_->[0], "\n" } @result if @result;
+      } @_;
+}
+
+sub cm
+{
+  my $self = shift;
+  my $conn = $self->{conn};
+
+  map { $conn->createmailbox ($_);
+        $self->errcheck ("createmailbox", $_);
+      } @_;
+}
+
+sub dm
+{
+  my $self = shift;
+  my $conn = $self->{conn};
+
+  map { $conn->deletemailbox ($_);
+        $self->errcheck ("deletemailbox", $_);
+      } @_;
+}
+
+sub DESTROY
+{
+  my $self = shift;
+  delete $self->{conn};
+}
+
+
+package main;
+use strict;
+
+sub main
+{
+  my $pw = $ENV{PASS};
+  unless (defined $pw)
+    {
+      $pw = `getpop`;
+      chomp $pw;
+      undef $pw if $pw eq "";
+    }
+
+  my $cyr = Cyr->new (host => $ENV{IMAP_HOST},
+                      user => $ENV{IMAP_USER},
+                      pass => $pw);
+
+  my $cmd = shift;
+  if    ($cmd eq 'lm') { $cyr->lm (@_) }
+  elsif ($cmd eq 'cm') { $cyr->cm (@_) }
+  elsif ($cmd eq 'dm') { $cyr->dm (@_) }
+  else
+    {
+      print STDERR "$cmd: Not a recognized command\n";
+      exit (1);
+    }
+}
+
+main (@ARGV);
+
+# eof
