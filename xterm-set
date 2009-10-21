@@ -4,7 +4,7 @@
 # Created: 1991-06-26
 # Public domain
 
-# $Id: xterm-set,v 2.4 2008/03/16 03:34:40 friedman Exp $
+# $Id: xterm-set,v 2.5 2009/03/28 16:26:26 friedman Exp $
 
 # Commentary:
 
@@ -38,8 +38,11 @@ my %ctlseq = (
  'show-cursor'             => [ 211, "\e[?25h", "", "Display cursor"],
  'hide-cursor'             => [ 212, "\e[?25l", "", "Do not display cursor"],
 
- 'smoothscroll'            => [ 301, "\e[?4h", "", "Set smooth scrolling"],
- 'jumpscroll'              => [ 302, "\e[?4l", "", "Set jump scrolling"],
+ 'blink-cursor'            => [ 221, "\e[?12h", "", "Start blinking cursor"],
+ 'no-blink-cursor'         => [ 222, "\e[?12l", "", "Stop blinking cursor"],
+
+ 'smooth-scroll'           => [ 301, "\e[?4h", "", "Set smooth scrolling"],
+ 'jump-scroll'             => [ 302, "\e[?4l", "", "Set jump scrolling"],
 
  'reverse-video'           => [ 401, "\e[?5h", "", "Set reverse video"],
  'normal-video'            => [ 402, "\e[?5l", "", "Restore normal video"],
@@ -50,12 +53,15 @@ my %ctlseq = (
  'wraparound'              => [ 601, "\e[?7h", "", "Wrap long lines to next line"],
  'no-wraparound'           => [ 602, "\e[?7l", "", "Truncate display of long lines"],
 
-# 'autorepeat'             => [ 701, "\e[?8h", "", "(not implemented by xterm)"],
-# 'no-autorepeat'          => [ 702, "\e[?8l", "", "(not implemented by xterm)"],
+ #'autorepeat'             => [ 701, "\e[?8h", "", "(not implemented by xterm)"],
+ #'no-autorepeat'          => [ 702, "\e[?8l", "", "(not implemented by xterm)"],
 
  # These are supported in XFree86 4.x xterm (or dickey xterm 1.48 and later)
  'scroll-bar'              => [ 711, "\e[?30h", "", "Show scroll bar"],
  'no-scroll-bar'           => [ 712, "\e[?30l", "", "Hide scroll bar"],
+
+ 'tool-bar'                => [ 711, "\e[?10h", "", "Show tool bar"],
+ 'no-tool-bar'             => [ 712, "\e[?10l", "", "Hide tool bar"],
 
  'allow80-132'             => [ 801, "\e[?40h", "", "Allow 80<->132 column switching"],
  'no-allow80-132'          => [ 802, "\e[?40l", "", "Do not allow 80<->132 column switching"],
@@ -68,8 +74,7 @@ my %ctlseq = (
  'xsize'                   => [ 807, "\e[4;;%st", "", "Set window width in pixels"],
  'ysize'                   => [ 808, "\e[4;%s;t", "", "Set window height in pixels"],
 
- 'xpos'                    => [ 809, "\e[3;%s;t", "", "Set windows's X coordinate"],
- 'ypos'                    => [ 810, "\e[3;;%st", "", "Move window"],
+ 'move'                    => [ 809, "\e[3;%s;%st", "xpos ypos", "Set upper left corner of windows's X,Y coordinates, in pixels"],
 
  'fixcurses'               => [ 901, "\e[?41h", "", "Work around curses bugs"],
  'no-fixcurses'            => [ 902, "\e[?41l", "", "Do not work around curses bugs"],
@@ -95,7 +100,7 @@ my %ctlseq = (
 
  'logging'                 => [1501, "\e[?46h", "", "Enable logging transcript"],
  'no-logging'              => [1502, "\e[?46l", "", "Disable logging transcript"],
- 'logfile-name'            => [1503, "\e]46\;%s\a", "file", "Set loggin transcript file name"],
+ 'logfile-name'            => [1503, "\e]46\;%s\a", "file", "Set logging transcript file name"],
 
  # Roland McGrath memorial option
  'frobme-baby'             => [1601, "\e\(0\e\)0\e\*0\e+B", "", "Switch to graphic character set"],
@@ -135,9 +140,10 @@ $ctlseq{'no-scrollbar'} = 'no-scroll-bar';
 
 sub xterm_send
 {
-  my ($seq, $arg) = @_;
+  my ($seq, @arg) = @_;
   my $screen_encap = "\eP%s\e\\";
-  $seq = sprintf ($seq, $arg) if ($seq =~ /%s/o);
+
+  $seq = sprintf ($seq, @arg) if @arg;
   $seq = sprintf ($screen_encap, $seq)
     if (exists $ENV{STY} || $ENV{TERM} =~ /^screen/o);
   print $seq;
@@ -160,6 +166,15 @@ sub ctlseq_maxlen
       $maxlen = $len if ($len > $maxlen);
     }
   return $maxlen;
+}
+
+sub ctlseq_numargs
+{
+  local $_ = shift;
+  my $i = 0;
+
+  $i++ while (/%[0-9.]*s/g);
+  return $i;
 }
 
 sub usage
@@ -194,8 +209,8 @@ sub usage
           $prio = $ctlseq{$ctlseq{$cmd}}->[0];
           $out = sprintf ($alias_fmt, $cmd, $val);
         }
-      print "\n" if ($prio / 10 != $last_prio && $last_prio != 0);
-      $last_prio = $prio / 10;
+      print "\n" if ($prio / 100 != $last_prio && $last_prio != 0);
+      $last_prio = $prio / 100;
 
       $out =~ s/[ \t]+$//o;
       print $out;
@@ -205,10 +220,10 @@ sub usage
 
 sub main
 {
-  return usage() unless ($#ARGV >= 0);
+  return usage() unless @ARGV;
 
   my @cmdlist;
-  while ($#ARGV >= 0)
+  while (@ARGV)
     {
       my $cmd = shift @ARGV;
       my $seq = ctlseq ($cmd, 1);
@@ -219,23 +234,21 @@ sub main
           exit (1);
         }
 
-      my $arg;
-      if ($seq =~ /%s/o)
-        {
-          $arg = shift @ARGV;
-          if (!defined $arg)
-            {
-              print STDERR "$prog: $cmd: command requires argument\n";
-              exit (2);
-            }
-        }
-      push @cmdlist, [ $seq, $arg ];
+      my $numargs = ctlseq_numargs ($seq);
+      my @arg = ($seq);
+      map { my $new = shift @ARGV;
+            if (!defined $new || exists $ctlseq{$new})
+              {
+                print STDERR "$prog: $cmd: command requires $numargs argument(s)\n";
+                exit (2);
+              }
+            push @arg, $new;
+          } (1 .. $numargs) if $numargs;
+
+      push @cmdlist, \@arg;
     }
 
-  for my $cmd (@cmdlist)
-    {
-      xterm_send ($cmd->[0], $cmd->[1]);
-    }
+  map { xterm_send (@$_) } @cmdlist;
 }
 
 main();
