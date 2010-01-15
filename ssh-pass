@@ -4,7 +4,7 @@
 # Created: 2003-02-13
 # Public domain.
 
-# $Id: ssh-pass,v 1.3 2006/05/24 07:27:19 friedman Exp $
+# $Id: ssh-pass,v 1.4 2010/01/15 00:45:37 friedman Exp $
 
 # Commentary:
 
@@ -103,8 +103,7 @@ sub getpass
         $tty->setlflag ($c_lflag);
         $tty->setattr ($fd);
         my $signum = $trap_sigs{$_[0]};
-        print STDERR "\n";
-        diag ("Exiting on signal $signum (SIG$_[0])");
+        print STDERR "\nExiting on signal $signum (SIG$_[0])\n";
         # 7th bit set indicates lower 6 bits represent a
         # signal number (0x80 == 2**7)
         exit (0x80 | $signum);
