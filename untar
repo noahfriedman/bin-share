@@ -1,8 +1,8 @@
 #! /bin/sh
-# $Id: untar,v 1.14 2008/02/07 01:02:21 friedman Exp $
+# $Id: untar,v 1.15 2008/09/15 00:54:53 friedman Exp $
 
 for f in ${1+"$@"}; do
-  case "$f" in
+  case $f in
     *.t[ag]z | *.tar.gz | *.tar.[Zz] | *.xtar.gz | *.xtar.[Zz] | *.nif )
       ${GZIP-gzip} -dc "$f" | ${TAR-tar} -xpvf -
      ;;
@@ -19,7 +19,7 @@ for f in ${1+"$@"}; do
       ${TAR-tar} -xpvf "$f"
      ;;
 
-    *.zip | *.jar | *.cbz | *.fbu )
+    *.zip | *.jar | *.cbz | *.fbu | *.apk )
       ${UNZIP-unzip} -o "$f"
      ;;
 
@@ -43,6 +43,11 @@ for f in ${1+"$@"}; do
       esac
       mkdir -p $libdir
       (cd $libdir && ${AR-ar} xv "$f")
+     ;;
+
+    *.msi )
+      dir=`echo "$f" | sed -e 's/\.[^.]*$//'`
+      ${MSIEXEC-msiexec} /a "$f" /qb TARGETDIR="$dir"
      ;;
   esac
 done
