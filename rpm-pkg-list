@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.16 2008/12/15 06:25:55 friedman Exp $
+# $Id: rpm-pkg-list,v 1.17 2009/03/01 21:37:06 friedman Exp $
 
 # Commentary:
 # Code:
@@ -76,10 +76,10 @@ my %field_alias
 
 my %repo_fingerprint
   = (
+      '57bbccba' => 'fedora-12',
+      'd22e77f2' => 'fedora-11',
       '4ebfc273' => 'fedora-10',
-
-      # only used for fedora 8/9 updates
-      '6df2196f' => 'fedora-8or9',
+      '6df2196f' => 'fedora-8or9',  # only used for fedora 8/9 updates
       'df9b0ae9' => 'fedora-8or9-test',
 
       # These fedora keys are discontinued as of 9/2008
@@ -89,28 +89,33 @@ my %repo_fingerprint
       '1cddbca9' => 'fedora-rawhide',
       '731002fa' => 'fedora-legacy',
 
-      # Note: these redhat keys should be discontinued as of 9/2008
-      'db42a60e' => 'redhat',
-      '897da07a' => 'redhat-beta',
-      'e418e3aa' => 'redhat-rawhide',
+      '16ca1a56' => 'rpmfusion-free-f12',
+      '8fcff4da' => 'rpmfusion-free-f11',    # f11 = fedora 11
+      '49c8885a' => 'rpmfusion-free-f10',    # fedora 10 and earlier
+
+      'a3a882c1' => 'rpmfusion-nonfree-f12',
+      '8dc43844' => 'rpmfusion-nonfree-f11',
+      'b1981b68' => 'rpmfusion-nonfree-f10',
 
       '9c800aca' => 'SuSE',
       '3d25d3d9' => 'SuSE-security',
 
-      '49c8885a' => 'rpmfusion-free',
-      'b1981b68' => 'rpmfusion-nonfree',
+      'ba392878' => 'splode-local', # internal reference key; not secure
 
       'e42d547b' => 'freshrpms',
       '66534c2b' => 'atrpms',
       '1aa78495' => 'dries',
-
-      'ba392878' => 'splode',
       '6b8d79e6' => 'dag',
       'a109b1ec' => 'livna',
       'ff6382fa' => 'kde-redhat',
       '22b2951d' => 'mhensler-suspend2',
       'a9464aa9' => 'pidgin',
       'f6777c67' => 'adobe',
+
+      # Note: these redhat keys should be discontinued as of 9/2008
+      'db42a60e' => 'redhat',
+      '897da07a' => 'redhat-beta',
+      'e418e3aa' => 'redhat-rawhide',
 
       '(none)'   => '(unknown)',  # unsigned, so dont know what repo it came from
     );
