@@ -4,7 +4,7 @@
 # Created: 2010-02-17
 # Public domain
 
-# $Id$
+# $Id: reset-xkb,v 1.1 2010/02/18 03:14:05 friedman Exp $
 
 # Commentary:
 
@@ -14,6 +14,8 @@
 
 # Code:
 
+verbose=t
+
 initialize()
 {
   xkb_rules=${XKB_RULES-xorg}
@@ -21,6 +23,7 @@ initialize()
   xkb_layout=${XKB_LAYOUT-us}
   xkb_geometry=${XKB_GEOMETRY}
   xkb_keycodes=${XKB_KEYCODES}
+  xkb_variant=${XKB_VARIANT}
   xkb_option=${XKB_OPTION-"
     ctrl:nocaps
     compose:lwin
@@ -48,7 +51,16 @@ run_setxkbmap()
 {
   set ${SETXKBMAP-setxkbmap}
 
-  for var in xkb_rules xkb_model xkb_layout xkb_geometry xkb_keycodes ; do
+  # xkb_option handled as a special case later.
+  xkb_vars='xkb_rules
+            xkb_model
+            xkb_layout
+            xkb_variant
+            xkb_geometry
+            xkb_keycodes
+  '
+
+  for var in $xkb_vars ; do
     opt=-${var#xkb_}
     eval val=\"\$$var\"
 
@@ -111,7 +123,7 @@ option_overrides()
         --*=* ) optarg=`echo "$1" | sed -e "1s/^[^=]*=//"` ; shift ;;
         -* ) case ${2+set} in
                set ) optarg=$2 ; shift ; shift ;;
-               ''  ) option=$1
+               ""  ) option=$1
                      case $option in --*=* ) option=${option%%=*} ;; esac
                      exec 1>&2
                      echo "$progname: option $bq$option$eq requires argument."
@@ -128,11 +140,12 @@ option_overrides()
       -r | --rules    | --r* ) eval "$getopt"; xkb_rules=$optarg    ;;
       -m | --model    | --m* ) eval "$getopt"; xkb_model=$optarg    ;;
       -l | --layout   | --l* ) eval "$getopt"; xkb_layout=$optarg   ;;
+      -v | --variant  | --v* ) eval "$getopt"; xkb_variant=$optarg  ;;
       -g | --geometry | --g* ) eval "$getopt"; xkb_geometry=$optarg ;;
       -k | --keycodes | --k* ) eval "$getopt"; xkb_keycodes=$optarg ;;
       -o | --option   | --o* ) eval "$getopt"; xkb_option="$xkb_option $optarg" ;;
 
-      -v | --verbose  | --v* ) verbose=t ; shift ;;
+      -q | --quiet    | --q* ) verbose=f ; shift ;;
 
       -- ) shift; break ;; # Stop option processing
       -? | --* )
