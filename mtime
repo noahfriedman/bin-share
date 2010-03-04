@@ -1,0 +1,23 @@
+#!/bin/sh
+# $Id$
+
+TIME='\n*** Timing Information ***\n
+Elapsed time     : %E
+CPU Time         : %Ss kernel, %Us user
+Percent CPU      : %P\n
+Page faults      : %F major, %R minor
+Page size        : %Z bytes\n
+Context switches : %w voluntary, %c involuntary
+Swaps            : %W\n
+Shared text      : %Xk
+Resident set size: %tk avg, %Mk max
+Avg total memory : %Kk
+Avg unshared mem : %pk stack, %Dk data\n
+I/O block ops    : %I input, %O output
+Socket msgs      : %r received, %s sent
+Signals received : %k\n
+Exit status: %x\n'
+
+export TIME
+
+exec time ${1+"$@"}
