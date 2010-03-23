@@ -4,7 +4,7 @@
 # Created: 1996-01-15
 # Public domain
 
-# $Id: untar,v 1.16 2010/01/23 01:15:27 friedman Exp $
+# $Id: untar,v 1.17 2010/03/17 02:06:22 friedman Exp $
 
 # Commentary:
 
@@ -17,6 +17,10 @@ tmpdir=untar$$
 pre()
 {
   pkgdir=`echo "$file" | sed -e 's=.*/==' -e 's=\.[^.]*$=='`
+  case $pkgdir in
+    *.tar | *.xtar ) pkgdir=`echo "$pkgdir" | sed -e 's=\.[^.]*$=='` ;;
+  esac
+
   if [ -d $pkgdir ]; then
     echo $pkgdir: directory already exists 1>&2
     return 1
