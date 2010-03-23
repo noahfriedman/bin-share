@@ -1,5 +1,5 @@
 #! /bin/sh
-# $Id: dist-tar,v 1.4 2008/02/18 06:35:38 friedman Exp $
+# $Id: dist-tar,v 1.5 2010/02/18 02:10:17 friedman Exp $
 
 LC_COLLATE=C
 export LC_COLLATE
@@ -27,7 +27,7 @@ for dir in ${1+"$@"} ; do
   { case $gnutar in
       t ) find "$dir" -print \
            | sort \
-           | ${TAR-tar} --no-recursion --acls --selinux --xattrs -T - -cvf - \
+           | ${TAR-tar} --no-recursion -T - -cvf - \
            | $zip --best > "$dir.tar.$z" ;;
 
       * ) ${TAR-tar} -cvf - "$dir" \
