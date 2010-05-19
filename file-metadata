@@ -4,23 +4,216 @@
 # Created: 2010-03-22
 # Public domain
 
-# $Id$
+# $Id: file-metadata,v 1.1 2010/05/19 06:52:46 friedman Exp $
 
 # Commentary:
 
-# Mercurial doesn't preserve file modes, timestamps, security contexts, and
-# other errata when updating a workspace.  This command can be used to
-# generate a checkpoint of this data in a workspace, and then restore it
-# after doing an update.
+# Many SCMs (e.g. mercurial and git) don't preserve file modes, timestamps,
+# security contexts, and other errata when updating a workspace.  This
+# command can be used to generate a checkpoint of this data in a workspace,
+# and then restore it after doing an update.
 
 # Code:
 
 $^W = 1; # enable warnings
 
 use strict;
-use Symbol;
+use Data::Dumper;
+use Fcntl;
 use File::ExtAttr qw(:all);
+use IO::Handle;
 
+(my $progname = $0) =~ s|^.*/||;
+my %opt;
+
+sub _error
+{
+  print STDERR join (": ", $progname, @_), "\n";
+  return undef;
+}
+
+sub _verbose
+{
+  return undef unless $opt{verbose};
+  print join (" ", $progname . ":", @_), "\n";
+  return undef;
+}
+
+
+# Mandatory args: file, statinfo
+# Optional args: actions
+#
+# actions is a bitmask: 1 = chmod
+#                       2 = set atime/mtime
+#                       4 = chown
+sub set_file_stats
+{
+  my $file = shift;
+  my $statinfo = shift;
+  my $actions = shift || 1;
+
+  # Set file permissions
+  (chmod ($statinfo->[2], $file)
+   || return _error (sprintf ("chmod(0%o)", $statinfo->[2] & 07777), $file, $!))
+    if ($actions & 1);
+
+  # Set atime/mtime
+  utime ($statinfo->[8], $statinfo->[9], $file) if ($actions & 2);
+  # Set owner/group
+  chown ($statinfo->[4], $statinfo->[5], $file) if ($actions & 4);
+
+  return 1;
+}
+
+# Mandatory args: from, to
+# Optional args: preserve, returnstatp, clobberp
+sub copy_file
+{
+  my ($from, $to, $preserve, $returnstatp, $clobberp) = @_;
+  my $fh_from = IO::Handle->new;
+  my $fh_to   = IO::Handle->new;
+
+  _verbose ("copying", $from, "->", $to);
+
+  $clobberp = 1 unless (defined $clobberp);
+  my $oflag = $clobberp ? O_TRUNC : O_EXCL;
+
+  sysopen ($fh_from, $from, O_RDONLY) || return _error ("open", $from, $!);
+  if (!sysopen ($fh_to, $to, O_WRONLY | O_CREAT | $oflag, 0600))
+    {
+      close ($fh_from);
+      _error ("open", $to, $!);
+      return undef;
+    };
+
+  my $data;
+  while (my $len = sysread ($fh_from, $data, 2**20)) # 1mb buffer
+    {
+      if (syswrite ($fh_to, $data, $len) != $len)
+        {
+          _error ("write", $to, $!);
+          close ($fh_from);
+          close ($fh_to);
+          return undef;
+        }
+    }
+
+  my @fromstat = stat ($fh_from);
+  my @tostat   = stat ($fh_to) if ($returnstatp);
+  close ($fh_from);
+  close ($fh_to);
+
+  return [ \@fromstat, \@tostat ] if ($returnstatp);
+
+  set_file_stats ($to, \@fromstat, ($preserve ? 1|2|4 : 1));
+  return 1;
+}
+
+# Mandatory arg: from
+# Optional arg: to
+sub backup_file
+{
+  my ($from, $to) = @_;
+  my $fromstat = xstat ($from);
+
+  $to = make_backup_file_name ($from, $ENV{VERSION_CONTROL})
+    unless defined $to;
+
+  # Backup by copying if file has multiple hard links
+  return copy_file ($from, $to, 1) if ($fromstat->[3] > 1);
+
+  # Backup by rename; new version will be in new file.
+  _verbose ("renaming", $from, "->", $to);
+  rename ($from, $to) || _error ("rename", join (" ", $from, "->", $to), $!);
+}
+
+# Mandatory args: file
+# Optional args: vc
+sub make_backup_file_name
+{
+  my $file = shift;
+  my $vc = lc (shift) || $ENV{VERSION_CONTROL} || '';
+
+  return $file . "~" if ($vc eq 'never' || $vc eq 'simple');
+
+  my $dir = ".";
+  my $base = $file;
+  if (index ($file, "/") >= $[)
+    {
+      $base =~ s|.*/||o;
+      $dir = $file;
+      $dir =~ s|/[^/]*$||o;
+    }
+
+  my $dfh = IO::Handle->new;
+  opendir ($dfh, $dir) || return _error ("opendir", $dir, "$!");
+  my $m = eval 'sub { m/^' . quotemeta ($base) . '\.~(\d+)~$/o && $1 }';
+  my $h = [sort { -($a <=> $b) } grep { $_ = &$m } readdir $dfh]->[0];
+  closedir ($dfh);
+
+  return join ("", $file, ".~", $h + 1, "~") if (defined $h);
+  join ("", $file, ($vc eq 'numbered' || $vc eq 't' ? ".~1~" : "~"));
+}
+
+sub xsysopen
+{
+  my ($filename, $mode, $perm) = @_;
+
+  $mode = O_RDONLY unless defined $mode;
+  if    ($mode eq 'r')  { $mode = O_RDONLY }
+  elsif ($mode eq 'w')  { $mode = O_WRONLY | O_CREAT | O_TRUNC }
+  elsif ($mode eq 'rw') { $mode = O_RDWR   | O_CREAT | O_TRUNC }
+  elsif ($mode eq 'a')  { $mode = O_WRONLY | O_CREAT | O_APPEND }
+  elsif ($mode eq 'a+') { $mode = O_RDWR   | O_CREAT | O_APPEND }
+
+  $perm = 0666 unless defined $perm;
+
+  my $fh = IO::Handle->new;
+  unless (sysopen ($fh, $filename, $mode, $perm))
+    {
+      return _error ("open", $filename, $!);
+    }
+  return $fh;
+}
+
+# read as much as possible up to size until eof; don't return partial reads
+sub xsysread
+{
+  my ($fh, $size, $offset) = @_[0,2,3];  # buffer $_[1] modified in-place
+
+  unless (defined $size)
+    {
+      my @st = stat ($fh);
+      $size = $st[7] if @st;
+      $size -= $offset if defined $size && defined $offset;
+    }
+  return 0 unless defined $size && $size > 0;
+  $offset = 0 unless defined $offset;
+
+  my $total = 0;
+  while ($total < $size)
+    {
+      my $rsz = sysread ($fh, $_[1], $size - $total, $offset + $total);
+      return $rsz if $rsz < 0; # error
+      last if $rsz == 0;       # eof
+      $total += $rsz;
+    }
+  return $total;
+}
+
+sub file_contents
+{
+  my $file = shift;
+
+  my $fh = xsysopen ($file, "r");
+  return unless $fh;
+  local $_;
+  xsysread ($fh, $_);
+  close ($fh);
+  return $_;
+}
+
+
 sub grind_over_tree
 {
   my ($dir, $fn, $fn_on_dirs) = @_;
@@ -35,7 +228,7 @@ sub grind_over_tree
   &$fn_on_dirs ($dir, $fn, $fn_on_dirs)
     if ($fn_on_dirs && ref $fn_on_dirs eq 'CODE');
 
-  my $dfh = gensym;
+  my $dfh = IO::Handle->new;
   if (opendir ($dfh, $dir))
     {
       my @files = sort grep (!/^\.\.?$/o, readdir ($dfh));
@@ -49,7 +242,7 @@ sub grind_over_tree
     }
   else
     {
-      print STDERR "opendir: $dir: $!\n";
+      _error ("opendir", $dir, $!);
     }
   &$fn ($dir) if $fn_on_dirs;
 }
@@ -68,7 +261,7 @@ sub get_file_xattrs
   return \%attr;
 }
 
-sub get_file_stats
+sub get_file_perms
 {
   my $file = shift;
 
@@ -82,8 +275,10 @@ sub get_file_stats
                mtime => $st[9],
              );
 
-  my $owner = getpwuid ($stat{uid});
-  $stat{owner} = $owner if defined $owner;
+  $stat{isdir} = 1 if -d _;  # false for symlinks to dirs; reuses lstat
+
+  my $user = getpwuid ($stat{uid});
+  $stat{user} = $owner if defined $user;
 
   my $group = getgrgid ($stat{gid});
   $stat{group} = $group if defined $group;
@@ -91,26 +286,79 @@ sub get_file_stats
   return \%stat;
 }
 
+sub get_file_metadata
+{
+  my $file = shift;
+  my $data = get_file_perms ($file);
+  $data->{xattrs} = get_file_xattrs ($file);
+  return $data;
+}
+
+sub get_tree_metadata
+{
+  my %file;
+  my $fn = sub { $file{$_[0]} = get_file_metadata ($_[0]) };
+  map { grind_over_tree ($_, $fn, 1) } @_;
+  return \%file;
+}
+
+
+sub set_file_xattrs
+{
+  my ($file, $xattrs) = @_;
+}
+
+sub set_file_perms
+{
+  my ($file, $data) = @_;
+  my @stat;
+
+  $stat[2] = $data->{mode};
+  $stat[4] = $data->{uid};
+  $stat[5] = $data->{gid};
+  $stat[8] = $data->{atime};
+  $stat[9] = $data->{mtime};
+
+  my $uid = getpwnam ($data->{user});
+  $stat[4] = $uid if defined $uid;
+
+  my $gid = getgrnam ($data->{group});
+  $stat[5] = $gid if defined $gid;
+
+  my $actions = 1;              # always chmod
+  $actions   |= 2 if $opt{mtime}; # set atime/mtime
+  # chown/chgrp if euid is 0.  For ordinary users don't give away files
+  # even if filesystem or kernel policy permits it.
+  $actions   |= 4 if ($> == 0);
+
+  set_file_stats ($file, \@stat, $actions);
+}
+
+sub set_file_metadata
+{
+  my ($file, $data) = @_;
+
+  set_file_perms  ($file, $data);
+  set_file_xattrs ($file, $data->{xattrs});
+}
+
+
 sub serialize
 {
-  use Data::Dumper;
+  my ($d) = Data::Dumper->new (\@_, ['$data']);
 
-  my ($dump) = Data::Dumper->new (\@_, ['*result']);
+  $d->Quotekeys (1);
+  $d->Useqq     (1);
+  $d->Sortkeys  (1);
+  $d->Indent    (1);
+  $d->Terse     (1);
 
-  my @p = (quotekeys  => 1,
-           useqq      => 1,
-           sortkeys   => 1,
-           indent     => 1,
-           purity     => 1,
-           terse      => 1,
-          );
-  while (@p)
-    {
-      my ($k, $v) = (shift @p, shift @p);
-      my $method = ucfirst ($k);
-      $dump->$method ($v);
-    }
-  return $dump->Dump;
+  return $d->Dump;
+}
+
+sub deserialize
+{
+  eval $_[0];
 }
 
 
@@ -120,6 +368,8 @@ sub parse_options
 
   my $help = -1;
   my $opt = $_[1] || {};
+  $opt->{file}    = '.file-metadata';
+  $opt->{verbose} = 1;
 
   local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
 
@@ -147,19 +397,14 @@ sub parse_options
 
 sub main
 {
-  my $opt = parse_options (\@_);
+  parse_options (\@_, \%opt);
 
-  my %file;
-  map { grind_over_tree
-          ($_,
-           sub { my $data = get_file_stats ($_[0]);
-                 $data->{xattrs} = get_file_xattrs ($_);
-                 $file{$_[0]} = $data;
-               },
-           1);
-      } @_;
+  my $data = get_tree_metadata (@_);
+  my $s = serialize ($data);
 
-  print serialize (\%file), "\n";
+  my $x = deserialize ($s);
+
+  print $s, "\n";
 }
 
 main (@ARGV);
