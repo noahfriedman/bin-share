@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.57 2008/08/21 03:58:48 friedman Exp $
+# $Id: from,v 1.58 2008/11/10 06:53:29 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,9 +19,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with this program; if not, you can either send email to this
-# program's maintainer or write to: The Free Software Foundation,
-# Inc.; 51 Franklin Street, Fifth Floor; Boston, MA 02110-1301, USA.
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # Commentary:
 
@@ -32,13 +30,15 @@
 
 $^W = 1; # enable warnings
 
-use 5.003;
+use 5.8.0;
 use strict;
 no strict qw(vars);
 
+use Encode qw(:all);
 use Getopt::Long;
 use POSIX qw(strftime);
 use Symbol;
+
 
 sub err
 {
@@ -882,6 +882,12 @@ sub print_headers
                                ? substr ($_, 0, $opt_columns) : $_; }
                        split (/\n/, $str, -1))
             if ($opt_columns > 0 && length ($str) > $opt_columns);
+          if ($opt_utf8 && is_utf8 ($str))
+            {
+              # print can't print wide characters; convert back to raw bytes.
+              # The receiver (e.g. xterm) will have to re-decode.
+              $str = encode_utf8 ($str);
+            }
           print $str;
           return;
         }
@@ -993,9 +999,7 @@ sub parse_rfc1522 ($)
                         : $4));
       if ($opt_utf8)
         {
-          use Encode;
-          #$decoded = decode ($charset, $decoded);
-          $decoded = encode ('utf8', $decoded);
+          $decoded = decode ($charset, $decoded); # string now multibyte
         }
 
       $result .= $decoded;
