@@ -1,0 +1,167 @@
+#!/usr/bin/env perl
+# file-metadata -- collect file metadata
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2010-03-22
+# Public domain
+
+# $Id$
+
+# Commentary:
+
+# Mercurial doesn't preserve file modes, timestamps, security contexts, and
+# other errata when updating a workspace.  This command can be used to
+# generate a checkpoint of this data in a workspace, and then restore it
+# after doing an update.
+
+# Code:
+
+$^W = 1; # enable warnings
+
+use strict;
+use Symbol;
+use File::ExtAttr qw(:all);
+
+sub grind_over_tree
+{
+  my ($dir, $fn, $fn_on_dirs) = @_;
+
+  return &$fn ($dir) unless (! -l $dir && -d _);
+
+  # fn_on_dirs can be a simple boolean or it can be a separate function, in
+  # which case the procedure is called as a "pre-" hook.  This can be used
+  # e.g. to make sure the directory permissions are changed so the
+  # directory is readable/traversible before descending into it.
+  # Even if this is a code ref, $fn will be called on this entry too.
+  &$fn_on_dirs ($dir, $fn, $fn_on_dirs)
+    if ($fn_on_dirs && ref $fn_on_dirs eq 'CODE');
+
+  my $dfh = gensym;
+  if (opendir ($dfh, $dir))
+    {
+      my @files = sort grep (!/^\.\.?$/o, readdir ($dfh));
+      closedir ($dfh);
+
+      for my $ent (@files)
+        {
+          my $file = join ("/", $dir, $ent);
+          grind_over_tree ($file, $fn, $fn_on_dirs);
+        }
+    }
+  else
+    {
+      print STDERR "opendir: $dir: $!\n";
+    }
+  &$fn ($dir) if $fn_on_dirs;
+}
+
+sub get_file_xattrs
+{
+  my $file = shift;
+
+  my %attr;
+  map { my $ns = $_;
+        map { my $val = getfattr ($file, $_, { namespace => $ns });
+              $attr{join (".", $ns, $_)} = $val if defined $val;
+            } listfattr ($file, { namespace => $ns });
+      } listfattrns ($file);
+
+  return \%attr;
+}
+
+sub get_file_stats
+{
+  my $file = shift;
+
+  my @st = lstat ($file);
+  return unless @st;
+
+  my %stat = ( uid   => $st[4],
+               gid   => $st[5],
+               mode  => $st[2] & 0777,
+               atime => $st[8],
+               mtime => $st[9],
+             );
+
+  my $owner = getpwuid ($stat{uid});
+  $stat{owner} = $owner if defined $owner;
+
+  my $group = getgrgid ($stat{gid});
+  $stat{group} = $group if defined $group;
+
+  return \%stat;
+}
+
+sub serialize
+{
+  use Data::Dumper;
+
+  my ($dump) = Data::Dumper->new (\@_, ['*result']);
+
+  my @p = (quotekeys  => 1,
+           useqq      => 1,
+           sortkeys   => 1,
+           indent     => 1,
+           purity     => 1,
+           terse      => 1,
+          );
+  while (@p)
+    {
+      my ($k, $v) = (shift @p, shift @p);
+      my $method = ucfirst ($k);
+      $dump->$method ($v);
+    }
+  return $dump->Dump;
+}
+
+
+sub parse_options
+{
+  return unless @_ && ref $_[0] eq 'ARRAY';
+
+  my $help = -1;
+  my $opt = $_[1] || {};
+
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+
+  use Getopt::Long;
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(autoabbrev bundling));
+  $parser->getoptions
+    ("h|help|usage+" => \$help,
+
+     "f|file=s"      => sub { $opt->{file}       = $_[1] },
+
+     "c|compare!"    => sub { $opt->{compare}    = $_[1] },
+     "s|save!"       => sub { $opt->{save}       = $_[1] },
+     "a|apply!"      => sub { $opt->{apply}      = $_[1] },
+     "m|mtime!"      => sub { $opt->{mtime}      = $_[1] },
+     "e|empty-dirs!" => sub { $opt->{empty_dirs} = $_[1] },
+
+     "v|verbose"     => sub { $opt->{verbose}    = 1 },
+     "q|quiet"       => sub { $opt->{verbose}    = 0 },
+    );
+
+  pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
+  return $opt;
+}
+
+sub main
+{
+  my $opt = parse_options (\@_);
+
+  my %file;
+  map { grind_over_tree
+          ($_,
+           sub { my $data = get_file_stats ($_[0]);
+                 $data->{xattrs} = get_file_xattrs ($_);
+                 $file{$_[0]} = $data;
+               },
+           1);
+      } @_;
+
+  print serialize (\%file), "\n";
+}
+
+main (@ARGV);
+
+__END__
