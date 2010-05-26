@@ -4,7 +4,7 @@
 # Created: 2010-03-22
 # Public domain
 
-# $Id: file-metadata,v 1.1 2010/05/19 06:52:46 friedman Exp $
+# $Id: file-metadata,v 1.2 2010/05/19 16:05:21 friedman Exp $
 
 # Commentary:
 
@@ -19,7 +19,7 @@ $^W = 1; # enable warnings
 
 use strict;
 use Data::Dumper;
-use Fcntl;
+use Fcntl         qw(:DEFAULT :mode);
 use File::ExtAttr qw(:all);
 use IO::Handle;
 
@@ -251,12 +251,17 @@ sub get_file_xattrs
 {
   my $file = shift;
 
+  my @ns = listfattrns ($file);
+  # This can happen if file is a symlink to a non-existent file
+  # or the operation is not supported on the filesystem.
+  return undef if (@ns == 1 && !defined $ns[0]);
+
   my %attr;
   map { my $ns = $_;
         map { my $val = getfattr ($file, $_, { namespace => $ns });
               $attr{join (".", $ns, $_)} = $val if defined $val;
             } listfattr ($file, { namespace => $ns });
-      } listfattrns ($file);
+      } @ns;
 
   return \%attr;
 }
@@ -270,15 +275,20 @@ sub get_file_perms
 
   my %stat = ( uid   => $st[4],
                gid   => $st[5],
-               mode  => $st[2] & 0777,
+               mode  => S_IMODE ($st[2]),
                atime => $st[8],
                mtime => $st[9],
              );
 
-  $stat{isdir} = 1 if -d _;  # false for symlinks to dirs; reuses lstat
+  if    (-l _) { $stat{type} = 'l'; $stat{link} = readlink ($file) }
+  elsif (-d _) { $stat{type} = 'd' }
+  elsif (-p _) { $stat{type} = 'p' }
+  elsif (-S _) { $stat{type} = 'S' }
+  elsif (-c _) { $stat{type} = 'c'; $stat{dev} = $st[6] }
+  elsif (-b _) { $stat{type} = 'b'; $stat{dev} = $st[6] }
 
   my $user = getpwuid ($stat{uid});
-  $stat{user} = $owner if defined $user;
+  $stat{user} = $user if defined $user;
 
   my $group = getgrgid ($stat{gid});
   $stat{group} = $group if defined $group;
@@ -290,15 +300,20 @@ sub get_file_metadata
 {
   my $file = shift;
   my $data = get_file_perms ($file);
-  $data->{xattrs} = get_file_xattrs ($file);
+
+  # File::ExtAttr uses getxattr, not lgetxattr, so we can't get the xattrs
+  # of the symlink itself.
+  my $xattrs = get_file_xattrs ($file) unless -l $file;
+  $data->{xattrs} = $xattrs if defined $xattrs;
   return $data;
 }
 
 sub get_tree_metadata
 {
+  my $files = shift;
   my %file;
   my $fn = sub { $file{$_[0]} = get_file_metadata ($_[0]) };
-  map { grind_over_tree ($_, $fn, 1) } @_;
+  map { grind_over_tree ($_, $fn, 1) } @$files;
   return \%file;
 }
 
@@ -347,11 +362,11 @@ sub serialize
 {
   my ($d) = Data::Dumper->new (\@_, ['$data']);
 
-  $d->Quotekeys (1);
-  $d->Useqq     (1);
-  $d->Sortkeys  (1);
-  $d->Indent    (1);
-  $d->Terse     (1);
+  $d->Quotekeys (0);  # slows module down moderately
+  $d->Useqq     (0);  # slows module *way* down
+  $d->Sortkeys  (0);  # not super slow, but not needed either.
+  $d->Indent    (1);  # attrs 1 per line; more compact deltas.
+  $d->Terse     (1);  # we don't need a variable name.
 
   return $d->Dump;
 }
@@ -380,6 +395,7 @@ sub parse_options
     ("h|help|usage+" => \$help,
 
      "f|file=s"      => sub { $opt->{file}       = $_[1] },
+     "F|file-list=s" => sub { $opt->{file_list}  = $_[1] },
 
      "c|compare!"    => sub { $opt->{compare}    = $_[1] },
      "s|save!"       => sub { $opt->{save}       = $_[1] },
@@ -395,15 +411,31 @@ sub parse_options
   return $opt;
 }
 
+sub read_file_list
+{
+  my $file = shift;
+  my $fh = *STDIN{IO} if $file eq '-';
+
+  unless (ref $fh)
+    {
+      $fh = xsysopen ($file);
+      return unless $fh;
+    }
+
+  my @files = map { chomp; $_ } <$fh>;
+  return \@files;
+}
+
 sub main
 {
   parse_options (\@_, \%opt);
 
-  my $data = get_tree_metadata (@_);
+  my $file_list = (defined $opt{file_list}
+                   ? read_file_list ($opt{file_list})
+                   : \@_);
+  my $data = get_tree_metadata ($file_list);
+
   my $s = serialize ($data);
-
-  my $x = deserialize ($s);
-
   print $s, "\n";
 }
 
