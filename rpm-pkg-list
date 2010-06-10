@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.17 2009/03/01 21:37:06 friedman Exp $
+# $Id: rpm-pkg-list,v 1.18 2010/02/08 19:12:44 friedman Exp $
 
 # Commentary:
 # Code:
@@ -76,6 +76,7 @@ my %field_alias
 
 my %repo_fingerprint
   = (
+      'e8e40fde' => 'fedora-13',
       '57bbccba' => 'fedora-12',
       'd22e77f2' => 'fedora-11',
       '4ebfc273' => 'fedora-10',
@@ -89,10 +90,14 @@ my %repo_fingerprint
       '1cddbca9' => 'fedora-rawhide',
       '731002fa' => 'fedora-legacy',
 
+      '865cc9ea' => 'rpmfusion-free-f14',
+      'a3780952' => 'rpmfusion-free-f13',
       '16ca1a56' => 'rpmfusion-free-f12',
       '8fcff4da' => 'rpmfusion-free-f11',    # f11 = fedora 11
       '49c8885a' => 'rpmfusion-free-f10',    # fedora 10 and earlier
 
+      'f09d8368' => 'rpmfusion-nonfree-f14',
+      '2425b284' => 'rpmfusion-nonfree-f13',
       'a3a882c1' => 'rpmfusion-nonfree-f12',
       '8dc43844' => 'rpmfusion-nonfree-f11',
       'b1981b68' => 'rpmfusion-nonfree-f10',
@@ -115,7 +120,7 @@ my %repo_fingerprint
       # Note: these redhat keys should be discontinued as of 9/2008
       'db42a60e' => 'redhat',
       '897da07a' => 'redhat-beta',
-      'e418e3aa' => 'redhat-rawhide',
+      'e418e3aa' => 'redhat-rawhide-2003',
 
       '(none)'   => '(unknown)',  # unsigned, so dont know what repo it came from
     );
