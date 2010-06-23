@@ -4,7 +4,7 @@
 # Created: 1996-01-15
 # Public domain
 
-# $Id: untar,v 1.18 2010/03/23 00:18:40 friedman Exp $
+# $Id: untar,v 1.19 2010/06/18 17:24:59 friedman Exp $
 
 # Commentary:
 
@@ -21,18 +21,18 @@ pre()
     *.tar | *.xtar ) pkgdir=`echo "$pkgdir" | sed -e 's=\.[^.]*$=='` ;;
   esac
 
-  if [ -d $pkgdir ]; then
-    echo $pkgdir: directory already exists 1>&2
+  if [ -d "$pkgdir" ]; then
+    echo "$pkgdir": directory already exists 1>&2
     return 1
   fi
 
-  if [ -d $tmpdir ]; then
-    echo $tmpdir: temp directory already exists, and it shouldn\'t 1>&2
+  if [ -d "$tmpdir" ]; then
+    echo "$tmpdir": temp directory already exists, and it shouldn\'t 1>&2
     return 1
   fi
 
-  mkdir -p $tmpdir || return 1
-  cd       $tmpdir || return 1
+  mkdir -p "$tmpdir" || return 1
+  cd       "$tmpdir" || return 1
 
   case $file in
     /* ) : ;;
@@ -55,14 +55,14 @@ post()
      { [ $nfiles -eq 1 ] && ! [ ".$ndir" = ".$pkgdir" ]; }
   then
     cd .. &&
-    mv $tmpdir $pkgdir
+    mv "$tmpdir" "$pkgdir"
   elif [ $nfiles -eq 1 ]; then
-    mv $ndir .. &&
+    mv "$ndir" .. &&
     cd .. &&
-    rmdir $tmpdir
+    rmdir "$tmpdir"
   else
-    echo $tmpdir: empty directory\? 1>&2
-    cd .. && rmdir $tmpdir
+    echo "$tmpdir": empty directory\? 1>&2
+    cd .. && rmdir "$tmpdir"
     return 1
   fi
 }
