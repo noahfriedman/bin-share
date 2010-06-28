@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# $Id$
+# $Id: tinyurl,v 1.1 2009/08/27 20:07:19 friedman Exp $
 
 $^W = 1; # enable warnings
 
@@ -15,6 +15,7 @@ sub http_get
   my $ua      = LWP::UserAgent->new;
   my $uri     = URI->new ($url);
   $request->url ($uri);
+  $ua->env_proxy;
   my $response = $ua->request ($request);
   return $response->content;
 }
