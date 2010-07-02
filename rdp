@@ -4,10 +4,10 @@
 # Created: 2005-08-10
 # Public domain
 
-# $Id: mrdesktop,v 1.1 2006/02/02 17:49:46 friedman Exp $
+# $Id: mrdesktop,v 1.2 2006/12/22 01:03:01 friedman Exp $
 
 # Commentary:
-#
+
 # When a client connects to a windows 2000/2003 terminal server and has no
 # permanent client access license associated with it, the server will issue
 # a temporary license.  This license will eventually expire and the client
@@ -15,7 +15,9 @@
 # number" to the client name (normally the host name) periodically to avoid
 # using an expired temporary license.  The generation number is determined
 # from the current date and time.
-#
+
+# The arg "-fs" will create a full-screen client.
+
 # Code:
 
 hostname=${HOSTNAME-`uname -n`}
@@ -43,14 +45,17 @@ geom=`xrdb -symbols -screen \
 
 depth=`xrdb -symbols -screen | sed -n -e '/-DPLANES=/s///p'`
 
-case $geom in
-  18??x* | [2-9]???x* ) geom=1600x1200 ;;
-  1600x1200 )           geom=1400x1050 ;;
-  1400x1050 )           geom=1280x960  ;; # use a 4:3 geometry
-  1280x1024 )           geom=1152x864  ;; # note 1280x1024 is 5:4, not 4:3
-  1152x864  )           geom=1024x768  ;;
-  1024x768  )           geom=800x600   ;;
-   800x600  )           geom=640x480   ;;
+case $geom:$1 in
+  *:-fs ) shift
+          set fnord -T notitle ${1+"$@"}
+          shift ;;
+  18??x*:* | [2-9]???x*:* ) geom=1600x1200 ;;
+  1600x1200:* )             geom=1400x1050 ;;
+  1400x1050:* )             geom=1280x960  ;; # use a 4:3 geometry
+  1280x1024:* )             geom=1152x864  ;; # note 1280x1024 is 5:4, not 4:3
+  1152x864:*  )             geom=1024x768  ;;
+  1024x768:*  )             geom=800x600   ;;
+   800x600:*  )             geom=640x480   ;;
 esac
 
 rdesktop -n ${RDESKTOP_CLIENT-$client} \
