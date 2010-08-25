@@ -4,7 +4,7 @@
 # Created: 1993-09-26
 # Public domain
 
-# $Id: mkpass,v 1.8 2008/04/16 00:35:37 friedman Exp $
+# $Id: mkpass,v 1.9 2009/02/10 01:20:47 friedman Exp $
 
 # Commentary:
 # Code:
@@ -34,12 +34,12 @@ my %crypt_salt
 
       # glibc 2.7 and later
       sha256 => { prefix => '$5$',
-                  len    => 16,
+                  len    => sub { 16 }, # default, but exact not required
                 },
 
       # glibc 2.7 and later
       sha512 => { prefix => '$6$',
-                  len    => 16,
+                  len    => sub { 16 }, # default, but exact not required
                 },
 
       # NetBSD, FreeBSD, Solaris 9 and later
