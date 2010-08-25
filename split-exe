@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: split-exe,v 1.2 2006/03/22 01:00:26 friedman Exp $
+# $Id: split-exe,v 1.3 2010/04/20 19:03:52 friedman Exp $
 
 ofmt="-O binary"
 case $1 in
@@ -7,15 +7,26 @@ case $1 in
 esac
 
 for exe in ${1+"$@"}; do
-  name=`basename $exe`
-  mkdir -p $name.sections
+  name=`basename "$exe"`
+  mkdir -p "$name.sections"
 
-  set x `objdump -h $exe | sed -ne '/^ *[0-9]* \(\.[^ ]*\) .*/!d;s//\1/p'`
+  set x `objdump -h "$exe" | sed -ne '/^ *[0-9]* \([^ ]*\)  *[0-9a-f].*/!d;s//\1/p'`
   shift
 
   for section in ${1+"$@"}; do
     echo $name: $section
     outname=`echo $section | sed -e 's/^\./_/' -e 'y/\//_/'`
-    objcopy $ofmt --only-section=$section $exe $name.sections/$outname
+
+    # We have to mangle addresses and flags to get objcopy to work for all
+    # possible sections.
+    objcopy \
+        --only-section           $section   \
+        --change-section-address $section=0 \
+        --change-section-lma     $section=0 \
+        --change-section-vma     $section=0 \
+        --set-section-flags      $section=contents,load \
+        $ofmt \
+        "$exe" \
+        "$name.sections/$outname"
   done
 done
