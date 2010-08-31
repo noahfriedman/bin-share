@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# pmwget -- poor man's wget
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2010-08-30
+# Public domain
+
+# $Id$
+
+htget()
+{
+  url=${1#http://}
+  host=${url%%/*}
+  path=/${url#*/}
+  file=${path##*/}
+
+  { echo -e GET $path HTTP/1.0'\r'
+    echo -e Host: $host'\r'
+    echo -e '\r'
+
+    sed -e '1,/^\r$/d' 1>&3
+  } > /dev/tcp/$host/80 0<&1 3> $file
+}
+
+main()
+{
+  for url in "$@"; do
+    echo "$url"
+    htget "$url"
+  done
+}
+
+main "$@"
+
+# eof
