@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: automake-ify,v 1.3 2006/08/14 20:59:42 friedman Exp $
+# $Id: automake-ify,v 1.4 2010/09/10 03:07:23 friedman Exp $
 
 run()
 {
@@ -7,13 +7,21 @@ run()
   ${1+"$@"} || exit $?
 }
 
-run aclocal -I m4
+if [ -d m4 ]; then
+  run aclocal -I m4
+else
+  run aclocal
+fi
 
 if [ -d po ]; then
   run glib-gettextize --force --copy
 fi
 
 run autoheader
+
+if grep 'AM_PROG_LIBTOOL' configure.in > /dev/null 2>&1; then
+  run libtoolize -c
+fi
 
 if [ -f Makefile.am ]; then
   run automake --add-missing --copy
