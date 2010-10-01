@@ -4,7 +4,7 @@
 # Created: 2010-02-17
 # Public domain
 
-# $Id: reset-xkb,v 1.1 2010/02/18 03:14:05 friedman Exp $
+# $Id: reset-xkb,v 1.2 2010/02/18 06:50:15 friedman Exp $
 
 # Commentary:
 
@@ -44,6 +44,11 @@ customize()
       case $product_version in
         ThinkPad*60* ) xkb_model=thinkpad60 ;;
       esac ;;
+
+    *"Ideapad S10"* )
+      xkb_model=
+      xkb_option=`delq numpad:microsoft $xkb_option`
+      ;;
   esac
 }
 
