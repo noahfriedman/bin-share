@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.58 2008/11/10 06:53:29 friedman Exp $
+# $Id: from,v 1.59 2010/05/19 23:01:23 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -917,7 +917,7 @@ sub base64_decode ($)
 {
   return $_[0] unless (length ($_[0]) % 4 == 0);
 
-  if (!defined @base64_decode_vector)
+  if (! @base64_decode_vector)
     {
       my $i = 0;
       my $s = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
