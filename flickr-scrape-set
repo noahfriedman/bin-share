@@ -4,7 +4,7 @@
 # Created: 2009-01-28
 # Public domain
 
-# $Id: flickr-scrape-set,v 1.2 2009/02/01 03:38:06 friedman Exp $
+# $Id: flickr-scrape-set,v 1.3 2009/03/14 19:23:17 friedman Exp $
 
 # Commentary:
 
@@ -25,10 +25,12 @@
 # By default the "original size" image urls will be retrieved.  This can be
 # overridden by specifying the size as the second argument; it can be one of:
 # 	"o"   (original)
+#       "b"   (large) -- seems to be used when o not available
 #	"l"   (large)
-#	"m"   (medium)
+#       "z"   (medium640)
+#	"m"   (medium500)
 #	"s"   (small)
-#	"t"   (tiny)
+#	"t"   (thumbnail)
 #	"sq"  (square)
 
 # Sets or images which are only viewable by friends, etc. can be retrieved
@@ -48,7 +50,7 @@ use strict;
 my @default_cookie_db
   = ( "$ENV{HOME}/.cookies.sqlite",
       "$ENV{HOME}/.mozilla/firefox/default/cookies.sqlite",
-      "$ENV{HOME}/etc/misc/.mozilla/firefox/noah.firefox3/cookies.sqlite"
+      "$ENV{HOME}/etc/misc/.flickr-scape-set/cookies.sqlite",
     );
 
 sub make_cookie
@@ -190,9 +192,12 @@ sub image_url
 {
   my ($page_url, $headers) = @_;
 
+  my $picid = $1 if $page_url =~ m=/(\d+)/sizes=;
   my $content = http_get ($page_url, $headers);
+
   return join (".", $1, $2)
-    if $content =~ m/="([^"]+)_d\.(jpg|png|gif)"/;
+    if ($content =~ m/="([^"]+)_d\.(jpg|png|gif)"/
+        || $content =~ m/src="([^"]+\/${picid}_.*?)\.(jpg|png|gif)/);
 }
 
 sub main
