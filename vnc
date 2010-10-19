@@ -1,0 +1,75 @@
+#!/bin/sh
+# $Id: vncviewer,v 1.3 2010/02/16 20:46:06 friedman Exp $
+
+# Note: OSX RDP is busted and only recognizes hextile encoding.
+# For realvnc, use:  -FullColor -PreferredEncoding hextile
+
+xgeom()
+{
+  xrdb -symbols -screen \
+    | sort \
+    | sed -e /-DHEIGHT=/h \
+          -e /-DWIDTH=/H  \
+          -e '$!d'        \
+          -e x            \
+          -e 's/^.*=\(.*\)\n.*=\(.*\)/\2x\1/'
+}
+
+run_vnc()
+{
+  vncviewer "$@" >> $HOME/.xinitrc.log 2>&1 < /dev/null &
+}
+
+tigervnc()
+{
+  run_vnc -Shared "$@"
+}
+
+realvnc()
+{
+  run_vnc -AlwaysShared -Shared "$@"
+}
+
+tightvnc()
+{
+  encodings='copyrect tight hextile zlib corre rre'
+  run_vnc -encodings "$encodings" "$@"
+}
+
+vnc_client()
+{
+  case $fs in
+    t ) set fnord -geometry `xgeom` -name notitle "$@"
+        shift ;;
+  esac
+
+  case $mac in
+    t ) set fnord -FullColor -PreferredEncoding hextile "$@"
+        shift ;;
+  esac
+
+  case $vncversion in
+    *TigerVNC*      ) tigervnc "$@" ;;
+    *"RealVNC Ltd"* ) realvnc  "$@" ;;
+    *TightVNC*      ) tightvnc "$@" ;;
+  esac
+}
+
+main()
+{
+  vncversion=`vncviewer --version 2>&1`
+
+  while :; do
+    case $1 in
+      -fs  ) fs=t;  shift ;;
+      -mac ) mac=t; shift ;;
+      *    ) break ;;
+    esac
+  done
+
+  vnc_client "$@"
+}
+
+main "$@"
+
+# eof
