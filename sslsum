@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id$
+# $Id: sslsum,v 1.1 2007/06/04 19:59:06 friedman Exp $
 
 openssl=${OPENSSL-openssl}
 
@@ -39,9 +39,10 @@ esac
 case $# in
   0 ) exec $openssl dgst -$alg ;;
   * ) for arg in ${1+"$@"} ; do
+        test -d "$arg" && continue
         dgst=`$openssl dgst -$alg < "$arg"`
         echo "$dgst  $arg"
       done ;;
-esac
+esac | sed -e 's/^[^=]*= //'
 
 # eof
