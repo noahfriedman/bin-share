@@ -4,7 +4,7 @@
 # Created: 2005-08-10
 # Public domain
 
-# $Id: mrdesktop,v 1.3 2010/07/02 02:11:35 friedman Exp $
+# $Id: mrdesktop,v 1.4 2010/10/08 22:06:24 friedman Exp $
 
 # Commentary:
 
@@ -61,7 +61,6 @@ esac
 
 rdesktop -n ${RDESKTOP_CLIENT-$client} \
          -g ${RDESKTOP_GEOM-$geom} \
-
          -u ${RDESKTOP_USER-${LOGNAME-$USER}} \
          -a ${RDESKTOP_DEPTH-$depth} \
          -K -P \
