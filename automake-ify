@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: automake-ify,v 1.4 2010/09/10 03:07:23 friedman Exp $
+# $Id: automake-ify,v 1.5 2010/09/19 07:00:19 friedman Exp $
 
 run()
 {
@@ -20,7 +20,14 @@ fi
 run autoheader
 
 if grep 'AM_PROG_LIBTOOL' configure.in > /dev/null 2>&1; then
-  run libtoolize -c
+  if grep -i 'libltdl' configure.in > /dev/null 2>&1; then
+    if [ -d libltdl ]; then
+      rm -rf libltdl
+    fi
+    run libtoolize -c --ltdl --subproject
+  else
+    run libtoolize -c
+  fi
 fi
 
 if [ -f Makefile.am ]; then
