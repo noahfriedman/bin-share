@@ -4,7 +4,7 @@
 # Created: 2010-02-17
 # Public domain
 
-# $Id: reset-xkb,v 1.2 2010/02/18 06:50:15 friedman Exp $
+# $Id: reset-xkb,v 1.3 2010/10/01 08:35:11 friedman Exp $
 
 # Commentary:
 
@@ -18,8 +18,8 @@ verbose=t
 
 initialize()
 {
-  xkb_rules=${XKB_RULES-xorg}
-  xkb_model=${XKB_MODEL-microsoft}
+  xkb_rules=${XKB_RULES}
+  xkb_model=${XKB_MODEL}
   xkb_layout=${XKB_LAYOUT-us}
   xkb_geometry=${XKB_GEOMETRY}
   xkb_keycodes=${XKB_KEYCODES}
@@ -27,7 +27,6 @@ initialize()
   xkb_option=${XKB_OPTION-"
     ctrl:nocaps
     compose:lwin
-    numpad:microsoft
     terminate:ctrl_alt_bksp
   "}
 }
@@ -38,16 +37,13 @@ customize()
 
   case $product_version in
     ThinkPad* )
-      xkb_model=thinkpad
-      xkb_option=`delq numpad:microsoft $xkb_option`
+      xkb_model=${XKB_MODEL-thinkpad}
 
       case $product_version in
-        ThinkPad*60* ) xkb_model=thinkpad60 ;;
+        ThinkPad*60* ) xkb_model=${XKB_MODEL-thinkpad60} ;;
       esac ;;
 
-    *"Ideapad S10"* )
-      xkb_model=
-      xkb_option=`delq numpad:microsoft $xkb_option`
+    *"Ideapad S10"* ) :
       ;;
   esac
 }
