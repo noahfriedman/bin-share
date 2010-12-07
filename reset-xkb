@@ -4,7 +4,7 @@
 # Created: 2010-02-17
 # Public domain
 
-# $Id: reset-xkb,v 1.3 2010/10/01 08:35:11 friedman Exp $
+# $Id: reset-xkb,v 1.4 2010/11/15 17:45:42 friedman Exp $
 
 # Commentary:
 
@@ -40,7 +40,8 @@ customize()
       xkb_model=${XKB_MODEL-thinkpad}
 
       case $product_version in
-        ThinkPad*60* ) xkb_model=${XKB_MODEL-thinkpad60} ;;
+        ThinkPad*60*  ) xkb_model=${XKB_MODEL-thinkpad60} ;;
+        ThinkPad*701* ) xkb_model=${XKB_MODEL-thinkpad60} ;;
       esac ;;
 
     *"Ideapad S10"* ) :
