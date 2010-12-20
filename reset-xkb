@@ -4,7 +4,7 @@
 # Created: 2010-02-17
 # Public domain
 
-# $Id: reset-xkb,v 1.4 2010/11/15 17:45:42 friedman Exp $
+# $Id: reset-xkb,v 1.5 2010/12/07 05:20:05 friedman Exp $
 
 # Commentary:
 
@@ -27,8 +27,8 @@ initialize()
   xkb_option=${XKB_OPTION-"
     ctrl:nocaps
     compose:lwin
-    terminate:ctrl_alt_bksp
   "}
+#   terminate:ctrl_alt_bksp
 }
 
 customize()
