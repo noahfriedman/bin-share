@@ -1,10 +1,10 @@
 #!/bin/sh
-# mrdesktop --- wrapper for rdesktop
+# rdp --- Remote Desktop Protocol client wrapper
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2005-08-10
 # Public domain
 
-# $Id: mrdesktop,v 1.4 2010/10/08 22:06:24 friedman Exp $
+# $Id$
 
 # Commentary:
 
@@ -20,50 +20,92 @@
 
 # Code:
 
-hostname=${HOSTNAME-`uname -n`}
-host=`echo "$HOSTNAME" | sed -e 's/\..*//'`
+setup()
+{
+  hostname=${HOSTNAME-`uname -n`}
+  host=`echo "$HOSTNAME" | sed -e 's/\..*//'`
 
-sec_per_day=86400
-days_per_license=60  # might be 90? play it safe
-epoch=1117584000     # 2005-06-01 00:00:00 UTC
-now=`date -u +%s`
+  sec_per_day=86400
+  days_per_license=60  # might be 90? play it safe
+  epoch=1117584000     # 2005-06-01 00:00:00 UTC
+  now=`date -u +%s`
 
-# expr is more likely to be installed than dc
-#gen=`echo "$now $epoch - $sec_per_day $days_per_license 1 - * / p" | dc`
-#gen=`expr \( $now - $epoch \) / \( $sec_per_day \* \( $days_per_license - 1 \) \)`
-gen=$(( (now - epoch) / (sec_per_day * (days_per_license - 1)) ))
-client=$host'$'$gen'$'
+  # expr is more likely to be installed than dc
+  #gen=`echo "$now $epoch - $sec_per_day $days_per_license 1 - * / p" | dc`
+  #gen=`expr \( $now - $epoch \) / \( $sec_per_day \* \( $days_per_license - 1 \) \)`
+  gen=$(( (now - epoch) / (sec_per_day * (days_per_license - 1)) ))
+  client=$host'$'$gen'$'
 
-#geom=`xrdb-symbol-value WIDTH HEIGHT | sed -ne '1h;2H;$x;$s/\n/x/;$p'`
-geom=`xrdb -symbols -screen \
-       | sort \
-       | sed -e /-DHEIGHT=/h \
-             -e /-DWIDTH=/H  \
-             -e '$!d'        \
-             -e x            \
-             -e 's/^.*=\(.*\)\n.*=\(.*\)/\2x\1/'`
+  xrdb=`xrdb -symbols -screen | sort`
+  depth=`echo "$xrdb" | sed -n -e '/-DPLANES=/s///p'`
 
-depth=`xrdb -symbols -screen | sed -n -e '/-DPLANES=/s///p'`
+  #geom=`xrdb-symbol-value WIDTH HEIGHT | sed -ne '1h;2H;$x;$s/\n/x/;$p'`
+  geom=`echo "$xrdb" \
+         | sed -e /-DHEIGHT=/h \
+               -e /-DWIDTH=/H  \
+               -e '$!d'        \
+               -e x            \
+               -e 's/^.*=\(.*\)\n.*=\(.*\)/\2x\1/'`
+  display_geom=$geom
 
-case $geom:$1 in
-  *:-fs ) shift
-          set fnord -T notitle ${1+"$@"}
+  case $1 in -fs ) return ;; esac
+  case $geom in
+    1920x1200 ) geom=1400x1050 ;;
+    1600x1200 ) geom=1400x1050 ;;
+    1400x1050 ) geom=1280x960  ;; # use a 4:3 geometry
+    1280x1024 ) geom=1152x864  ;; # note 1280x1024 is 5:4, not 4:3
+    1152x864  ) geom=1024x768  ;;
+    1024x600  ) geom=800x480   ;;
+    1024x768  ) geom=800x600   ;;
+     800x600  ) geom=640x480   ;;
+  esac
+}
+
+run_rdesktop()
+{
+  case $1 in
+    -fs ) shift
+          set fnord -T notitle "$@"
           shift ;;
-  18??x*:* | [2-9]???x*:* ) geom=1600x1200 ;;
-  1600x1200:* )             geom=1400x1050 ;;
-  1400x1050:* )             geom=1280x960  ;; # use a 4:3 geometry
-  1280x1024:* )             geom=1152x864  ;; # note 1280x1024 is 5:4, not 4:3
-  1152x864:*  )             geom=1024x768  ;;
-  1024x600:*  )             geom=800x480   ;;
-  1024x768:*  )             geom=800x600   ;;
-   800x600:*  )             geom=640x480   ;;
-esac
+  esac
 
-rdesktop -n ${RDESKTOP_CLIENT-$client} \
-         -g ${RDESKTOP_GEOM-$geom} \
-         -u ${RDESKTOP_USER-${LOGNAME-$USER}} \
-         -a ${RDESKTOP_DEPTH-$depth} \
-         -K -P \
-         ${1+"$@"} &
+  ${RDP_PROG-rdesktop} \
+      -n ${RDP_CLIENT-$client} \
+      -g ${RDP_GEOM-$geom} \
+      -u ${RDP_USER-${LOGNAME-$USER}} \
+      -a ${RDP_DEPTH-$depth} \
+      -K -P -z \
+      ${1+"$@"} &
+}
+
+run_xfreerdp()
+{
+  case $1 in
+    -fs ) shift
+          set fnord -f "$@"
+          shift ;;
+  esac
+
+  ${RDP_PROG-xfreerdp} \
+      -n ${RDP_CLIENT-$client} \
+      -g ${RDP_GEOM-$geom} \
+      -u ${RDP_USER-${LOGNAME-$USER}} \
+      -a ${RDP_DEPTH-$depth} \
+      -z \
+      --plugin cliprdr \
+      --plugin rdpsnd \
+      ${1+"$@"} &
+}
+
+main()
+{
+  setup "$@"
+  case ${RDP_PROG-rdesktop} in
+    *rdesktop* ) run_rdesktop "$@" ;;
+    *freerdp*  ) run_xfreerdp "$@" ;;
+  esac
+}
+
+main "$@"
 
 # eof
