@@ -1,5 +1,5 @@
 #! /bin/sh
-# $Id: dist-tar,v 1.5 2010/02/18 02:10:17 friedman Exp $
+# $Id: dist-tar,v 1.6 2010/03/23 05:16:32 friedman Exp $
 
 LC_COLLATE=C
 export LC_COLLATE
@@ -12,6 +12,7 @@ case ${DIST_TAR_ZIP-gzip} in
   gzip  ) zip=gzip  z=gz   ;;
   bzip2 ) zip=bzip2 z=bz2  ;;
   lzma  ) zip=lzma  z=lzma ;;
+  xz    ) zip=xz    z=xz   ;;
 esac
 
 for dir in ${1+"$@"} ; do
