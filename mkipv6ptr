@@ -1,0 +1,29 @@
+#!/usr/bin/env perl
+# $Id$
+
+# Generate strings suitable for PTR records out of hex quad ipv6 addresses.
+# e.g:
+# 	$ mkipv6ptr 226:2dff:fefe:fe9c 20c:29ff:fe74:2feb 2001:470:8609:10:20c:29ff:fe69:3ff3
+# 	226:2dff:fefe:fe9c                      c.9.e.f.e.f.e.f.f.f.d.2.6.2.2.0
+# 	20c:29ff:fe74:2feb                      b.e.f.2.4.7.e.f.f.f.9.2.c.0.2.0
+# 	2001:470:8609:10:20c:29ff:fe69:3ff3     3.f.f.3.9.6.e.f.f.f.9.2.c.0.2.0.0.1.0.0.9.0.6.8.0.7.4.0.1.0.0.2
+
+$^W = 1;
+
+use strict;
+
+sub ip6rev
+{
+  join (".", reverse map { split (//, sprintf ("%04x", hex ($_)));
+                         } split (/:/, shift));
+}
+
+sub main
+{
+  @_ = map { chomp; $_ } <STDIN> unless @_;
+  map { printf ("%-39s %s\n", $_, ip6rev ($_)) } @_;
+}
+
+main (@ARGV);
+
+# eof
