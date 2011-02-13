@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# $Id$
+# $Id: mkipv6ptr,v 1.1 2011/02/10 04:05:44 friedman Exp $
 
 # Generate strings suitable for PTR records out of hex quad ipv6 addresses.
 # e.g:
@@ -7,16 +7,43 @@
 # 	226:2dff:fefe:fe9c                      c.9.e.f.e.f.e.f.f.f.d.2.6.2.2.0
 # 	20c:29ff:fe74:2feb                      b.e.f.2.4.7.e.f.f.f.9.2.c.0.2.0
 # 	2001:470:8609:10:20c:29ff:fe69:3ff3     3.f.f.3.9.6.e.f.f.f.9.2.c.0.2.0.0.1.0.0.9.0.6.8.0.7.4.0.1.0.0.2
+#
+# This will auto compute autoconfiguration /64s for mac address in the form xx:xx:xx:xx:xx:xx
+# e.g:
+#	$ mkipv6ptr c8:0a:a9:5b:8a:d1 00:26:82:6c:02:fd
+#	c8:0a:a9:5b:8a:d1                       1.d.a.8.b.5.e.e.f.f.9.a.a.0.a.c
+#	00:26:82:6c:02:fd                       d.f.2.0.c.6.e.e.f.f.2.8.6.2.2.0
+#
 
 $^W = 1;
 
 use strict;
 
+sub ipv6_autoconfig_mac
+{
+  local $_ = lc $_[0];
+
+  s/://g;
+  s/^(.{6})/$1ffee/;
+  s/(....)/$1:/g;
+  s/:$//;
+
+  # Set the universal bit if not set already.
+  my $ubit = sprintf ("%x", (2 | hex ($1))) if /^.(.)/;
+  s/^(.)(.)/$1$ubit/;
+
+  return $_;
+}
+
 sub ip6rev
 {
+  my $ip = lc shift;
+  $ip = ipv6_autoconfig_mac ($ip) if $ip =~ /^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$/;
+
   join (".", reverse map { split (//, sprintf ("%04x", hex ($_)));
-                         } split (/:/, shift));
+                         } split (/:/, $ip));
 }
+
 
 sub main
 {
