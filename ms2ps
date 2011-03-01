@@ -1,3 +1,4 @@
 #!/bin/sh
-# $Id$
-exec groff -pet -Tps -mgs ${1+"$@"}
+# $Id: ms2ps,v 1.1 1998/03/21 12:20:54 friedman Exp $
+# adding -rHY=0 to the command line will disable hyphenation
+exec groff -pet -ms -Tps ${1+"$@"}
