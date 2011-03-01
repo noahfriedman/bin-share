@@ -1,4 +1,5 @@
 #!/bin/sh
-# $Id: ms2txt,v 1.2 2004/06/07 07:31:41 friedman Exp $
+# $Id: ms2txt,v 1.3 2006/03/17 16:26:35 friedman Exp $
 # adding -rHY=0 to the command line will disable hyphenation
-exec groff -pet -Tlatin1 -mgs ${1+"$@"}
+# -Tlatin1
+exec groff -pet -ms -Tutf8 ${1+"$@"}
