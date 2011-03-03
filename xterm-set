@@ -4,7 +4,7 @@
 # Created: 1991-06-26
 # Public domain
 
-# $Id: xterm-set,v 2.5 2009/03/28 16:26:26 friedman Exp $
+# $Id: xterm-set,v 2.6 2009/10/21 01:46:11 friedman Exp $
 
 # Commentary:
 
@@ -70,11 +70,12 @@ my %ctlseq = (
 
  'width'                   => [ 805, "\e[8;;%st", "cols",  "Set window width in columns"],
  'height'                  => [ 806, "\e[8;%s;t", "lines", "Set window height in lines"],
+ 'geometry'                => [ 807, "\e[8;%s;%st", "height width", "Set window height and width in chars"],
 
- 'xsize'                   => [ 807, "\e[4;;%st", "", "Set window width in pixels"],
- 'ysize'                   => [ 808, "\e[4;%s;t", "", "Set window height in pixels"],
+ 'xsize'                   => [ 810, "\e[4;;%st", "", "Set window width in pixels"],
+ 'ysize'                   => [ 811, "\e[4;%s;t", "", "Set window height in pixels"],
 
- 'move'                    => [ 809, "\e[3;%s;%st", "xpos ypos", "Set upper left corner of windows's X,Y coordinates, in pixels"],
+ 'move'                    => [ 820, "\e[3;%s;%st", "xpos ypos", "Set upper left corner of windows's X,Y coordinates, in pixels"],
 
  'fixcurses'               => [ 901, "\e[?41h", "", "Work around curses bugs"],
  'no-fixcurses'            => [ 902, "\e[?41l", "", "Do not work around curses bugs"],
@@ -128,6 +129,7 @@ my %ctlseq = (
 # Aliases
 $ctlseq{rows}           = 'height';
 $ctlseq{cols}           = 'width';
+$ctlseq{geom}           = 'geometry';
 $ctlseq{wob}            = 'reverse-video';
 $ctlseq{bow}            = 'normal-video';
 $ctlseq{fg}             = 'foreground-color';
@@ -147,6 +149,87 @@ sub xterm_send
   $seq = sprintf ($screen_encap, $seq)
     if (exists $ENV{STY} || $ENV{TERM} =~ /^screen/o);
   print $seq;
+}
+
+# xterm sends answerback to tty, which we read from stdin.
+# We must put the terminal in non-canonical mode so that we can read the
+# string immediately and not subject it to (most) editing characters.
+# However, we do want to leave control characters (INT, HUP, etc) enabled,
+# so we cannot use raw mode.
+#
+# Example usage:
+#	my $re = qr/\e\[8;(\d+);(\d+)t/;
+#	xterm_send ("\e[18t");
+#	my $result = xterm_read_response ($re);
+#	$result =~ $re;
+#	print "Geometry is $2x$1\n";
+#
+sub xterm_read_response
+{
+  my $re = shift;
+  my $fn;
+
+  my %trap_sigs = ( HUP  =>  1, INT  =>  2, QUIT =>  3, TERM => 15);
+  my %sig_orig;
+  my $restorefn = sub { &$fn if $fn;
+                        my $signum = $trap_sigs{$_[0]};
+                        # 7th bit set indicates lower 6 bits represent a
+                        # signal number (0x80 == 2**7)
+                        exit (0x80 | $signum);
+                      };
+  map { $sig_orig{$_} = $SIG{$_} || 'DEFAULT';
+        $SIG{$_} = $restorefn
+      } keys %trap_sigs;
+
+  my $fh = *STDIN{IO};
+  my $fd = fileno ($fh);
+  if (-t $fd)
+    {
+      use POSIX qw(:termios_h);
+
+      # Put tty in non-canonical mode and disable echo.
+      my $fd = fileno ($fh);
+      my $tty = POSIX::Termios->new;
+      $tty->getattr ($fd);
+
+      # Save original values
+      my $c_lflag = $tty->getlflag;
+      my @c_cc;
+      $c_cc[VMIN]  = $tty->getcc (VMIN);
+      $c_cc[VTIME] = $tty->getcc (VTIME);
+
+      $tty->setlflag ($c_lflag & ~(ECHO | ICANON));
+      $tty->setcc    (VMIN,  1);
+      $tty->setcc    (VTIME, 0);
+      $tty->setattr  ($fd);
+
+      $fn = sub { $tty->setlflag ($c_lflag);
+                  $tty->setcc (VMIN,  $c_cc[VMIN]);
+                  $tty->setcc (VTIME, $c_cc[VTIME]);
+                  $tty->setattr ($fd);
+                };
+    }
+  else # reading from a pipe, presumably
+    {
+      my $orig_fh = select ($fh);
+      my $bufferedp = $|;
+
+      $| = 1;  # disable buffering
+      select ($orig_fh);
+
+      $fn = sub { $orig_fh = select ($fh);
+                  $| = $bufferedp;
+                  select ($orig_fh);
+                };
+    }
+
+  local $_ = "";
+  $_ .= getc ($fh) while (! /$re/);
+
+  &$fn; # call restore thunk
+  map { $SIG{$_} = $sig_orig{$_} } keys %trap_sigs;
+
+  return $_;
 }
 
 sub ctlseq
@@ -220,12 +303,12 @@ sub usage
 
 sub main
 {
-  return usage() unless @ARGV;
+  return usage() unless @_;
 
   my @cmdlist;
-  while (@ARGV)
+  while (@_)
     {
-      my $cmd = shift @ARGV;
+      my $cmd = shift @_;
       my $seq = ctlseq ($cmd, 1);
 
       if (!defined $seq)
@@ -236,7 +319,7 @@ sub main
 
       my $numargs = ctlseq_numargs ($seq);
       my @arg = ($seq);
-      map { my $new = shift @ARGV;
+      map { my $new = shift @_;
             if (!defined $new || exists $ctlseq{$new})
               {
                 print STDERR "$prog: $cmd: command requires $numargs argument(s)\n";
@@ -251,7 +334,7 @@ sub main
   map { xterm_send (@$_) } @cmdlist;
 }
 
-main();
+main (@ARGV);
 
 # local variables:
 # mode: perl
