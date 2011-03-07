@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# $Id: mkipv6ptr,v 1.1 2011/02/10 04:05:44 friedman Exp $
+# $Id: mkipv6ptr,v 1.2 2011/02/13 22:54:47 friedman Exp $
 
 # Generate strings suitable for PTR records out of hex quad ipv6 addresses.
 # e.g:
@@ -24,7 +24,7 @@ sub ipv6_autoconfig_mac
   local $_ = lc $_[0];
 
   s/://g;
-  s/^(.{6})/$1ffee/;
+  s/^(.{6})/$1fffe/;
   s/(....)/$1:/g;
   s/:$//;
 
