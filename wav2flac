@@ -1,0 +1,39 @@
+#!/bin/sh
+# $Id$
+
+wav_to_flac()
+{
+  wav=$1
+  shift
+
+  base=`basename "$wav" .wav`
+  flac=$base.flac
+
+  flac \
+      --verify \
+      --compression-level-8 \
+      --exhaustive-model-search \
+      --keep-foreign-metadata \
+      --seekpoint=10s \
+      --output-name="$flac" \
+      "$wav" \
+      "$@"
+}
+
+main()
+{
+  case $1 in
+    -1 ) shift
+         wav_to_flac "$@" ;;
+     * )
+         for wav in "$@"; do
+           echo "$wav"
+           wav_to_flac "$wav"
+           echo
+         done ;;
+  esac
+}
+
+main "$@"
+
+# eof
