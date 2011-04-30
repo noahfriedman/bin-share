@@ -5,7 +5,7 @@
 # Created: 1996-03-05; rewritten in perl 2011-04-26
 # Public domain
 
-# $Id$
+# $Id: fancy-xearth,v 1.11 2011/04/28 17:11:11 friedman Exp $
 
 # Commentary:
 # Code:
@@ -120,8 +120,8 @@ sub xplanet
   # width and height.
   my $offset = ($width + $height) / 8;
 
-  my $height_pct = 12; # Inititally use 12% of height
-  $height_pct = 1 + ceil ($height_pct * $aspect)
+  my $height_pct = 13; # Inititally use 13% of height
+  $height_pct = $height_pct * $aspect
     if ($width < $height); # But adjust by aspect ratio if width smaller.
 
   # Make sure that center offset leaves the edge of the planet at least 150
@@ -140,9 +140,12 @@ sub xplanet
               "-vroot",
 
               "-north",      "body",
-              "-latitude",    "21",
-              "-localtime",    "8", # center over 8am local time
-             #"-longitude",  "275", # center over fixed point
+
+              #"-latitude",    "21",
+              #"-localtime",    "8", # center over 8am local time
+
+              "-latitude",    "40",
+              "-longitude",  "300", # center over fixed point
              );
 
   if (@_ && $_[0] eq '-once')
@@ -164,11 +167,14 @@ sub xearth
 {
   my $width  = xrdb_symbol_value ('width');
   my $height = xrdb_symbol_value ('height');
-  my $aspect = aspect_ratio ($width, $height);
 
-  # Needs work.
-  my $xshift = $width  / 4;
-  my $yshift = $height / 6;
+  my $mag = 0.26;
+  my $minsize = $width < $height ? $width : $height;
+  my $radius = $mag * $minsize / 2;
+
+  my $offset = $minsize / 3;
+  my $xshift = ($width  / 2) - $offset;
+  my $yshift = ($height / 2) - $offset;
 
   my @args = ("-nolabel",
               "-stars",
@@ -177,18 +183,16 @@ sub xearth
               "-night",    "15",
               "-wait",     "3600",
               "-nice",     "19",
-              "-mag",      "0.25",
+              "-mag",      "$mag",
               "-shift",    "-$xshift,-$yshift",
               "-pos",      "sunrel,24.64,41.3",
               "-gamma",    "1.0",
-              "-rot",      "21",
               "-proj",     "orthographic",
               "-bigstars", "20",
              );
   push @args, (qw(-fork)) unless (@_ && $_[0] eq '-once');
   push @args, @_;
 
-  print "xearth @args\n";
   system ("xearth", @args);
 }
 
