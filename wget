@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# $Id: wget,v 1.7 2008/11/05 07:36:34 friedman Exp $
+# $Id: wget,v 1.8 2009/06/09 15:57:21 friedman Exp $
 
 wget=`run-next -p "$0" || echo :`
 
@@ -20,14 +20,20 @@ esac
 
 atleast() { [ $vmajor -eq $1 ] && [ $vminor -ge $2 ] || [ $vmajor -gt $1 ]; }
 
-opts="--verbose
-      --server-response
-      --wait=0
+opts="--wait=0
       --tries=0
       --cache=off
       --passive-ftp
      "
 #     --follow-ftp
+
+case " $* " in
+  *" -q "* | *" --quiet "* ) : ;;
+  * ) opts="$opts
+            --verbose
+            --server-response
+           " ;;
+esac
 
 # wget 1.11.1 doesn't allow -N (--timestamping) with -O
 case " $* " in
