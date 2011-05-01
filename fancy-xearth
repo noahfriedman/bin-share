@@ -5,7 +5,7 @@
 # Created: 1996-03-05; rewritten in perl 2011-04-26
 # Public domain
 
-# $Id: fancy-xearth,v 1.11 2011/04/28 17:11:11 friedman Exp $
+# $Id: fancy-xearth,v 1.12 2011/04/30 19:17:34 friedman Exp $
 
 # Commentary:
 # Code:
@@ -130,22 +130,24 @@ sub xplanet
   my $edge = $offset - $radius;
   $offset += (150 - $edge) if $edge < 150;
 
-  my @args = ("-config",     "default",
-              "-projection", "orthographic",
-              "-starfreq",   ".0015",
-              "-searchdir",  "$ENV{HOME}/etc/images/xplanet",
-              "-center",     "+$offset+$offset",
-              "-radius",     "$height_pct",
+  my @args = ("-config",         "fancy-xearth.conf",
+              "-verbosity",      "-1",
+              "-searchdir",      "$ENV{HOME}/etc/images/xplanet",
+              "-center",         "+$offset+$offset",
+
+              "-radius",         "$height_pct",
+              "-range",           "4",
+              "-base_magnitude", "12",
+
               "-light_time",
               "-vroot",
 
-              "-north",      "body",
+              "-north",          "body",
+              #"-latitude",      "21",
+              #"-localtime",      "8", # center over 8am local time
 
-              #"-latitude",    "21",
-              #"-localtime",    "8", # center over 8am local time
-
-              "-latitude",    "40",
-              "-longitude",  "300", # center over fixed point
+              "-latitude",       "40",
+              "-longitude",     "300", # center over fixed point
              );
 
   if (@_ && $_[0] eq '-once')
@@ -159,6 +161,7 @@ sub xplanet
     }
 
   push @args, @_;
+  #print "xplanet @args\n";
   system ("xplanet", @args);
 }
 
