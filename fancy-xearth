@@ -5,7 +5,7 @@
 # Created: 1996-03-05; rewritten in perl 2011-04-26
 # Public domain
 
-# $Id: fancy-xearth,v 1.12 2011/04/30 19:17:34 friedman Exp $
+# $Id: fancy-xearth,v 1.13 2011/05/01 04:37:17 friedman Exp $
 
 # Commentary:
 # Code:
@@ -136,7 +136,7 @@ sub xplanet
               "-center",         "+$offset+$offset",
 
               "-radius",         "$height_pct",
-              "-range",           "4",
+              "-range",           "6",
               "-base_magnitude", "12",
 
               "-light_time",
