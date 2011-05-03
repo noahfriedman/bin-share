@@ -5,7 +5,7 @@
 # Created: 1996-03-05; rewritten in perl 2011-04-26
 # Public domain
 
-# $Id: fancy-xearth,v 1.14 2011/05/01 04:40:02 friedman Exp $
+# $Id: fancy-xearth,v 1.15 2011/05/01 04:50:13 friedman Exp $
 
 # Commentary:
 # Code:
@@ -118,7 +118,7 @@ sub xplanet
 
   # Make initial offset of center of planet one quarter of the average of
   # width and height.
-  my $offset = ($width + $height) / 8;
+  my $offset = int (($width + $height) / 8);
 
   my $height_pct = 13; # Inititally use 13% of height
   $height_pct = $height_pct * $aspect
