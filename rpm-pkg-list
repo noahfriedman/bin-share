@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.19 2010/06/10 00:27:57 friedman Exp $
+# $Id: rpm-pkg-list,v 1.20 2010/11/09 02:21:54 friedman Exp $
 
 # Commentary:
 # Code:
@@ -76,6 +76,7 @@ my %field_alias
 
 my %repo_fingerprint
   = (
+      '069c8460' => 'fedora-15',
       '97a1071f' => 'fedora-14',
       'e8e40fde' => 'fedora-13',
       '57bbccba' => 'fedora-12',
