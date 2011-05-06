@@ -1,30 +1,10 @@
-#!/bin/sh
-exec ${PERL-perl} -Swx $0 ${1+"$@"}
-#!perl		  [perl will skip all lines in this file before this line]
-
+#!/usr/bin/env perl
 # with --- run program with special properties
-
-# Copyright (C) 1995, 2000, 2002 Noah S. Friedman
-
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-08-14
+# Public domain
 
-# $Id: with,v 1.11 2003/02/25 09:01:22 friedman Exp $
-
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2, or (at your option)
-# any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, you can either send email to this
-# program's maintainer or write to: The Free Software Foundation,
-# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
+# $Id$
 
 # Commentary:
 
@@ -33,28 +13,21 @@ exec ${PERL-perl} -Swx $0 ${1+"$@"}
 
 # Code:
 
-use Getopt::Long;
-use POSIX qw(setsid);
-use Symbol;
+$^W = 1; # enable warnings
+
 use strict;
+use Symbol;
+use POSIX qw(setsid);
+use Getopt::Long;
+use Pod::Usage;
 
 (my $progname = $0) =~ s|.*/||;
 my $bgfn;
 my $bgopt = 0;
 
-my $opt_cwd;
-my $opt_egid;
-my $opt_euid;
-my $opt_gid;
-my $opt_groups;
-my @opt_include;
-my $opt_name;
-my $opt_pgrp;
-my $opt_priority;
-my $opt_root;
-my $opt_uid;
-my $opt_umask;
-my $opt_foreground = 0;
+my %opt = ( foreground => 0,
+            include    => [],
+          );
 
 sub err
 {
@@ -70,7 +43,7 @@ sub get_includes
         "$ENV{HOME}/lib/perl",
         "$ENV{HOME}/lib/perl/include");
 
-  eval { require "syscall.ph" } if defined $opt_groups;
+  eval { require "syscall.ph" } if defined $opt{groups};
 }
 
 sub numberp
@@ -162,6 +135,15 @@ sub set_priority
   setpriority (0, 0, $prio) || err ("setpriority", $prio, $!);
 }
 
+sub set_proxy
+{
+  my $proxy = shift;
+
+  # Some programs use case-sensitive variable names; some don't.
+  map { $ENV{$_} = $ENV{uc $_} = $proxy;
+      } (qw(http_proxy https_proxy ftp_proxy));
+}
+
 sub set_root
 {
   my $d = shift;
@@ -207,7 +189,7 @@ sub background
       return *STDERR{IO};
     }
 
-  exit (0) unless $opt_foreground;
+  exit (0) unless $opt{foreground};
   wait;
   exit ($?);
 }
@@ -259,38 +241,46 @@ sub set_bg_option
       8 => \&dosetsid,
     );
 
-  $bgopt = $_[0];
-  $bgfn  = $bgfntbl{$bgopt};
+  $bgopt |= $_[0];
+  $bgfn   = $bgfntbl{$bgopt};
 }
 
 sub parse_options
 {
-  Getopt::Long::config (qw(bundling autoabbrev require_order));
+  my $help = -1;
+
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  Getopt::Long::config (qw(bundling auto_abbrev require_order));
   my $succ = GetOptions
-    ("h|help",          sub { usage () },
-     "c|cwd=s",         \$opt_cwd,
-     "d|display=s",     \$ENV{DISPLAY},
-     "H|home=s",        \$ENV{HOME},
-     "G|egid=s",        \$opt_egid,
-     "g|gid=s",         \$opt_gid,
-     "I|include=s@",    \@opt_include,
-     "l|groups=s",      \$opt_groups,
-     "m|umask=s",       \$opt_umask,
-     "n|name=s",        \$opt_name,
-     "P|priority=i",    \$opt_priority,
-     "p|pgrp=i",        \$opt_pgrp,
-     "r|root=s",        \$opt_root,
-     "U|euid=s",        \$opt_euid,
-     "u|uid=s",         \$opt_uid,
+    ("h|help|usage+"    => \$help,
+     "c|cwd=s"          => \$opt{cwd},
+     "d|display=s"      => \$ENV{DISPLAY},
+     "H|home=s"         => \$ENV{HOME},
+     "G|egid=s"         => \$opt{egid},
+     "g|gid=s"          => \$opt{gid},
+     "I|include=s@"     => \@{$opt{include}},
+     "l|groups=s"       => \$opt{groups},
+     "m|umask=s"        => \$opt{umask},
+     "n|name=s"         => \$opt{name},
+     "P|priority=i"     => \$opt{priority},
+     "proxy=s"          => \$opt{proxy},
+     "p|pgrp=i"         => \$opt{pgrp},
+     "r|root=s"         => \$opt{root},
+     "U|euid=s"         => \$opt{euid},
+     "u|uid=s"          => \$opt{uid},
 
-     "f|fg|foreground", \$opt_foreground,
-
-     "b|bg|background", sub { set_bg_option (1); $opt_foreground = 0 },
-     "a|daemon|demon",  sub { set_bg_option (2) },
-     "N|no-tty|notty",  sub { set_bg_option (4) },
-     "s|setsid",        sub { set_bg_option (8) },
+     "f|fg|foreground"  => \$opt{foreground},
+     "b|bg|background"  => sub { set_bg_option (1); $opt{foreground} = 0 },
+     "a|daemon|demon"   => sub { set_bg_option (2) },
+     "N|no-tty|notty"   => sub { set_bg_option (4) },
+     "s|setsid"         => sub { set_bg_option (8) },
     );
-  usage () unless $succ;
+
+  pod2usage (-exitstatus => 1, -verbose => 0) unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
+  pod2usage (-exitstatus => 1, -verbose => 0,
+             -message => "$progname: need to specify command to run.\n")
+    unless @ARGV;
 
   my $n = 0;
   do { $n++ if $bgopt & 1 } while ($bgopt >>= 1);
@@ -298,96 +288,169 @@ sub parse_options
     if ($n > 1);
 }
 
-sub usage
+sub main
 {
-  print STDERR "$progname: @_\n\n" if @_;
-  print STDERR "Usage: $progname {options} [command {args...}]\n
-Options are:
--h, --help            You're looking at it.
--D, --debug           Turn on interactive debugging in perl.
--I, --include   DIR   Include DIR in \@INC path for perl.
-                      This option may be specified multiple times to append
-                      search paths to perl.
+  parse_options (\@_);
+  get_includes (@{$opt{include}});
 
--d, --display   DISP  Run with DISP as the X server display.
--H, --home      HOME  Set \$HOME.
--n, --name      ARGV0 Set name of running program (argv[0]).
+  umask        (oct ($opt{umask})) if defined $opt{umask};
+  set_gid      ($opt{gid})         if defined $opt{gid};
+  set_egid     ($opt{egid})        if defined $opt{egid};
+  set_groups   ($opt{groups})      if defined $opt{groups};
+  set_root     ($opt{root})        if defined $opt{root};
+  set_cwd      ($opt{cwd})         if defined $opt{cwd};
+  set_priority ($opt{priority})    if defined $opt{priority};
+  set_uid      ($opt{uid})         if defined $opt{uid};
+  set_euid     ($opt{euid})        if defined $opt{euid};
+  set_proxy    ($opt{proxy})       if defined $opt{proxy};
 
--c, --cwd       DIR   Run with DIR as the current working directory.
-                      This directory is relative to the root directory as
-                      specified by \`--root', or \`/'.
--r, --root      ROOT  Set root directory (via \`chroot' syscall) to ROOT.
+  my $stderr = $bgfn ? &$bgfn () : *STDERR{IO};
 
--G, --egid      EGID  Set \`effective' group ID.
--g, --gid       GID   Set both \`real' and \`effective' group ID.
--l, --groups    GLIST Set group list to comma-separated GLIST.
--U, --euid      EUID  Set \`effective' user ID.
--u, --uid       UID   Set both \`real' and \`effective' user ID.
+  my $runprog = $_[0];
+  if ($opt{name})
+    {
+      shift   @_;
+      unshift @_, $opt{name};
+    }
+  local $^W = 0; # avoid implicit warnings from exec
+  exec ($runprog @_) || err ($stderr, "exec", $runprog, $!);
+}
 
--m, --umask     UMASK Set umask.
--P, --priority  NICE  Set scheduling priority to NICE (-20 to 20).
--p, --pgrp      PGRP  Set process group.
+main (@ARGV);
+
+__END__
+
+=head1 NAME
+
+with - run program with special properties
+
+=head1 SYNOPSIS
+
+ with {-h|--help}            {-d|--display DISP}   {-c|--cwd DIR}
+      {-D|--debug}           {-H|--home HOME}      {-r|--root ROOT}
+      {-I|--include DIR}     {-n|--name ARGV0}
+
+      {-m|--umask UMASK}     {-G|--egid EGID}      {-b|--background}
+      {-P|--priority NICE}   {-g|--gid GID}        {-f|--foreground}
+      {-p|--pgrp PGRP}       {-l|--groups GLIST}   {-a|--daemon}
+                             {-U|--euid EUID}      {-N|--no-tty}
+                             {-u|--uid UID}        {-s|--setsid}
+
+      [command {args...}]
+
+ The -h option may be repeated up to 3 times for increased verbosity.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<-h>, B<--help>
+
+Usage information.
+May be repeated 1-3 times for more verbosity.
+
+=item B<-D>, B<--debug>
+
+Turn on interactive debugging in perl.
+
+=item B<-I>, B<--include=>I<DIR>
+
+Include DIR in @INC path for perl.
+This option may be specified multiple times to append search paths to perl.
+
+=item B<-d>, B<--display=>I<DISP>
+
+Run with DISP as the X server display.
+
+=item B<-H>, B<--home=>I<HOME>
+
+Set $HOME.
+
+=item B<-n>, B<--name=>I<ARGV0>
+
+Set name of running program (argv[0]).
+
+=item B<-c>, B<--cwd=>I<DIR>
+
+Run with DIR as the current working directory.  This directory is relative
+to the root directory as specified by B<--root>, or C</>.
+
+=item B<-r>, B<--root=>I<ROOT>
+
+Set root directory (via `chroot' syscall) to ROOT.
+
+=item B<-G>, B<--egid=>I<EGID>
+
+Set `effective' group ID.
+
+=item B<-g>, B<--gid=>I<GID>
+
+Set both `real' and `effective' group ID.
+
+=item B<-l>, B<--groups=>I<GLIST>
+
+Set group list to comma-separated GLIST.
+
+=item B<-U>, B<--euid=>I<EUID>
+
+Set `effective' user ID.
+
+=item B<-u>, B<--uid=>I<UID>
+
+Set both `real' and `effective' user ID.
+
+=item B<-m>, B<--umask=>I<UMASK>
+
+Set umask.
+
+=item B<-P>, B<--priority=>I<NICE>
+
+Set scheduling priority to NICE (-20 to 20).
+
+=item B<-p>, B<--pgrp=>I<PGRP>
+
+Set process group.
+
+=back
 
 The following options cause the resulting process to be backgrounded
 automatically but differ in various ways:
 
--b, --background      Run process in background.  This is the default with
-                      the --daemon, --no-tty, and --setsid options.
+=over 8
 
--f, --foreground      Do not put process into the background when using
-                      the --daemon, --no-tty, and --setsid options.
-                      In all other cases the default is to remain in the
-                      foreground.
+=item B<-b>, B<--background>
 
--a, --daemon          Run process in \"daemon\" mode.
-                      This closes stdin, stdout, and stderr, dissociates
-                      the process from any controlling terminal, and
-                      backgrounds the process.
+Run process in background.
+This is the default with the B<--daemon>, B<--no-tty>,
+and B<--setsid> options.
 
--N, --no-tty          Run process in background with no controlling
-                      terminal and with stdin, stdout, and stderr
-                      redirected to /dev/null.
+=item B<-f>, B<--foreground>
 
--s, --setsid          Dissociate from controlling terminal.
-                      This automatically backgrounds the process but
-                      does not redirect any file descriptors.\n";
-  exit (1);
-}
+Do not put process into the background when using the B<--daemon>,
+B<--no-tty>, and B<--setsid> options.
+In all other cases the default is to remain in the foreground.
 
-sub main
-{
-  parse_options ();
-  usage () unless @ARGV;
+=item B<-a>, B<--daemon>
 
-  get_includes (@opt_include);
+Run process in "daemon" mode.  This closes stdin, stdout, and stderr,
+dissociates the process from any controlling terminal, and backgrounds the
+process.
 
-  umask        (oct ($opt_umask)) if defined $opt_umask;
-  set_gid      ($opt_gid)         if defined $opt_gid;
-  set_egid     ($opt_egid)        if defined $opt_egid;
-  set_groups   ($opt_groups)      if defined $opt_groups;
-  set_root     ($opt_root)        if defined $opt_root;
-  set_cwd      ($opt_cwd)         if defined $opt_cwd;
-  set_priority ($opt_priority)    if defined $opt_priority;
-  set_uid      ($opt_uid)         if defined $opt_uid;
-  set_euid     ($opt_euid)        if defined $opt_euid;
+=item B<-N>, B<--no-tty>
 
-  my $stderr = $bgfn ? &$bgfn () : *STDERR{IO};
+Run process in background with no controlling terminal and with stdin,
+stdout, and stderr redirected to /dev/null.
 
-  my $runprog = $ARGV[0];
-  if ($opt_name)
-    {
-      shift   @ARGV;
-      unshift @ARGV, $opt_name;
-    }
-  local $^W = 0; # avoid implicit warnings from exec
-  exec ($runprog @ARGV) || err ($stderr, "exec", $runprog, $!);
-}
+=item B<-s>, B<--setsid>
 
-main ();
+Dissociate from controlling terminal.  This automatically backgrounds the
+process but does not redirect any file descriptors.
 
-# local variables:
-# mode: perl
-# eval: (auto-fill-mode 1)
-# end:
+=back
 
-# with ends here
+=head1 DESCRIPTION
+
+This program tweaks the environment of the process to be invoked.
+It should be relatively self-explanatory.
+
+=cut
