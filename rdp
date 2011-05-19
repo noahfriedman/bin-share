@@ -4,7 +4,7 @@
 # Created: 2005-08-10
 # Public domain
 
-# $Id$
+# $Id: rdp,v 1.6 2010/12/27 04:44:02 friedman Exp $
 
 # Commentary:
 
@@ -38,6 +38,9 @@ setup()
 
   xrdb=`xrdb -symbols -screen | sort`
   depth=`echo "$xrdb" | sed -n -e '/-DPLANES=/s///p'`
+  case $depth in
+    24 ) depth=32 ;;
+  esac
 
   #geom=`xrdb-symbol-value WIDTH HEIGHT | sed -ne '1h;2H;$x;$s/\n/x/;$p'`
   geom=`echo "$xrdb" \
@@ -52,6 +55,7 @@ setup()
   case $geom in
     1920x1200 ) geom=1400x1050 ;;
     1600x1200 ) geom=1400x1050 ;;
+    1680x1050 ) geom=1400x960  ;;
     1400x1050 ) geom=1280x960  ;; # use a 4:3 geometry
     1280x1024 ) geom=1152x864  ;; # note 1280x1024 is 5:4, not 4:3
     1152x864  ) geom=1024x768  ;;
