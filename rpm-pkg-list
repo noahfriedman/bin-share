@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.20 2010/11/09 02:21:54 friedman Exp $
+# $Id: rpm-pkg-list,v 1.21 2011/05/04 03:52:42 friedman Exp $
 
 # Commentary:
 # Code:
@@ -92,17 +92,14 @@ my %repo_fingerprint
       '1cddbca9' => 'fedora-rawhide',
       '731002fa' => 'fedora-legacy',
 
-      '865cc9ea' => 'rpmfusion-free-f14',
-      'a3780952' => 'rpmfusion-free-f13',
-      '16ca1a56' => 'rpmfusion-free-f12',
-      '8fcff4da' => 'rpmfusion-free-f11',    # f11 = fedora 11
-      '49c8885a' => 'rpmfusion-free-f10',    # fedora 10 and earlier
-
-      'f09d8368' => 'rpmfusion-nonfree-f14',
-      '2425b284' => 'rpmfusion-nonfree-f13',
-      'a3a882c1' => 'rpmfusion-nonfree-f12',
-      '8dc43844' => 'rpmfusion-nonfree-f11',
-      'b1981b68' => 'rpmfusion-nonfree-f10',
+      'adf25d9c' => 'rpmfusion-free-f16',       '952f3af8' => 'rpmfusion-nonfree-f16',
+      '00a4d52b' => 'rpmfusion-free-f15',       '6d0c8ec2' => 'rpmfusion-nonfree-f15',
+      '865cc9ea' => 'rpmfusion-free-f14',       'f09d8368' => 'rpmfusion-nonfree-f14',
+      'a3780952' => 'rpmfusion-free-f13',       '2425b284' => 'rpmfusion-nonfree-f13',
+      '16ca1a56' => 'rpmfusion-free-f12',       'a3a882c1' => 'rpmfusion-nonfree-f12',
+      '8fcff4da' => 'rpmfusion-free-f11',       '8dc43844' => 'rpmfusion-nonfree-f11',
+      '49c8885a' => 'rpmfusion-free-f10',       'b1981b68' => 'rpmfusion-nonfree-f10',
+      # rpmfusion uses the f10 keys for earlier releases
 
       '9c800aca' => 'SuSE',
       '3d25d3d9' => 'SuSE-security',
@@ -118,6 +115,7 @@ my %repo_fingerprint
       '22b2951d' => 'mhensler-suspend2',
       'a9464aa9' => 'pidgin',
       'f6777c67' => 'adobe',
+      '98ab5139' => 'oracle-virtualbox',
 
       # Note: these redhat keys should be discontinued as of 9/2008
       'db42a60e' => 'redhat',
