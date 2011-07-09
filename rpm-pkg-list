@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.21 2011/05/04 03:52:42 friedman Exp $
+# $Id: rpm-pkg-list,v 1.22 2011/06/09 02:03:22 friedman Exp $
 
 # Commentary:
 # Code:
@@ -104,18 +104,18 @@ my %repo_fingerprint
       '9c800aca' => 'SuSE',
       '3d25d3d9' => 'SuSE-security',
 
-      'ba392878' => 'splode-local', # internal reference key; not secure
-
-      'e42d547b' => 'freshrpms',
-      '66534c2b' => 'atrpms',
-      '1aa78495' => 'dries',
-      '6b8d79e6' => 'dag',
-      'a109b1ec' => 'livna',
-      'ff6382fa' => 'kde-redhat',
-      '22b2951d' => 'mhensler-suspend2',
-      'a9464aa9' => 'pidgin',
       'f6777c67' => 'adobe',
+      '66534c2b' => 'atrpms',
+      '6b8d79e6' => 'dag',
+      '1aa78495' => 'dries',
+      'e42d547b' => 'freshrpms',
+      '7fac5991' => 'google',
+      'ff6382fa' => 'kde-redhat',
+      'a109b1ec' => 'livna',
+      '22b2951d' => 'mhensler-suspend2',
       '98ab5139' => 'oracle-virtualbox',
+      'a9464aa9' => 'pidgin',
+      'ba392878' => 'splode-local', # internal reference key; not secure
 
       # Note: these redhat keys should be discontinued as of 9/2008
       'db42a60e' => 'redhat',
