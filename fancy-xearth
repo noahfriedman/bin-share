@@ -5,7 +5,7 @@
 # Created: 1996-03-05; rewritten in perl 2011-04-26
 # Public domain
 
-# $Id: fancy-xearth,v 1.15 2011/05/01 04:50:13 friedman Exp $
+# $Id: fancy-xearth,v 1.16 2011/05/03 19:15:15 friedman Exp $
 
 # Commentary:
 # Code:
@@ -14,7 +14,7 @@ $^W = 1; # enable warnings
 
 use lib "$ENV{HOME}/lib/perl";
 
-use NF::FileOps qw(:open);
+use NF::FileUtil qw(:open);
 use POSIX;
 use strict;
 
