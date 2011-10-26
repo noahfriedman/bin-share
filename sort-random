@@ -1,2 +1,0 @@
-#!/usr/bin/env perl
-print sort { rand(1) <=> rand(1) } <>
