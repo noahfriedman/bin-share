@@ -4,7 +4,7 @@
 # Created: 2010-02-17
 # Public domain
 
-# $Id: reset-xkb,v 1.7 2011/05/31 18:28:57 friedman Exp $
+# $Id: reset-xkb,v 1.8 2011/07/29 00:46:11 friedman Exp $
 
 # Commentary:
 
@@ -32,7 +32,10 @@ initialize()
     ctrl:nocaps
     compose:lwin
   "}
-#   terminate:ctrl_alt_bksp
+# Other xkb_options:
+#   terminate:ctrl_alt_bksp    - Allow Ctrl-Alt-BS to kill X server
+#   srvrkeys:none              - Disable Ctrl-Alt-Fn vt switching
+# See /usr/share/X11/xkb/rules/xorg.lst for others
 }
 
 customize()
