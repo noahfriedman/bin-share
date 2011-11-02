@@ -1,5 +1,5 @@
-#!/bin/sh
-# $Id: automake-ify,v 1.5 2010/09/19 07:00:19 friedman Exp $
+#!/usr/bin/env bash
+# $Id: automake-ify,v 1.6 2010/11/06 21:20:45 friedman Exp $
 
 run()
 {
@@ -7,31 +7,59 @@ run()
   ${1+"$@"} || exit $?
 }
 
-if [ -d m4 ]; then
-  run aclocal -I m4
-else
-  run aclocal
-fi
-
-if [ -d po ]; then
-  run glib-gettextize --force --copy
-fi
-
-run autoheader
-
-if grep 'AM_PROG_LIBTOOL' configure.in > /dev/null 2>&1; then
-  if grep -i 'libltdl' configure.in > /dev/null 2>&1; then
-    if [ -d libltdl ]; then
-      rm -rf libltdl
-    fi
-    run libtoolize -c --ltdl --subproject
-  else
-    run libtoolize -c
+manual()
+{
+  if ! [ -d config ]; then
+    mkdir config
   fi
-fi
 
-if [ -f Makefile.am ]; then
-  run automake --add-missing --copy
-fi
+  if [ -d m4 ]; then
+    run aclocal -I config -I m4
+  else
+    run aclocal -I config
+  fi
 
-run autoconf
+  if [ -d po ]; then
+    if type -P autopoint > /dev/null; then
+      run autopoint  --force
+    else
+      run gettextize --force --no-changelog
+    fi
+  fi
+
+  run autoheader -W all
+
+  if grep 'AM_PROG_LIBTOOL' configure.in > /dev/null 2>&1; then
+    if grep -i 'libltdl' configure.in > /dev/null 2>&1; then
+      if [ -d libltdl ]; then
+        rm -rf libltdl
+      fi
+      run libtoolize -c --ltdl --subproject
+    else
+      run libtoolize -c
+    fi
+  fi
+
+  if [ -f Makefile.am ]; then
+    run automake --add-missing --copy
+  fi
+
+  run autoconf -W all
+}
+
+main()
+{
+  if type -P autoreconf > /dev/null; then
+    set autoreconf --verbose --force --install -W all
+    if [ -d m4 ]; then
+      set "$@" -I m4
+    fi
+    run "$@"
+  else
+    manual
+  fi
+}
+
+main "$@"
+
+# eof
