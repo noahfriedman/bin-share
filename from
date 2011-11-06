@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.59 2010/05/19 23:01:23 friedman Exp $
+# $Id: from,v 1.60 2010/10/03 15:04:43 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -1248,7 +1248,7 @@ sub message_size
   my $result = $self->read_response ("SIZE");
 
   return $1
-    if $result =~ /^\* \d+ FETCH \(RFC822.SIZE (\d+)\)/mio;
+    if $result =~ /^\* \d+ FETCH \(RFC822.SIZE (\d+)\)/mi;
   return undef;
 }
 
@@ -1271,10 +1271,10 @@ sub retrieve_lines
 
   if ($bodylines < 0)
     {
-      $self->send_command ("RETR", "fetch $msgnumber rfc822.text.peek");
+      $self->send_command ("RETR", "fetch $msgnumber body[text]");
       $_ = $self->read_response ("RETR");
       push @lines, split (/\r?\n/, substr ($_, pos ($_), $1))
-        if (/^\* \d+ fetch \(rfc822.text {(\d+)}\r?\n/gmio);
+        if (/^\* \d+ fetch \(BODY\[TEXT\] {(\d+)}\r?\n/gmi);
     }
   elsif ($bodylines > 0)
     {
@@ -1285,12 +1285,12 @@ sub retrieve_lines
       my $octets = 0;
       while (1)
         {
-          my $start = $octets + 1;
+          my $start = $octets;
           $self->send_command
-            ("RETR", "partial $msgnumber rfc822.text.peek $start $blocksize");
+            ("RETR", "fetch $msgnumber body[text]<$start.$blocksize>");
           $_ = $self->read_response ("RETR");
 
-          last unless (/^\* \d+ fetch \(rfc822.text {(\d+)}\r?\n/gmio);
+          last unless (/^\* \d+ fetch \(body\[text\]<$start> {(\d+)}\r?\n/gmi);
           $octets += $1;
           my $newtext = substr ($_, pos ($_), $1);
           $newlines++ while ($newtext =~ /\n/go);
