@@ -7,13 +7,13 @@ use FindBin;
 use lib "$FindBin::Bin/../../lib/perl";
 use lib "$ENV{HOME}/lib/perl";
 
-use NF::FileUtil qw(:symlink);
+use NF::FileUtil qw(:file);
 
 $NF::FileUtil::verbose = 1;
 
 sub main
 {
-  mksymlinktree ($_[0], $_[1]);
+  mklinktree ($_[0], $_[1]);
 }
 
 main (@ARGV);
