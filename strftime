@@ -4,7 +4,7 @@
 # Created: 2006-08-08
 # Public domain.
 
-# $Id: strftime,v 1.3 2006/11/29 04:54:23 friedman Exp $
+# $Id: strftime,v 1.4 2006/12/06 00:47:50 friedman Exp $
 
 # Commentary:
 # Code:
@@ -12,7 +12,7 @@
 $^W = 1;  # enable warnings
 
 use strict;
-use POSIX qw(strftime localtime gmtime);
+use POSIX qw(strftime localtime);
 use Time::Local;
 use Getopt::Long;
 use Pod::Usage;
@@ -21,13 +21,18 @@ my %fmt_named =
   ( default  => "%c",                       # uses current locale
     seconds  => "%s",                       # gnu extension
 
-    iso8601  => "%Y-%m-%d %H:%M:%S",
+    iso8601  => sub { strftime_iso8601 ("%Y-%m-%dT%H:%M:%S%z", @_) },
+    iso8601s => sub { strftime_iso8601 ("%Y-%m-%d %H:%M:%S%z", @_) },
     iso      => q(iso8601),
+    isos     => q(iso8601s),
+    dtz      => "%Y-%m-%d %H:%M:%S %z",
 
     date     => "%a %b %e %H:%M:%S %Z %Y",  # date(1) format
     date1    => q(date),
 
     rfc822   => "%a, %d %b %Y %H:%M:%S %z",
+    rfc2822  => q(rfc822),
+
     mbox     => "%a %b %e %H:%M:%S %Y",     # mbox envelope format
     envelope => q(mbox),
 
@@ -37,8 +42,8 @@ my %fmt_named =
     rcs      => sub { ($_[5] < 100 ? "%y" : "%Y") . ".%m.%d.%H.%M.%S" },
 
     full     => join ("%n",
-                      "%A, %d %B %Y  %l:%M%P (%H:%M:%S %Z)",
-                      "day %j; weekday %w of week %U",
+                      "%A, %d %B %Y  %l:%M%P (%H:%M:%S %z/%Z)",
+                      "Day %j; weekday %w of week %U",
                       "%s epoch seconds",
                      ),
   );
@@ -47,70 +52,176 @@ my $fmt   = "default";
 my $time  = time;
 my $utc_p = 0 ;
 
-local *time2tm;
-local *tm2time;
-
 my @time_parser_list =
   ( [ "Time::ParseDate" => \&Time::ParseDate::parsedate ],
     [ "Date::Parse"     => \&Date::Parse::str2time      ], );
-my $tmparse;
-
-# TODO: add more cheesy parsers
-sub cheesy_date_parser
-{
-  local $_ = shift;
-
-  return      $_  if /^[0-9]+$/;
-  return hex ($_) if /^(?:0x)?[0-9a-f]+$/i;
-
-  # ISO-8601 date format: YYYY-MM-DD HH:MM:SS-hh:mm
-  # (where hh:mm is the timezone offset from UTC)
-  # This parsing doesn't attempt to convert the originating time zone to
-  # the local time.
-  return tm2time ($6 + 0,                           # sec
-                  $5 + 0,                           # min
-                  $4 + 0,                           # hours
-                  $3 + 0,                           # mday
-                  ($2 + 0 > 0    ? $2 - 1    : 0),  # mon
-                  ($1 + 0 < 1000 ? $1 + 1900 : $1)) # year
-    if /(\d{2,4})\D(\d\d)\D(\d\d)\D+(\d\d)\D(\d\d)\D(\d\d)/;
-
-  return;
-}
 
 sub parse_time
 {
   local $_ = join (" ", @_);
 
-  # Try this first since we have a few special cases
-  my $result = cheesy_date_parser ($_);
-  return $result if defined $result;
+  # Try this first since we have a few normal cases and it's faster.
+  my @result = cheesy_timestamp_parser ($_);
+  return @result if @result;
 
-  unless (defined $tmparse)
+  # Break out bigger guns
+  unless (*time_parser{CODE})
     {
       for my $elt (@time_parser_list)
         {
           my ($module, $fn) = @$elt;
           eval "use $module";
           next if ($@ ne "");
-          $tmparse = $fn;
+          *time_parser = $fn;
           last;
         }
+      *time_parser = sub { return } unless *time_parser{CODE};
     }
-  $result = &$tmparse ($_) if defined $tmparse;
+  my $result = time_parser ($_);
   unless (defined $result)
     {
       (my $progname = $0) =~ s=.*/==;
-      print STDERR "$progname: $_: cannot parse date specification\n";
-      exit (1);
+      die "$progname: \"$_\": cannot parse date specification\n";
     }
   return $result;
 }
 
-sub set_timefns
+my %month_conv
+  = (Jan => 1,    Apr => 4,    Jul => 7,    Oct => 10,
+     Feb => 2,    May => 5,    Aug => 8,    Nov => 11,
+     Mar => 3,    Jun => 6,    Sep => 9,    Dec => 12);
+
+sub cheesy_timestamp_parser
 {
-  *time2tm = $utc_p ? \&gmtime : \&localtime;
-  *tm2time = $utc_p ? \&timegm : \&timelocal;
+  local $_ = shift;
+
+  return      $_  if /^[0-9]+$/;
+  return hex ($_) if /^(?:0x)?[0-9a-f]+$/i;
+
+  my ($y, $m, $d, $H, $M, $S, $offset, $tm);
+
+  # Handle dates of the form:
+  #    Sun, 19 Jan 1992 22:44:05 -0500
+  #    21 Dec 1992 17:32:12 -500 (EST)
+  # These are the most common.
+  if (/^(?:\D+,?\s+)?(\d+)\s+(\S+)\s+(\d+)\s+(\d+):(\d+):(\d\d)\s+([+-]\d?\d:?\d\d)/)
+    {
+      ($y, $m, $d, $H, $M, $S, $offset) = ($3, $month_conv{$2}, $1, $4, $5, $6, $7);
+    }
+
+  # Handle dates of the form:
+  #    Fri, 19 Apr 91 01:07:33 PDT
+  #    Fri, 12 May 95 17:26 MET DST
+  #    23 Dec 92 02:17:25
+  elsif (/^(?:\D+,?\s+)?(\d+)\s+(\S+)\s+(\d+)\s+(\d+):(\d+)(?::(\d\d))?(?:\s+([A-Za-z ]+))?/)
+    {
+      ($y, $m, $d, $H, $M, $S, $offset) = ($3, $month_conv{$2}, $1, $4, $5, $6, $7);
+      $offset = tzconv ($offset) if $offset;
+    }
+
+  # Handle dates of the form:
+  #    Sun Feb 17 23:41:23 1991
+  #    Sat Jan  1 21:24:52 IST 2000
+  #    Tue Jun 18 17:51:38 MET DST 1996
+  elsif (/^[a-z]{3}\s+([a-z]{3})\s+(\d+)\s+(\d+):(\d+):(\d\d)\s*?([a-z]{3,4}(?: DST|))?\s+(\d{4})/i)
+    {
+      ($y, $m, $d, $H, $M, $S, $offset) = ($7, $month_conv{$1}, $2, $3, $4, $5, $6);
+      $offset = tzconv ($offset) if $offset;
+    }
+
+  # ISO-8601 date format: YYYY-MM-DD{T}HH:MM:SS[+-]hh{:}mm
+  # Or sloppy variants.
+  elsif (/^(\d{2,4})\D(\d?\d)\D(\d?\d)\D+(\d?\d)\D(\d?\d)\D(\d?\d)\s*(Z|[+-]\d\d:?\d\d)?/)
+    {
+      ($y, $m, $d, $H, $M, $S, $offset) = ($1, $2, $3, $4, $5, $6, $7);
+    }
+
+  else { return } # unrecognized.
+
+  local $ENV{TZ} = 'UTC' if $offset;
+  $tm = timelocal ($S + 0, $M + 0, $H + 0,
+                   $d + 0, ($m + 0 > 0 ? $m - 1 : 0), normalize_year ($y));
+
+  if ($offset && $offset =~ /^([+-])(\d?\d):?(\d\d)/)
+    {
+      my ($sign, $h, $m) = ($1 . '1', $2, $3);
+      $tm -= $sign * (($h * 3600) + ($m * 60));
+    }
+
+  return unless defined $tm;
+  return wantarray ? ($tm, $offset) : $tm;
+}
+
+sub normalize_year
+{
+  my $y = 0 + shift;
+  return $y        if $y > 999;  # 1000 or higher
+  return $y + 1900 if $y >  99;  #  100 or higher
+
+  # For years 0-99, see if the value is equal to or less than the current
+  # year.  If it is, use the current epoch.  If higher, use the previous epoch.
+  my ($h, $l) = ($1, $2) if strftime ("%Y", localtime (time)) =~ /^(\d+?)(\d\d)$/;
+  $h-- if $y > $l;
+  return $y + $h * 100;
+}
+
+my %tzconv;
+sub tzconv
+{
+  my $tz = uc shift;
+
+  unless (%tzconv)
+    {
+      # This is not meant to be complete, just to pick up the more common
+      # ancient, pre-RFC2822 timezone indicators.
+      %tzconv = ( GMT  => '+0000',  UTC   => '+0000',
+                  EST  => '-0500',  EDT   => '-0400',
+                  CST  => '-0600',  CDT   => '-0500',
+                  MST  => '-0700',  MDT   => '-0600',
+                  PST  => '-0800',  PDT   => '-0700',
+                  WET  => '+0000',  WEST  => '+0100',
+                  CET  => '+0100',  CEST  => '+0200',
+                  EET  => '+0200',  EEST  => '+0300',
+                  JST  => '+0900',
+                  'WET DST' => '+0100', 'MET DST' => '+0200', );
+    }
+  return $tzconv{$tz} if exists $tzconv{$tz};
+
+  # Break out bigger guns.
+  unless (*tz2zone{CODE})
+    {
+       eval "use Time::Timezone ()";
+       if ($@ eq "")
+         {
+           *tz2zone   = \&Time::Timezone::tz2zone;
+           *tz_offset = \&Time::Timezone::tz_offset;
+         }
+       else
+         {
+           *tz2zone = *tz_offset = sub { return };
+         }
+     }
+  use integer;
+  my $z = tz2zone ($tz);
+  return unless $z;
+  my $s = tz_offset ($z);
+  my $h = $s / 3600;
+  my $m = ($s - 3600 * $h) / 60;
+  my $o = sprintf ("%02.2d%02d", $h, $m);
+  $o = "+$o" if $s >= 0;
+  return $o;
+}
+
+# strftime doesn't directly let you display Zulu time correctly.
+# This implementation conforms to iso8601:2004.
+sub strftime_iso8601
+{
+  my $fmt = shift;
+
+  local $_ = strftime ($fmt, @_);
+  s=\+0000=Z= if $fmt =~ /[^\s]%z/;
+  s=%=%%=g;  # re-quote outstanding `%' for reinput to strftime again.
+  return $_;
 }
 
 sub parse_options
@@ -131,10 +242,12 @@ sub parse_options
 sub main
 {
   parse_options (\@_);
-  set_timefns ();
 
   $time = parse_time (@_) if @_;
-  my @tminfo = time2tm ($time);
+
+  local $ENV{TZ} = "UTC" if $utc_p;
+  my @tminfo = localtime ($time);
+
   $fmt = $fmt_named{$fmt} while (!ref $fmt && $fmt !~ /%/ && exists $fmt_named{$fmt});
   $fmt = &$fmt (@tminfo) if ref $fmt eq 'CODE';
 
