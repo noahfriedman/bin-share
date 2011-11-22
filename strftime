@@ -4,7 +4,7 @@
 # Created: 2006-08-08
 # Public domain.
 
-# $Id: strftime,v 1.4 2006/12/06 00:47:50 friedman Exp $
+# $Id: strftime,v 1.5 2011/11/21 08:12:57 friedman Exp $
 
 # Commentary:
 # Code:
@@ -104,7 +104,7 @@ sub cheesy_timestamp_parser
   #    Sun, 19 Jan 1992 22:44:05 -0500
   #    21 Dec 1992 17:32:12 -500 (EST)
   # These are the most common.
-  if (/^(?:\D+,?\s+)?(\d+)\s+(\S+)\s+(\d+)\s+(\d+):(\d+):(\d\d)\s+([+-]\d?\d:?\d\d)/)
+  if (/(?:\D+,?\s+)?(\d+)\s+(\S+)\s+(\d+)\s+(\d+):(\d+):(\d\d)\s+([+-]\d?\d:?\d\d)/)
     {
       ($y, $m, $d, $H, $M, $S, $offset) = ($3, $month_conv{$2}, $1, $4, $5, $6, $7);
     }
@@ -113,7 +113,7 @@ sub cheesy_timestamp_parser
   #    Fri, 19 Apr 91 01:07:33 PDT
   #    Fri, 12 May 95 17:26 MET DST
   #    23 Dec 92 02:17:25
-  elsif (/^(?:\D+,?\s+)?(\d+)\s+(\S+)\s+(\d+)\s+(\d+):(\d+)(?::(\d\d))?(?:\s+([A-Za-z ]+))?/)
+  elsif (/(?:\D+,?\s+)?(\d+)\s+(\S+)\s+(\d+)\s+(\d+):(\d+)(?::(\d\d))?(?:\s+([A-Za-z ]+))?/)
     {
       ($y, $m, $d, $H, $M, $S, $offset) = ($3, $month_conv{$2}, $1, $4, $5, $6, $7);
       $offset = tzconv ($offset) if $offset;
@@ -123,7 +123,7 @@ sub cheesy_timestamp_parser
   #    Sun Feb 17 23:41:23 1991
   #    Sat Jan  1 21:24:52 IST 2000
   #    Tue Jun 18 17:51:38 MET DST 1996
-  elsif (/^[a-z]{3}\s+([a-z]{3})\s+(\d+)\s+(\d+):(\d+):(\d\d)\s*?([a-z]{3,4}(?: DST|))?\s+(\d{4})/i)
+  elsif (/[a-z]{3}\s+([a-z]{3})\s+(\d+)\s+(\d+):(\d+):(\d\d)\s*?([a-z]{3,4}(?: DST|))?\s+(\d{4})/i)
     {
       ($y, $m, $d, $H, $M, $S, $offset) = ($7, $month_conv{$1}, $2, $3, $4, $5, $6);
       $offset = tzconv ($offset) if $offset;
@@ -131,7 +131,7 @@ sub cheesy_timestamp_parser
 
   # ISO-8601 date format: YYYY-MM-DD{T}HH:MM:SS[+-]hh{:}mm
   # Or sloppy variants.
-  elsif (/^(\d{2,4})\D(\d?\d)\D(\d?\d)\D+(\d?\d)\D(\d?\d)\D(\d?\d)\s*(Z|[+-]\d\d:?\d\d)?/)
+  elsif (/(\d{2,4})\D(\d?\d)\D(\d?\d)\D+(\d?\d)\D(\d?\d)\D(\d?\d)\s*(Z|[+-]\d\d:?\d\d)?/)
     {
       ($y, $m, $d, $H, $M, $S, $offset) = ($1, $2, $3, $4, $5, $6, $7);
     }
@@ -243,7 +243,7 @@ sub main
 {
   parse_options (\@_);
 
-  $time = parse_time (@_) if @_;
+  ($time) = parse_time (@_) if @_;
 
   local $ENV{TZ} = "UTC" if $utc_p;
   my @tminfo = localtime ($time);
