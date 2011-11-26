@@ -1,12 +1,12 @@
 #!/usr/bin/env perl
 # from --- show you who your mail is from
 
-# Copyright (C) 1992, 95, 96, 97, 98, 99, 00, 02, 2003 Noah S. Friedman
+# Copyright (C) 1992, 1995-2000, 2002, 2003, 2011 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.61 2011/11/06 06:07:27 friedman Exp $
+# $Id: from.new,v 1.29 2011/11/26 00:31:24 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,343 +22,1215 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # Commentary:
-
-# Thanks to Jonathan Kamens <jik@kamens.brookline.ma.us> for
-# the `{FROMTO}' virtual header field.
-
 # Code:
 
-$^W = 1; # enable warnings
-
-use 5.8.0;
 use strict;
-no strict qw(vars);
-
-use Encode qw(:all);
+use Carp;
 use Getopt::Long;
-use POSIX qw(strftime);
-use Symbol;
+use Pod::Usage;
 
+our $version = "2.0";
+our %opt;
 
-sub err
+sub parse_options
 {
-  my $msg = join (": ", $progname, @_);
-  print STDERR $msg, (substr ($msg, -1, 1) eq "\n"? "" : "\n");
-  return undef;
-}
+  my $help = -1;
 
-sub usage
-{
-  print "Usage: $progname {options} {folder {...}}\n
-Options are:
--1, --first-header-line      Do not display header continuation lines; show
-                             only the first line of each displayed header.
--a, --all-headers            Show all headers.  Ignore \`--format'.
--C, --count-only             Only count the number of messages that would
-                             be displayed, without displaying any other
-                             information about them.  E.g. \`-Cu' would
-                             print the number of unread messages you have.
--c, --columns       COLS     Truncate lines exceeding COLS length on output.
-                             If COLS=0 or output is not to a terminal, no
-                             truncation is done.  The default is
-                             the current width of the terminal.
--D, --debug                  Enable interactive debugging.
--E, --extract      {LINES}   Print the body of each matched message.
-                             If the optional argument LINES is supplied,
-                             print only the first LINES number of lines.
--e, --envelope               Show message envelope instead of headers.
-                             This causes any formatting options (e.g.
-                             \`--columns', \`--numbered') to be ignored.
-                             This option only makes sense for local folders.
--f, --format        FMT      Use FMT as the output format.  The option
-                             \`--help-format' gives instructions for this.
--h, --help                   You're looking at it.
--H, --help-format            Get documentation about the format of the FMT
-                             argument to \`--format'.
--i, --me-match      REGEXP   Pattern to match against the From field
-                             to determine whether you are the sender
-                             (affects the {FROMTO} format specifier).
-                             Defaults to everything up until the first
-                             comma in your GECOS information.
--M, --match-header  HEADERS  Seach only headers named HEADER for patterns
-                             specified with \`--match'.
-                             By default, the header searched is \`From'.
--m, --match         REGEXP   Only print messages in which REGEXP could be
-                             found in the \`From' header, or those
-                             specified with \`--match-headers'.
--n, --numbered               Show number of message with respect to the
-                             current folder.  See also \`--help-format'.
--s, --sender        ADDR     Show only messages sent from ADDR.
-                             This is equivalent to specifying the options
-                             \`--match-headers=From --match=ADDR'.
--P, --no-parse               Do not do fancy parsing of From and Date fields.
--U, --user          USER     Show headers of USER's spooled messages.
--u, --unread-only            Only show information about unread messages
-                             (i.e. those that do not have a \`R' in
-                             the Status header field).\n
+  %opt =
+    ( format        => "%-3{FMSGNO} %-20.20{FROMTO}  %-0.32Date  %Subject\n",
+      date_format   => sub { strftime_iso8601 ("%Y-%m-%d  %H:%M:%S%z", @_) },
+      tzdate        => 'sender',
+      parsep        => 1,
+      onelinep      => 1,
 
-To specify a POP3 folder:
+      header_regexp => '^(?:From|To|Cc|Subject)$',
+      interesting   => [],
 
-  Syntax: pop:HOST:PORT:AUTH:USER:PASS
+      user          => default_user(),
+      columns       => output_columns(),
+    );
 
-  Fields may be blank, in which case:
-
-    * HOST defaults to \`localhost'
-    * PORT defaults to 110
-    * AUTH defaults to \`pass' (this is the only currently supported
-      authentication protocol anyway).
-    * USER defaults to your current username
-    * PASS is obtained from the POPPASS environment variable.
-      (This default will also be used if this field is set to \`*'.)
-
-To specify an IMAP folder:
-
-  Syntax: imap:HOST:PORT:MAILBOX:AUTH:USER:PASS
-
-  Fields may be blank, in which case:
-
-    * HOST defaults to \`localhost'
-    * PORT defaults to 143
-    * MAILBOX defaults to \`inbox'.
-    * AUTH defaults to \`login' (this is the only currently supported
-      authentication protocol anyway).
-    * USER defaults to your current username
-    * PASS is obtained from the POPPASS environment variable.
-      (This default will also be used if this field is set to \`*'.)\n\n";
-  exit (1);
-}
-
-sub usage_fmt
-{
-  print "$progname format usage: --format='%{{-}{n}{.m}}[header] ...' ...\n
-The FMT specifier to the \`--format' option can contain literal text for
-the output, along with header specifiers in the form\n
-      %{{-}{n}{.m}}Header\n
-where\n
-  * \`n' is the line width reserved for the value of \`Header'.
-  * \`-' means that header strings shorter than \`n' chars are
-    flushed left within the field, instead of right.
-  * \`.m' is the maximum allowed length of the field; if the header
-    string is longer than this, it is truncated.
-  * \`Header' is the name of the header, e.g. \`Subject'.
-
-Some special \"header names\" are defined for useful information that
-cannot generally be obtained from message headers.  As usual, you can use
-general format specifiers, e.g \"%-4.3{TLINES}\".  These special names,
-surrounded by curly braces, are:
-
-  * \`{TLINES}'
-    The number of this message line irrespective of any folder it
-    may have come from (if more than one folder was specified on the
-    command line).
-  * \`{FLINES}'
-    The number of this message in the current folder.  This number is reset
-    whenever this program begins reading a new folder specified on the
-    command line.
-  * \`{FOLDER}'
-    The name of this folder, as specified on the command line.
-  * \`{FROMTO}'
-    The sender of the message if it isn't you, or \"To <recipient>\"
-    otherwise.
-
-For example, given a message with headers of the form
-
-      From: Noah Friedman <friedman\@splode.com>
-      To: nobody\@prep.ai.mit.edu
-      Subject: example
-      Date: Tue, 18 Oct 94 12:22:50 CDT
-
-here are some valid format specifiers and the output that results from them.
-(\`-|' indicates the results here; it is not actually printed.)
-
-      \"%From %Subject\"
-      -| Noah Friedman  example
-
-      \"%-19.18From %-13.12Date %-.45Subject\"
-      -| Noah Friedman       Oct 18 12:22  example
-
-      \"To %-19To %-13Date %20Subject\"
-      -| To nobody\@prep.ai.mit.edu Oct 18 12:22                   example
-
-      \"To %-19.18To %-13.12Date %-.45Subject\"
-      -| To nobody\@prep.ai.mit.  Oct 18 12:22  example
-
-      \"   From: %From\\nSubject: %Subject\\n   Date: %Date\\n\"
-      -|    From: Noah Friedman
-      -| Subject: example
-      -|    Date: Oct 18 12:22
-      -|
-
-If you use something like last example format specifier, you may wish to
-use the \`--no-parse' option to avoid any parsing (and therefore
-truncation) of the From and Date lines.\n";
-  exit (1);
-}
-
-sub parse_options ()
-{
-  ($progname = $0) =~ s|.*/||;
-
-  # if stdout is not a tty, then disable truncation (user may explicitly
-  # enables it later by use of the --columns option).
-  # Decrement number of columns by 1 since output in last column causes
-  # wraparound on many (most?) terminals.
-  $opt_columns = (-t STDOUT
-                  ? ((defined $ENV{COLUMNS}) ? $ENV{COLUMNS} - 1 : 79)
-                  : 0);
-  $opt_user = default_user ();
-  $opt_pass = $ENV{POPPASS} || 'none';
+  my @interesting_default =
+    (qw(From To Apparently-To Cc Newsgroups Subject Date Reply-To));
 
   # Precedence for defs (highest->lowest): options, ~/.fromrc.pl, default
-  $fromrc = $ENV{FROMRCPL} || "$ENV{HOME}/.fromrc.pl";
-  eval { require "$fromrc" } if (-f $fromrc);
-  exit 1+err ($fromrc, $@) if ($@ ne "" && $@ !~ /not return a true value/o);
+  my $fromrc = $ENV{FROMRCPL} || "$ENV{HOME}/.fromrc.pl";
+  eval { require "$fromrc" } if -f $fromrc;
+  _error ($fromrc, $@) if ($@ ne "" && $@ !~ /not return a true value/);
 
-  Getopt::Long::config ('bundling', 'autoabbrev');
-  GetOptions ("1|first-header-line-only", \$opt_firstlinep,
-              "a|all-headers",            sub { $opt_all_headers = 1;
-                                                $opt_firstlinep = 0; },
-              "C|count-only",             \$opt_countp,
-              "c|columns=i",              \$opt_columns,
-              "E|extract:s",              sub { $opt_extractp = 1;
-                                                $opt_linelimit = $_[1]; },
-              "e|envelope",               \$opt_envelopep,
-              "f|format=s",               \$opt_format,
-              "h|help",                   \&usage,
-              "H|help-format",            \&usage_fmt,
-              "i|me-match",               \$opt_me_match,
-              "M|match-header=s",         \$opt_match_header,
-              "m|match=s",                \$opt_match_regexp,
-              "n|numbered",               \$opt_numbered,
-              "P|no-parse",               \$opt_no_parsep,
-              "s|sender=s",               sub { $opt_match_header = 'From';
-                                                $opt_match_regexp = $_[1]; },
-              "U|user=s",                 \$opt_user,
-              "u|unread-only",            \$opt_unread_only,
-              "utf8|utf-8",               \$opt_utf8,
-              # For debugging
-              "w|warnings",               \$^W);
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
 
-  set_default_format () unless (defined $opt_format);
-  set_me_match () unless (defined $opt_me_match);
-  # User might have set opt_pass in fromrc using a backquoted substitution
-  chop $opt_pass if (substr ($opt_pass, -1, 1) eq "\n");
-  push @rfc1522_charset, 'utf-8' if $opt_utf8;
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev no_require_order no_ignore_case));
+
+  my $succ = $parser->getoptions
+    ('h|help|usage+'            =>      \$help,
+     'D|debug!'                 =>      \$::debug,
+     'W|warnings!'              =>      \$^W,
+
+     'c|count-only'             =>      \$opt{countp},
+     'e|envelope'               =>      \$opt{envelopep},
+
+     'p|parse!'                 =>      \$opt{parsep},
+     'P'                        => sub { $opt{parsep} = 0 },
+
+     'u|unread-only'            =>      \$opt{unread_only},
+     'n|message-numbers=s'      => sub { $opt{message_numbers} .= $_[1] . ' '},
+
+     '1|one-line-headers'       =>      \$opt{onelinep},
+     '2|multi-line-headers'     => sub { $opt{onelinep}      = 0 },
+     'a|all-headers'            => sub { $opt{all_headers}   = 1;
+                                         $opt{onelinep}      = 0 },
+     'I|interesting-headers=s@' =>       $opt{interesting}, # arrayref
+
+     'E|extract:-1'              => sub { $opt{extractp}  = 1;
+                                          $opt{bodylines} = $_[1] },
+
+     'C|columns=i'              =>      \$opt{columns},
+     'f|format=s'               => sub { $opt{format}      = interpolate ($_[1]) },
+     'd|date-format=s'          => sub { $opt{date_format} = interpolate ($_[1]) },
+     'S|show-date=s'            =>      \$opt{tzdate},
+     'utc|gmt'                  => sub { $opt{tzdate}      = 'UTC' },
+
+     'i|me-match=s'             =>      \$opt{me_match_regexp},
+     'M|match-header=s'         =>      \$opt{header_regexp},
+     'm|match=s'                =>      \$opt{match_regexp},
+     's|sender=s'               => sub { $opt{header_regexp} = '^From|Sender$';
+                                         $opt{match_regexp}  = $_[1] },
+
+     'U|user=s'                 =>      \$opt{user},
+     'password=s'               =>      \$opt{pass}, # undoc, and don't use!
+
+     'utf8|utf-8!'              =>      \$opt{utf8},
+     'V|version',               =>      \$opt{show_version},
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)     unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
+
+  if ($opt{show_version})
+    {
+      print "Version ", $version, "\n";
+      exit (0);
+    }
+
+  $opt{pass}            = $ENV{FROMPASS}     unless defined $opt{pass};
+  $opt{me_match_regexp} = default_me_match() unless defined $opt{me_match_regexp};
+  $opt{format_parsed}   = parse_format_string ($opt{format});
+
+  $opt{interesting} = (@{$opt{interesting}}
+                       ? [map { split (/[\s,]+/, $_) } @{$opt{interesting}}]
+                       : \@interesting_default);
 }
 
-sub main ()
+sub main
 {
-  parse_options ();
+  parse_options (\@_);
+  @_ = default_spool_file() unless @_;
 
-  # Quit early if we have no files to read
-  if ($#ARGV < 0)
+  my $exitstat = 0;
+  my $bodylines = $opt{bodylines};
+  my $want_headers = wanted_headers();
+
+  my %meta = ('{tmsgno}' => 0);
+  for my $folder (@_)
     {
-      my $default_spool = default_spool_file ($opt_user);
-      push (@ARGV, $default_spool) if (defined $default_spool);
-      exit (0) unless (defined $default_spool);
-    }
+      $meta{'{folder}'} = $folder;
+      $meta{'{fmsgno}'} = 0;
 
-  initialize_variables ();
-  make_format_vector ($opt_format);
-
-  $header_save_p{STATUS} = 1 if ($opt_unread_only);
-
-  if (defined $opt_match_header && $opt_match_header ne '')
-    {
-      # Must store actual header name as well as MATCH header name, so that
-      # contents will be stored.
-      $header_save_p{uc ($opt_match_header)} = 1;
-      $opt_match_header = join ('', "{MATCH_", uc ($opt_match_header), "}");
-      $header_save_p{$opt_match_header} = 1;
-    }
-
-  for my $file (@ARGV)
-    {
-      if ($file !~ /^(?:pop|imap).*?:/oi && $file ne "-" && ! -r $file)
+      my $mbox = From::Mailbox->new ($folder, wanted_headers => $want_headers);
+      unless ($mbox)
         {
-          my $fh = gensym;
-          # Set $! appropriately.
-          open ($fh, $file);
-          err ($file, "$!.");
-          close ($fh);
-          $exit_status = 1;
+          $exitstat = 1;
           next;
         }
 
-      # pop:HOST:PORT:AUTH:USER:PASSWORD
-      # Only auth method currently supported is `pass'
-      if ($file =~ /^pop-?3?:(.*?):(.*?):(.*?):(.*?):(.*)/oi)
+      if ($opt{countp} && ! (   $opt{unread_only}
+                             || $opt{match_regexp}
+                             || $opt{message_numbers}))
         {
-          my ($host, $port, $auth, $user, $pass) = ($1, $2, lc ($3), $4, $5);
-
-          $auth = "pass" if ($auth eq '');
-          unless ($auth eq 'pass')
-            {
-              err ($3, "Unsupported POP authentication protocol");
-              exit (1);
-            }
-
-          $host = "localhost" if ($host eq '');
-          $port = 110         if ($port eq '');
-          $user = $opt_user   if ($user eq '');
-          $pass = $opt_pass   if ($pass eq '' || $pass eq '*');
-          process_remote_folder ('POP3', $host, $port, $auth, $user, $pass);
+          my $n = $mbox->message_count;
+          if (@_ > 1) { printf ("%-10d %s\n",  $n, $folder) }
+          else        { print $n, "\n" }
+          next;
         }
 
-      # imap:HOST:PORT:MAILBOX:AUTH:USER:PASSWORD
-      # Only auth method currently supported is `login'
-      elsif ($file =~ /^imap:(.*?):(.*?):(.*?):(.*?):(.*?):(.*)/oi)
+      my @msgs = message_numbers ($mbox);
+      if (@msgs)
         {
-          my ($host, $port, $mbox, $auth, $user, $pass)
-            = ($1, $2, $3, lc ($4), $5, $6);
-
-          $auth = "login" if ($auth eq '');
-          unless ($auth eq 'login')
-            {
-              err ($3, "Unsupported IMAP authentication protocol");
-              exit (1);
-            }
-
-          $host = "localhost" if ($host eq '');
-          $port = 143         if ($port eq '');
-          $mbox = "inbox"     if ($mbox eq '');
-          $user = $opt_user   if ($user eq '');
-          $pass = $opt_pass   if ($pass eq '' || $pass eq '*');
-          process_remote_folder
-            ('IMAP', $host, $port, $auth, $user, $pass, $mbox);
-        }
-
-      elsif ($opt_countp)
-        {
-          my $n = folder_message_count ($file);
-          next unless (defined $n);
-          if (scalar @ARGV > 1)
-            {
-              print $n, "\t", $file, "\n";
-            }
-          else
-            {
-              print $n, "\n";
-            }
-        }
-      elsif ($opt_envelopep)
-        {
-          print_envelopes ($file);
+          map { process_message ($mbox, \%meta, $_, $bodylines) } @msgs;
         }
       else
         {
-          process_file ($file);
+          my $i = 0;
+          while (1)
+            {
+              last unless process_message ($mbox, \%meta, ++$i, $bodylines);
+            }
+        }
+      if ($opt{countp})
+        {
+          my $n = $mbox->{message_count};
+          if (@_ > 1) { printf ("%-10d %s\n",  $n, $folder) }
+          else        { print $n, "\n" }
+          next;
         }
     }
-  exit ($exit_status);
+
+  exit ($exitstat);
 }
 
-
-sub initialize_variables ()
+sub process_message
 {
-  $ctime_now = strftime ("%a %b %d %H:%M:%S %Y", (($ENV{TZ} || '') eq 'UTC'
-                                                  ? gmtime    (time)
-                                                  : localtime (time)));
+  my ($mbox, $meta, $i, $bodylines) = @_;
+
+  if ($opt{unread_only})
+    {
+      my %flags = $mbox->flags ($i);
+      return 1 if %flags && $flags{read};
+    }
+
+  my $msg;
+  unless ($opt{envelopep} && ! $opt{match_regexp})
+    {
+      $msg = $mbox->retrieve ($i, $bodylines);
+      return unless defined $msg;
+    }
+
+  if ($opt{match_regexp})
+    {
+      my $header_regexp = $opt{header_regexp};
+      my $re = $opt{match_regexp};
+
+      my $header = From::Header->new ($msg->[0]);
+      my @names = $header->names;
+      my $found;
+
+      for my $h (@names)
+        {
+          next unless $h =~ /$header_regexp/io;
+          for my $c ($header->contents ($h, 1), $header->parsed ($h, 1))
+            {
+              $found = 1 if $c =~ /$re/mo;
+              last if $found;
+            }
+        }
+      return 1 unless $found;
+    }
+
+  if ($opt{countp})
+    {
+      $mbox->{message_count}++;
+      return 1;
+    }
+
+  $meta->{'{tmsgno}'}++;
+  $meta->{'{fmsgno}'} = $i;
+
+  if ($opt{envelopep})
+    {
+      my $envelope = $mbox->envelope ($meta->{'{fmsgno}'});
+      return 0 unless $envelope;
+      print $envelope, "\n";
+      return 1;
+    }
+
+  if ($opt{extractp})
+    {
+      my $envelope = $mbox->envelope ($meta->{'{fmsgno}'});
+      print_message ($msg, $meta, $envelope);
+    }
+  else
+    {
+      print_message_summary ($msg, $meta);
+    }
+  return 1;
+}
+
+sub print_message
+{
+  my ($msg, $meta, $envelope) = @_;
+
+  if ($::opt{all_headers})
+    {
+      if ($opt{utf8})
+        {
+          map { utf8::decode ($_) } @$msg;
+          map { utf8::encode ($_) } @$msg;
+        }
+
+      print $envelope, "\n" if defined $envelope;
+      print @$msg, "\n";
+      return 1;
+    }
+
+  print $envelope, "\n" if defined $envelope;
+  my $header = From::Header->new ($msg->[0], $meta);
+  my $contents = $::opt{onelinep} ? 'contents1' : 'contents';
+  map { my ($name) = $header->names (lc $_);
+        map { if ($name)
+                {
+                  my $s = sprintf ("%s: %s\n", $name, $_);
+                  if ($opt{utf8})
+                    {
+                      utf8::decode ($s);
+                      utf8::encode ($s);
+                    }
+                  print $s;
+                }
+            } $header->$contents ($_, 1);
+      } @{$opt{interesting}};
+
+  if ($opt{utf8})
+    {
+      utf8::decode ($msg->[1]);
+      utf8::encode ($msg->[1]);
+    }
+  print "\n", $msg->[1], "\n";
+}
+
+sub print_message_summary
+{
+  my ($msg, $meta) = @_;
+  my $header = From::Header->new ($msg->[0], $meta);
+
+  my ($fmt, @name) = @{$opt{format_parsed}};
+
+  my $fn = $opt{parsep} ? 'allparsed1' : 'allcontents1';
+  map { $_ = $header->$fn ($_) } @name;
+
+  my $s;
+  if ($opt{utf8})
+    {
+      map { utf8::decode ($_) } @name;
+      $s = sprintf ($fmt, @name);
+      utf8::encode ($s);
+    }
+  else
+    {
+      $s = sprintf ($fmt, @name);
+    }
+  $s =~ s/^(.{$opt{columns}}).*/$1/mgo if $opt{columns};
+  print $s;
+}
+
+sub message_numbers
+{
+  return unless $opt{message_numbers};
+
+  my $mbox = shift;
+  my %n;
+  my $max;
+
+  for my $n (split (/[\s,]+/, $opt{message_numbers}))
+    {
+      if ($n =~ /^(\d*)-(\d*)$/)
+        {
+          my ($beg, $end) = ($1, $2);
+          if ($beg && $end)
+            {
+              map { $n{$_} = $_ } $beg .. $end;
+            }
+          elsif ($end)
+            {
+              $max ||= $mbox->message_count;
+              map { $n{$_} = $_ } (($max - $end + 1) .. $max);
+            }
+          elsif ($beg)
+            {
+              $max ||= $mbox->message_count;
+              map { $n{$_} = $_ } ($beg .. $max);
+            }
+        }
+      else
+        {
+          $n{$n} = $n;
+        }
+    }
+  return (sort { $a <=> $b } values %n);
+}
+
+# This is an optimization for IMAP folders to reduce the amount of
+# bandwidth needed for header retrieval.  Other protocols either don't
+# support it (pop3) or would not be particularly efficient (mbox files) so
+# those classes just ignore this data.
+sub wanted_headers
+{
+  return                   if $opt{all_headers};
+  return                   if $opt{match_regexp};
+  return $opt{interesting} if $opt{extractp};
+
+  my @x = @{$opt{format_parsed}};
+  shift @x; # discard fmt
+  my @headers;
+  map { if    ($_ eq '{fromto}') { push @headers, 'from', 'to' }
+        elsif ($_ !~ /^\{/)      { push @headers, $_ }
+      } @x;
+
+  return \@headers;
+}
+
+sub parse_format_string
+{
+  local $_ = shift;
+  my $fmt;
+  my @header;
+
+  my %format_token = ( '{tmsgno}' => 'd',
+                       '{fmsgno}' => 'd',
+                       '{octets}' => 'd',
+                     );
+  my $start = 0;
+  while (/(?:^|[^%])(?:%%)*%-?[\d.]*([^%\s]+)/gc)
+    {
+      my $h = lc ($1);
+      push @header, $h;
+      my $c = defined $format_token{$h} ? $format_token{$h} : 's';
+      $fmt .= substr ($_, $start, pos ($_) - $start - length ($1)) . $c;
+      $start = pos ($_);
+    }
+  $fmt .= substr ($_, pos ($_));
+
+  unshift @header, $fmt;
+  return wantarray ? @header : \@header;
+}
+
+sub max
+{
+  my $x = shift;
+  map { $x = $_ if $_ > $x } @_;
+  return $x;
+}
+
+sub output_columns
+{
+  my $fh = shift || *STDOUT{IO};
+
+  my $fileno = fileno ($fh);
+  if (-t $fileno)
+    {
+      my $result = 0;
+      eval { require 'sys/ioctl.ph';
+             my $data = "";
+             if (ioctl ($fh, TIOCGWINSZ(), $data))
+               {
+                 my ($rows, $cols, $xpix, $ypix) = unpack ('S4', $data);
+                 $result = $cols;
+               }
+           };
+      return max (0, $result - 1) unless $@;
+
+      my $stty = ($fileno == 1 ? `stty -a` : `stty -a 0<&$fileno`);
+      return max (0, $1 - 1) if $stty =~ /columns (\d+);/;
+    }
+  return defined $ENV{COLUMNS} ? max (0, $ENV{COLUMNS} - 1) : 0;
+}
+
+sub default_user
+{
+  my @envvars = qw(FROMUSER USER LOGNAME);
+
+  for my $var (@envvars)
+    {
+      my $val = $ENV{$var};
+      return $val if defined $val && $val ne '';
+    }
+  return scalar getpwuid ($<);
+}
+
+sub default_me_match
+{
+  my $username = $opt{user};
+  my @passwd = $username ? getpwnam ($username) : getpwuid ($>);
+  return unless @passwd;
+
+  (my $match = $passwd[6]) =~ s/,.*//;
+  $match =~ s/^\s*(.*?)\s*$/$1/;
+  $match =~ s/(\W)/\\$1/g;
+  return $match;
+}
+
+sub default_spool_file
+{
+  return $ENV{FROMMAIL} if defined $ENV{FROMMAIL};
+  return $ENV{MAIL}     if defined $ENV{MAIL};
+
+  my $user = shift || $opt{user};
+  my $spooldirs = (shift || [qw(/var/mail /var/spool/mail)]);
+  for my $spool (@$spooldirs)
+    {
+      my $file = join ("/", $spool, $user);
+      return $file if -f $file;
+    }
+  return;
+}
+
+# Using `eval' at runtime is pretty questionable, but there's no other
+# reliable way to honor all the escape sequences that perl understands in
+# interpolated strings, especially unicode escape sequences. Besides, we
+# read (and execute) anything in the .fromrc.pl config.
+sub interpolate
+{
+  local $_ = shift;
+  return $_ unless /\\/;
+
+  my $result = eval "\"$_\"";
+  _error ("\"$_\"", $@) if $@;
+  return $result;
+}
+
+our $errors_fatal   =  0;
+our $debug          =  0;
+(my $progname = $0) =~ s=.*/==;
+
+sub _verbose
+{
+  return unless $^W;
+  my $msg = join (": ", $progname, @_);
+  $msg .= "\n" unless substr ($msg, -1, 1) eq "\n";
+  print STDERR $msg;
+}
+
+sub _error
+{
+  my $msg = join (": ", $progname, "Error", @_);
+  $msg .= "\n" unless substr ($msg, -1, 1) eq "\n";
+
+  if ($errors_fatal)
+    {
+      my $pkg = __PACKAGE__;
+      local $Carp::CarpInternal{$pkg} = 1; # don't show this pkg in backtrace
+      local $Carp::Verbose = $debug;
+      croak $msg;
+    }
+
+  print STDERR $msg;
+  return;
+}
+
+sub _debug
+{
+  return unless $debug;
+
+  @_ = &{$_[0]} if @_ == 1 && ref $_[0] eq 'CODE';
+  my @caller = caller (1);
+  my $pkg = $caller[0];
+  my $fn  = $caller[3];
+  $fn =~ s/.*:://;
+
+  my $args = join (", ", map { printobj ($_) } @_);
+  $args =~ s/\r/\\r/mg;
+  $args =~ s/\n/\\n/mg;
+
+  my $msg = sprintf ("** %s->%s (%s)\n", $pkg, $fn, $args);
+  print STDERR $msg;
+  return;
+}
+
+sub printobj
+{
+  my $obj = shift;
+  my @list;
+
+  return undef unless (defined $obj);
+  my $ref = ref $obj;
+
+  if ($ref eq 'ARRAY')
+    {
+      return "[" . join (", ", map { printobj ($_) } @$obj) . "]";
+    }
+  elsif ($ref eq 'HASH')
+    {
+      return ("{ "
+              . join (", ", map { sprintf "%s => %s",
+                                          $_, printobj ($obj->{$_})
+                                } sort keys %$obj)
+              . " }");
+    }
+  elsif ($ref eq 'CODE')
+    {
+      return $ref;
+    }
+  elsif ($ref ne "")
+    {
+      $ref =~ s/=.*//;
+      return $ref;
+    }
+  elsif ($obj =~ /^[+-]?[\d.]+/)
+    {
+      return $obj;
+    }
+  $obj =~ s/"/\\"/go;
+  return "\"$obj\"";
+}
+
+# Make it convenient for users to use this in their .fromrc.pl
+*strftime_iso8601 = \&From::Timestamp::strftime_iso8601;
+
+
+package From::ONS;
+
+use strict;
+use Symbol;
+use Socket;
+use Fcntl;
+use POSIX qw(:errno_h);
+
+# mode 1 = buffering, 0 = no buffering
+sub set_buffering_mode
+{
+  my $mode = shift;
+  my $orig = select ($_[0]);
+
+  map { select ($_);
+        $| = ($mode == 0);
+      } @_;
+  select ($orig);
+}
+
+# mode 1 = blocking, 0 = non-blocking
+sub set_blocking_mode
+{
+  my $mode = shift;
+
+  if ($^O eq "MSWin32")
+    {
+      # Note: only socket handles can be made non-blocking on w32.
+      # This definition comes from winsock.h
+      my $FIONBIO = (0x80000000 | (4 << 16) | (ord ('f') << 8) | 126);
+      my $nonblocking = pack ("i", $mode ? 0 : 1);
+
+      map { my $result = ioctl ($_, $FIONBIO, $nonblocking);
+            ::_error ("set_blocking_mode", $!) unless defined $result;
+          } @_;
+    }
+  else
+    {
+      map { my $flags = fcntl ($_, F_GETFL, 0);
+            my $newflags = ($mode
+                            ? $flags & ~(O_NONBLOCK)
+                            : $flags | O_NONBLOCK);
+
+            fcntl ($_, F_SETFL, $newflags)
+              if ($flags != $newflags);
+          } @_;
+    }
+}
+
+my $h_errno = 0;
+my %herrstr = (-1 => "Resolver internal error",
+                0 => "Resolver Error 0 (no error)",
+                1 => "Unknown host",
+                2 => "Host name lookup failure",
+                3 => "Unknown server error",
+                4 => "No address associated with name");
+
+sub ipaddrp { $_[0] =~ /^[\d.]+$/ }
+
+sub herrstr
+{
+  my $null_if_no_error = shift;
+
+  return if ($null_if_no_error && $h_errno == 0);
+  return $herrstr{$h_errno};
+}
+
+sub ons_err
+{
+  my $h = herrstr (1);
+  ::_error (@_, $h);
+  return;
+}
+
+sub ons_gethostbyname
+{
+  my $name = shift;
+
+  $h_errno = $? = 0;
+  my @data = gethostbyname ($name);
+  return @data if @data;
+  $h_errno = $? if ($? != 0);
+  return; # distinct from `return undef' in an array context.
+}
+
+sub ons_gethostbyaddr
+{
+  my ($addr, $type) = @_;
+
+  $type = AF_INET unless defined $type;
+  $h_errno = $? = 0;
+  my $name = gethostbyaddr ($addr, $type);
+  $h_errno = $? if (!defined $name && $? != 0);
+
+  return (defined $name && $name ne "") ? $name : inet_ntoa ($addr);
+}
+
+# Currently the timeout argument applies independently to each connection
+# attempt for multiaddressed hosts.  Should this change?
+sub open_network_stream
+{
+  my ($rhostname, $port, $timeout) = @_;
+
+  my $proto = getprotobyname ("tcp");
+  (undef, undef, $port) = getservbyname ($port, "tcp") if ($port !~ /^\d+$/);
+
+  my @rhostaddr;
+  if (ipaddrp ($rhostname))
+    {
+      push @rhostaddr, inet_aton ($rhostname);
+    }
+  else
+    {
+      @rhostaddr = ons_gethostbyname ($rhostname);
+      return ons_err ($rhostname)
+        unless (defined $rhostaddr[0] && $rhostaddr[0] ne "");
+      splice (@rhostaddr, 0, 4);
+    }
+
+  my $sock = gensym;
+  while (scalar @rhostaddr > 0)
+    {
+      close ($sock) if (defined fileno ($sock));
+      socket ($sock, AF_INET, SOCK_STREAM, $proto)
+        || return ::_error ("socket", $!);
+
+      # If a timeout is specified, put socket into non-blocking mode and
+      # select on it; if the connection succeeds before the timer expires,
+      # put the socket back in blocking mode and return it.
+      if (defined $timeout)
+        {
+          set_blocking_mode (0, $sock);
+          my $status = connect ($sock, sockaddr_in ($port, shift @rhostaddr));
+          if ((!defined $status || $status == -1)
+              && ($! == 0 || $! == EINPROGRESS))
+            {
+              my ($wbits, $tmout) = ('', $timeout);
+              vec ($wbits, fileno ($sock), 1) = 1;
+              my $n = select (undef, $wbits, undef, $tmout);
+
+              next if ($n == -1);
+
+              if ($n != 1)
+                {
+                  $! = ETIMEDOUT;
+                  next;
+                }
+
+              # We got an event before timeout, but don't know what kind.
+              # Check to make sure the connection actually succeeded.
+              my $so_error = getsockopt ($sock, SOL_SOCKET, SO_ERROR);
+              if (defined $so_error && unpack ('i', $so_error) != 0)
+                {
+                  $! = unpack ('i', $so_error);
+                  next;
+                }
+
+              set_blocking_mode (1, $sock);
+              return $sock;
+            }
+        }
+      else
+        {
+          connect ($sock, sockaddr_in ($port, shift @rhostaddr))
+            && return $sock;
+        }
+    }
+  return ::_error ("socket", $!);
+}
+
+
+package From::NetCmd;
+
+use strict;
+
+sub new
+{
+  my $type = shift;
+  my $class = ref ($type) || $type;
+
+  my $self = {};
+  bless $self, $class;
+
+  my %args = @_;
+  while (my ($key, $val) = each %args)
+    {
+      $self->{$key} = $val;
+    }
+  $self->{host} = "localhost" unless defined $self->{host};
+  return $self;
+}
+
+sub connect
+{
+  my $self = shift;
+
+  $self->disconnect;
+  ::_debug (sub { $self->{host}, $self->{port} });
+  $self->{fh} = From::ONS::open_network_stream
+    ($self->{host}, $self->{port}, $self->{timeout});
+
+  From::ONS::set_buffering_mode (0, $self->{fh});
+}
+
+sub command
+{
+  my $self = shift;
+  { my $args = \@_; ::_debug (sub { @$args }) }
+
+  my $cmd = join (" ", @_);
+  $cmd =~ s/\r?\n//g;
+  $cmd .= "\r\n";
+  send ($self->{fh}, $cmd, 0);
+}
+
+sub disconnect
+{
+  my $self = shift;
+  return unless (exists $self->{fh});
+  shutdown ($self->{fh}, 2);  # 2 == SHUTDOWN_BOTH
+  delete $self->{fh};
+}
+
+
+package From::Mailbox::Imap; # See rfc3501
+
+use strict;
+
+our @ISA = qw(From::NetCmd);
+
+sub new
+{
+  my $type = shift;
+  my $class = ref ($type) || $type;
+  my $self = $class->SUPER::new (@_);
+
+  $self->{port}   = "imap"  unless $self->{port};
+  $self->{folder} = "INBOX" unless $self->{folder};
+
+  $self->connect;
+  $self->response_ok_p ("*");
+  return unless $self->login ($self->{user}, $self->{pass});
+  $self->message_count;  # sets folder
+  return $self;
+}
+
+# If called with no arguments, return last response.
+# A tag argument means a new response is expected matching that tag.
+sub response
+{
+  my $self = shift;
+  my $wantarray = wantarray;
+
+  unless (@_)
+    {
+      my $old = $self->{response};
+      return unless defined $old;
+      my @lines = @$old;
+      return $wantarray ? @lines : join ("", @lines);
+    }
+
+  my $tag = quotemeta (shift);
+  my $fh = $self->{fh};
+  my @lines;
+  while (1)
+    {
+      local $_ = <$fh>;
+      push @lines, $_;
+      if (/^\* .*{(\d+)}\r?\n$/)
+        {
+          my $cont = $1;
+          my $pos = 0;
+          while ($pos < $cont)
+            {
+              my $read = read ($fh, $_, $cont - $pos, $pos);
+              $pos += $read;
+            }
+          push @lines, $wantarray ? split (/(\n)/, $_, -1) : $_ ;
+        }
+      last if /^$tag (OK|NO|BAD|PREAUTH)/;
+    }
+  $self->{response} = \@lines;
+  ::_debug (sub { $tag, @lines });
+
+  return unless defined $wantarray;
+  return $wantarray ? @lines : join ("", @lines);
+}
+
+sub response_ok_p
+{
+  my ($self, $tag) = @_;
+
+  my @response = $self->response ($tag);
+  my $last = $response[$#response];
+  $tag = quotemeta ($tag);
+  return unless $last =~ /^$tag (OK|NO|BAD|PREAUTH)/;
+  return 1 if ($1 eq "OK");
+  return 0;
+}
+
+sub command_ok_p
+{
+  my ($self, $tag) = (shift, shift);
+  $self->command ($tag, @_);
+  $self->response_ok_p ($tag);
+}
+
+sub login
+{
+  my ($self, $login, $pass) = @_;
+
+  return 1 if $self->command_ok_p ("AUTH", "login", $login, $pass);
+
+  $self->disconnect;
+  my @response = $self->response;
+  ::_error ($self->{url}, @response);
+  return;
+}
+
+sub logout
+{
+  my $self = shift;
+
+  $self->command_ok_p ("AUTH", "logout");
+  $self->disconnect;
+  return;
+}
+
+sub message_count
+{
+  my $self = shift;
+  $self->{folder} = $_[0] if @_;
+  my $folder = $self->{folder};
+
+  return unless $self->command_ok_p ("EXAMINE", "examine", "$folder");
+  my $result = $self->response;
+
+  my %data;
+  while ($result =~ /^\* (\S+) (.*?)\r?$/mg)
+    {
+      my $tok1 = lc $1;
+      my $tok2 = lc $2;
+
+      if ($tok1 eq 'ok')
+        {
+          $data{$1} = $2 if $tok2 =~ /\[(\S+)\s+(\S+)\]/;
+        }
+      elsif ($tok1 eq 'flags')
+        {
+          $data{$tok1} = [split (/\s+/, $1)] if $tok2 =~ /\((.*)\)/;
+        }
+      else
+        {
+          $data{$tok2} = $tok1
+        }
+    }
+  my $self->{folder_metadata} = \%data;
+  ::_debug (\%data);
+
+  return $data{exists} if defined $data{exists};
+  return;
+}
+
+sub message_size
+{
+  my ($self, $msgno) = @_;
+
+  $self->command_ok_p ("SIZE", "fetch $msgno rfc822.size");
+  my $result = $self->response;
+
+  return $1 if $result =~ /^\* \d+ fetch \(rfc822.size (\d+)\)/mi;
+  return;
+}
+
+sub flags
+{
+  my ($self, $msgno) = @_;
+
+  $self->command_ok_p ("FLAGS", "FETCH $msgno flags");
+  my $result = $self->response;
+
+  my $status = $1 if $result =~ /^\* \d+ fetch \(flags \((.*?)\)\)/mi;
+  return unless $status;
+
+  my %trans = ( seen => ['read', 1], );
+  my %flag;
+  map { my $p = $trans{$_};
+        my $k = $p ? $p->[0] : $_;
+        my $v = $p ? $p->[1] : 1 ;
+        $flag{$k} = $v;
+      } split (m=[\s\\]+=, lc $status);
+  return wantarray ? %flag : \%flag;
+}
+
+sub envelope
+{
+  my ($self, $msgno) = @_;
+
+  # Return-Path usually matches the original SMTP envelope address.
+  return unless $self->command_ok_p
+    ("RETR", "fetch $msgno (internaldate body[header.fields (return-path)])");
+  my $result = $self->response;
+
+  my $rawdate = $1 if $result =~ /internaldate "(.*?)"/i; # delivery date
+  my $addr    = $1 if $result =~ /^Return-Path:\s+<(.*?)>/m;
+
+  local $::opt{date_format} = "%a %b %e %H:%M:%S %Y";
+  local $::opt{tzdate}      = 'sender';
+  my $date = From::Header::_parse_date ($rawdate);
+
+  return "From $addr  $date";
+}
+
+# TODO: If retrieving just part of a multipart/alternative message, try
+# returning just the text/plain portion if one exists.
+# (If --no-parse, do not select parts.)
+sub retrieve
+{
+  my ($self, $msgno, $bodylines) = @_;
+  $bodylines += 0;  # force into numeric context
+
+  my $cmd;
+  my $wanted = $self->{wanted_headers};
+  if ($wanted)
+    {
+      my $s = join (" ", map { "\"$_\"" } @$wanted);
+      $cmd = sprintf ("fetch %d (uid body[header.fields (%s)])", $msgno, $s);
+    }
+  else
+    {
+      $cmd = sprintf ("fetch %d (uid body[header])", $msgno);
+    }
+
+  return unless $self->command_ok_p ("RETR", $cmd);
+  local $_ = $self->response;
+  return unless /[\(|\s]body\[.*?\] \{(\d+)\}\r?\n/gmi;
+
+  my $header_octets = $1;
+  my $header = substr ($_, pos ($_), $header_octets);
+  substr ($header, -2) = "X-UID: $1\r\n\r\n" if (/[\(|\s]uid\s+(\d+)/mi);
+
+  my $body;
+  if ($bodylines < 0)
+    {
+      $self->command ("RETR", "fetch $msgno body[text]");
+      $_ = $self->response ("RETR");
+      $body = substr ($_, pos ($_), $1)
+        if (/^\* \d+ fetch \(body\[text\] {(\d+)}\r?\n/gmi);
+    }
+  elsif ($bodylines > 0)
+    {
+      my $text_octets = $self->message_size ($msgno) - $header_octets;
+      my $blocksize = 1024;
+      my $newlines = 0;
+      my $octets = 0;
+      while (1)
+        {
+          my $start = $octets;
+          last unless $self->command_ok_p
+            ("RETR", "fetch $msgno body[text]<$start.$blocksize>");
+          $_ = $self->response;
+
+          last unless (/^\* \d+ fetch \(body\[text\]<$start> {(\d+)}\r?\n/gmi);
+          $octets += $1;
+          my $newtext = substr ($_, pos ($_), $1);
+          my $end = 0;
+          $end = pos ($newtext) while ($newtext =~ /\n/g && $newlines++ < $bodylines);
+          $body .= substr ($newtext, 0, $end);
+          last if ($octets >= $text_octets || $newlines >= $bodylines);
+        }
+    }
+
+  $header =~ s/\r$//gm;
+  $body   =~ s/\r$//gm if defined $body;
+  return [$header, $body];
+}
+
+
+package From::Mailbox::Pop3;
+
+use strict;
+use POSIX qw(:errno_h strftime);
+
+our @ISA = qw(From::NetCmd);
+
+sub new
+{
+  my $type = shift;
+  my $class = ref ($type) || $type;
+  my $self = $class->SUPER::new (@_);
+
+  $self->{port} = "pop3" unless defined $self->{port};
+
+  $self->connect;
+  $self->response_ok_p;
+  return unless $self->login ($self->{user}, $self->{pass});
+  return $self;
+}
+
+sub response
+{
+  my $self = shift;
+  my $fh = $self->{fh};
+  my $line = <$fh>;
+  ::_debug ($line);
+  return $line;
+}
+
+sub response_ok_p
+{
+  my $self = shift;
+  local $_ = $self->response;
+
+  return 1 if /^\+OK/;
+  $self->{response} = $_;
+  return 0;
+}
+
+sub command_ok_p
+{
+  my $self = shift;
+  $self->command (@_);
+  $self->response_ok_p;
+}
+
+sub login
+{
+  my ($self, $login, $pass) = @_;
+
+  return 1 if (   $self->command_ok_p ("USER", $login)
+               && $self->command_ok_p ("PASS", $pass));
+
+  $self->disconnect;
+  ::_error ($self->{url}, $self->{response});
+  return;
+}
+
+sub logout
+{
+  my $self = shift;
+  $self->command_ok_p ("QUIT");
+  $self->disconnect;
+  return;
+}
+
+sub message_count
+{
+  my $self = $_[0];
+
+  $self->command ("STAT");
+  local $_ = $self->response;
+  return $1 if /^\+OK\s+(\d+)/;
+  return;
+}
+
+sub message_size
+{
+  my ($self, $msgno) = @_;
+
+  $self->command ("LIST ", $msgno);
+  local $_ = $self->response;
+  return $1 if /^\+OK\s+\d+\s+(\d+)/;
+  return;
+}
+
+# No POP3 implementations I'm aware of provide any status flags.
+sub flags { return }
+
+# It's not worth trying to compute a real envelope for this protocol.
+my $pop3_envdate;
+sub envelope
+{
+  my ($self, $msgno) = @_;
+
+  $pop3_envdate = strftime ("%a %b %e %H:%M:%S %Y", localtime) unless $pop3_envdate;
+  sprintf ("From m%03d\@pop3  %s", $msgno, $pop3_envdate);
+}
+
+sub retrieve
+{
+  my ($self, $msgno, $bodylines) = @_;
+  $bodylines += 0;  # force into numeric context
+
+  $self->command ($bodylines < 0
+                  ? "RETR $msgno"
+                  : "TOP $msgno $bodylines");
+  return unless $self->response_ok_p;
+
+  my $fh = $self->{fh};
+  From::ONS::set_blocking_mode (0, $fh);
+  local $_;
+  my $pos = 0;
+  while (1)
+    {
+      my $rsz = read ($fh, $_, 1024, $pos);
+      last if (!defined $rsz
+               && length $_ > 4
+               && substr ($_, -4) =~ /^\.[\r\n]/m);
+      $pos += $rsz if defined $rsz;
+    }
+  From::ONS::set_blocking_mode (1, $fh);
+
+  s/\r\n/\n/gm;
+
+  my ($header, $body) = split (/\n\n/, $_, 2);
+  $body =~ s/^\.//mg if defined $body;
+  chop $body; # remove last newline from `.' terminator
+  return [$header, $body];
+}
+
+
+package From::Mailbox::MboxFile;
+
+use strict;
+use Symbol;
+
+our @ISA = qw(From::NetCmd);
+
+sub new
+{
+  my $type = shift;
+  my $class = ref ($type) || $type;
+  my $self = $class->SUPER::new (@_);
+
+  $self->{raw} = file_contents ($self->{folder});
+  $self->analyze;
+  return $self;
+}
+
+sub xopen
+{
+  my $fh = gensym;
+
+  unless (open ($fh, $_[0], @_[1 .. $#_])) # filename arg must be expicit
+    {
+      ::_error ("open", $_[0], $!);
+      return;
+    }
+  return $fh;
+}
+
+sub file_contents
+{
+  my $file = shift;
+
+  my $fh = xopen ($file);
+  return unless $fh;
+
+  local $_;
+  my $pos = 0;
+  while (1)
+    {
+      my $rsz = read ($fh, $_, -s $fh, $pos);
+      last if $rsz == 0;
+      $pos += $rsz;
+    }
+  close ($fh);
+  return $_;
+}
+
+sub analyze
+{
+  my $self = shift;
 
   # This is perhaps a little too specific, but some MTAs do not
   # quote 'From ' at the beginning of a line in the body, especially
@@ -369,553 +1241,498 @@ sub initialize_variables ()
   # It is rare, but I have seen whitespace (quoted) in the address part of
   # the envelope, e.g.
   #   From "Speakeasy <support"@speakeasy.net  Thu Dec 19 22:46:37 2002
-  $re_message_delimiter = '^From\s+.*?\s+\S{3}\s+\S{3}\s+\d+\s+\d\d:\d\d';
+  my $re_message_delimiter = 'From\s+.*?\s+\S{3}\s+\S{3}\s+\d+\s+\d\d:\d\d';
 
-  # According to RFC822, "The field-name must be composed of printable
-  # ASCII characters (i.e. characters that have decimal values between 33
-  # and 126, except colon)", i.e. any chars except ctl chars, space, or colon.
-  $re_header_name = '[][!"#$%&\'()*+,-./0-9;<=>?@A-Z\\^_`a-z{|}~]+';
-
-  # However, these are the characters allowed in the $opt_format specifiers;
-  # some restrictions exist for the sake of formatting.
-  $re_fmt_header_name = '[!"#$&\'*+,-./0-9;<=>?@A-Z\\^_`a-z{|}~]+';
-
-  $re_blank_line = '^$';
-  $re_format_modifier = '%[\d.-]*';
-
-  $hack_header_function{FROM}    = \&hack_From_data;
-  $hack_header_function{TO}      = \&parse_rfc1522;
-  $hack_header_function{CC}      = \&parse_rfc1522;
-  $hack_header_function{DATE}    = \&hack_Date_data;
-  $hack_header_function{SUBJECT} = \&parse_rfc1522;
-
-  $format_token{'{TLINES}'}  = 'd';
-  $format_token{'{FLINES}'}  = 'd';
-  $format_token{'{OCTETS}'}  = 'd';
-
-  $total_message_lines = 0;
-  $exit_status = 0;
-
-  $body_line_limit = ($opt_linelimit
-                      ? $opt_linelimit + 0
-                      : ($opt_extractp ? -1 : 0));
-}
-
-sub default_user ()
-{
-  my @envvars = qw(FROM_USER USER LOGNAME);
-
-  for my $var (@envvars)
+  my %msg;
+  my $msgno = 0;
+  local *_ = \$self->{raw};
+  while (/^(${re_message_delimiter}.*)$/mogc)
     {
-      my $val = $ENV{$var};
-      return $val if defined $val && $val ne '';
+      $msgno++;
+
+      my %this;
+      $this{envelope} = $1;
+      $this{hbeg} = pos ($_) + 1;
+      $this{hend} = pos ($_) + 1 if /^$/mgc;
+      $this{bbeg} = pos ($_) + 1;
+      $this{bend} = pos ($_) if /^(?=$re_message_delimiter)/mogc || /$/sgc;
+      $msg{$msgno} = \%this;
     }
-  return scalar getpwuid ($<);
+
+  $self->{msgdata} = \%msg;
+  return;
 }
 
-sub default_spool_file ($;$)
+sub message_count
 {
-  return $opt_mail if (defined $opt_mail);
+  my $self = $_[0];
 
-  my $mailfile = $ENV{MAIL};
-  return $mailfile if (defined $mailfile);
+  return scalar keys %{$self->{msgdata}};
+}
 
-  my $user = shift;
-  my $spooldirs = (shift || [qw(/var/mail
-                                /var/spool/mail
-                                /usr/spool/mail
-                                /usr/mail
-                                /com/mail)]);
-  for my $spool (@$spooldirs)
+sub message_size
+{
+  my ($self, $msgno) = @_;
+
+  my $data = $self->{msgdata}->{$msgno};
+
+  return $data->{bend} - $data->{hbeg};
+}
+
+sub flags
+{
+  my ($self, $msgno) = @_;
+
+  my @msg = $self->retrieve ($msgno);
+  return unless @msg;
+
+  my $status = $1 if $msg[0] && $msg[0] =~ /^Status: (.*)/m;
+  return unless $status;
+
+  my %trans = ( R => [qw(read       1)],
+                O => [qw(recent     0)],
+                D => [qw(deleted    1)],
+                F => [qw(important  1)],
+                A => [qw(answered   1)], );
+  my %flag = ( recent => 1, );
+  map { my $p = $trans{$_};
+        my $k = $p ? $p->[0] : $_;
+        my $v = $p ? $p->[1] : 1 ;
+        $flag{$k} = $v;
+      } split (//, uc $status);
+  return wantarray ? %flag : \%flag;
+}
+
+sub envelope
+{
+  my ($self, $msgno) = @_;
+  my $msg = $self->{msgdata}->{$msgno};
+  return unless $msg;
+  return $msg->{envelope};
+}
+
+sub retrieve
+{
+  my ($self, $msgno, $bodylines) = @_;
+
+  my $data = $self->{msgdata}->{$msgno};
+  return unless $data;
+
+  my $header = substr ($self->{raw}, $data->{hbeg}, $data->{hend} - $data->{hbeg});
+
+  my $body;
+  if (defined $bodylines && $bodylines != 0)
     {
-      my $file = join ("/", $spool, $user);
-      return $file if (-f $file);
+      $body = substr ($self->{raw}, $data->{bbeg}, $data->{bend} - $data->{bbeg});
+      if ($bodylines > 0)
+        {
+          my $nl = 0;
+          while ($body =~ /\n/sgc && ++$nl < $bodylines) {}
+          substr ($body, pos ($body) -1, -1) = "";
+        }
     }
-  return undef;
+  return wantarray ? ($header, $body) : [$header, $body];
 }
 
-sub set_me_match ()
-{
-  if (! $opt_me_match)
-    {
-      my $username = default_user ();
-      my @passwd = $username ? getpwnam ($username) : getpwuid ($>);
-      return unless @passwd;
+
+package From::Mailbox;
 
-      ($opt_me_match = $passwd[6]) =~ s/,.*//o;
-      $opt_me_match =~ s/^\s*(.*?)\s*$/$1/o;
-      $opt_me_match =~ s/(\W)/\\$1/go;
-    }
+use strict;
+use POSIX;
+
+sub new
+{
+  my $class = shift;  # notused
+  my $loc = shift;
+
+  $loc = default_spool_file() unless defined $loc;
+  $loc = "file:///$loc" unless $loc =~ m|://|;
+  my %spec = _parse_spec ($loc);
+
+  my $proto = lc ($spec{proto});
+  return _new_imap (%spec, @_) if $proto =~ /^imap4?$/;
+  return _new_pop3 (%spec, @_) if $proto =~ /^pop3?$/;
+  return _new_mbox (%spec, @_) if $proto eq 'file';
+
+  ::_error ($proto, "unsupported protocol");
 }
 
-sub set_default_format ()
+sub _parse_spec
 {
-  if ($opt_extractp)
+  local $_ = shift;
+
+  my ($proto, $user, $pass, $host, $port, $path);
+  my $loc;
+
+  ($proto, $loc, $path) = ($1, $2, $3)
+    if m|^(.*?)://([^/]*)/?(.*)?|;
+
+  if ($loc =~ /^(.*?)@(.*)/)
     {
-      $opt_no_parsep = 1;
-      $opt_format = join ("", map { sprintf ("%s: %%%s\n", $_, $_) }
-                                  qw(From To Cc Subject Date));
+      my ($userpass, $hostport) = ($1, $2);
+      ($user, $pass) = split (/:/, $userpass, 2);
+      ($host, $port) = split (/:/, $hostport, 2);
     }
   else
     {
-      $opt_format = ($opt_numbered? "%-3{FLINES} " : "")
-                    . "%-19.18{FROMTO} %-13.12Date %Subject\n";
-
+      ($host, $port) = split (/:/, $loc, 2);
     }
+
+  s|(://.*?):.*?\@|$1:*\@|;  # strip password from url if present
+  my %data = ( url   => $_,
+               proto => $proto,
+               user  => (defined $user ? $user : $::opt{user}),
+               pass  => (defined $pass ? $pass : $::opt{pass}),
+               host  => $host,
+               port  => $port,
+               path  => $path,
+             );
+  map { delete $data{$_} unless defined $data{$_} && $data{$_} ne ""
+      } keys %data;
+  ::_debug (sub { map { sprintf ("%s => %s", $_, $data{$_}) if $_ ne 'pass'
+                      } sort keys %data });
+  return wantarray ? %data : \%data;
 }
 
-sub openfile ($)
+sub _new_imap
 {
-  my $file = shift;
-  my $fh = gensym;
+  my %data = @_;
 
-  if ($file eq "-")
-    {
-      unless (open ($fh, "<&STDIN"))
-        {
-          err ("stdin", $!);
-          exit (1);
-        }
-    }
-  elsif (!sysopen ($fh, $file, 0))
-    {
-      err ($file, $!);
-      exit (1);
-    }
-  return $fh;
+  $data{port} = "imap"          unless defined $data{port};
+  $data{pass} = input_noecho () unless defined $data{pass};
+  $data{folder} = $data{path} if defined $data{path} && !defined $data{folder};
+  return From::Mailbox::Imap->new (%data);
 }
 
-sub print_envelopes (@)
+sub _new_pop3
 {
-  for my $file (@_)
-    {
-      my $fh = openfile ($file);
-      while (<$fh>)
-        {
-          print if /$re_message_delimiter/o;
-        }
-      close ($fh);
-    }
+  my %data = @_;
+
+  $data{port} = "pop3"          unless defined $data{port};
+  $data{pass} = input_noecho () unless defined $data{pass};
+  return From::Mailbox::Pop3->new (%data);
 }
 
-sub folder_message_count (@)
+sub _new_mbox
 {
-  my $n = 0;
-  for my $file (@_)
-    {
-      my $fh = openfile ($file);
-      while (<$fh>)
-        {
-          $n++ if /$re_message_delimiter/o;
-        }
-      close ($fh);
-    }
-  return $n;
+  my %data = @_;
+
+  $data{folder} = $data{path} if defined $data{path} && !defined $data{folder};
+  return From::Mailbox::MboxFile->new (%data);
 }
 
-
-sub make_format_vector ($)
+sub input_noecho
 {
-  my $fstring = shift;
-  my $tmp = '';
-  my $re_token = $re_format_modifier . "[^%]*";
+  my ($prompt) = @_;
+  my $tty;
+  my $c_lflag;
+  my %trap_sigs = ( HUP  =>  1,
+                    INT  =>  2,
+                    QUIT =>  3,
+                    TERM => 15);
+  my %sig_orig;
+  my $fd = fileno (STDIN);
 
-  undef %header_save_p;
-  undef @vector_header_name;
-  undef @format_vector;
-
-  $tmp .= $1 while ($fstring =~ /^([^%]+|%%)/go);
-  $fstring = substr ($fstring, length ($tmp));
-
-  $vector_header_name[0] = 'prefix';
-  $format_vector[0] = $tmp;
-
-  while ($fstring =~ /^($re_token)/o)
+  # If stdin is a tty, disable echo while reading password.
+  if (-t STDIN)
     {
-      my $modifier = "";
-      my $trailing_whitespace = "";
+      $tty = POSIX::Termios->new;
+      $tty->getattr ($fd);
+      $c_lflag = $tty->getlflag;
 
-      $tmp = $1;
-      $fstring = substr ($fstring, length ($1));
+      # Set up handlers to restore tty on typical signals
+      my $restore = sub {
+        $tty->setlflag ($c_lflag);
+        $tty->setattr ($fd);
+        my $signum = $trap_sigs{$_[0]};
+        print STDERR "\n";
+        ::_verbose ("Exiting on signal $signum (SIG$_[0])");
+        # 7th bit set indicates lower 6 bits represent a
+        # signal number (0x80 == 2**7)
+        exit (0x80 | $signum);
+      };
+      map { $sig_orig{$_} = $SIG{$_} || 'DEFAULT';
+            $SIG{$_} = $restore
+          } keys %trap_sigs;
 
-      if ($tmp =~ /($re_format_modifier)/o)
-        {
-          $modifier = $1;
-          $tmp = substr ($tmp, length ($1));
-          if ($tmp =~ /($re_fmt_header_name)/o)
-            {
-              $trailing_whitespace = substr ($tmp, length ($1));
-              $tmp = $1;
-            }
-        }
-
-      while ($fstring =~ /^([^%]+|%%)/o)
-        {
-          $trailing_whitespace .= $1;
-          $fstring = substr ($fstring, length ($1));
-        }
-
-      # Make header name all upper case to distinguish from extraneous data
-      # like the `prefix' element.
-      $tmp = uc ($tmp);
-      my $tok = $format_token{$tmp} || 's';
-      $header_save_p{$tmp} = 1;
-      if ($tmp eq '{FROMTO}')
-        {
-	  $header_save_p{'FROM'} = 1;
-	  $header_save_p{'TO'}   = 1;
-        }
-      push @vector_header_name, $tmp;
-
-      my $fmt = join ('', $modifier, $tok, $trailing_whitespace);
-      $fmt = eval "\"$fmt\"" if ($fmt =~ /\\/o);
-      push @format_vector, $fmt;
-    }
-}
-
-sub process_file ($)
-{
-  my $file = shift;
-
-  my @headers;
-  my $header_contents = "";
-  my $in_message_body_p = 1;
-  my $folder_message_lines = 0;
-
-  my $fh = openfile ($file);
-  while (<$fh>)
-    {
-      chomp;
-
-      # If we hit an RFC822 message delimiter, clean up in preparation for
-      # getting info about the next message.
-      if ($in_message_body_p && /$re_message_delimiter/o)
-        {
-          undef @headers;
-          $header_contents = "";
-          undef %current_headers;
-          $in_message_body_p = 0;
-          next;
-        }
-
-      # If we're finished reading header continuation lines (evidenced by
-      # coming upon a new header name), finish processing this header.
-      if ($header_contents ne "" && /^$re_header_name/o)
-        {
-          push (@headers, $header_contents) if ($opt_all_headers);
-          add_header ($header_contents);
-          $header_contents = $_;
-          next;
-        }
-
-      # If we're not in the message body, and we come upon a blank line,
-      # we're at the end of the headers for this message.
-      if (! $in_message_body_p && /$re_blank_line/o)
-        {
-          # Add last buffered header.
-          push (@headers, $header_contents) if ($opt_all_headers);
-          add_header ($header_contents);
-          $header_contents = "";
-
-          $total_message_lines++;
-          $folder_message_lines++;
-          $current_headers{'{TLINES}'} = $total_message_lines;
-          $current_headers{'{FLINES}'} = $folder_message_lines;
-          $current_headers{'{FOLDER}'} = $file;
-
-          $in_message_body_p = 1;
-          $body_line_count = 0;
-
-          maybe_print_headers (scalar @headers, \@headers, $opt_all_headers);
-        }
-
-      if ($in_message_body_p
-          && $opt_extractp
-          && ! $ignore_this_message_p
-          && (($body_line_limit < 0)
-              || ($body_line_count <= $body_line_limit)))
-        {
-          chomp;
-          print "\n" if ($body_line_count == 0);
-          print $_, "\n";
-          $body_line_count++;
-          next;
-        }
-
-      next if ($in_message_body_p
-               || ($opt_firstlinep && $header_contents ne ""));
-
-      # Otherwise, append current header info.
-      $header_contents .= "\n" if ($header_contents ne "");
-      $header_contents .= $_;
-    }
-  close ($fh);
-}
-
-sub process_remote_folder ($$$$$$;$)
-{
-  my ($proto, $host, $port, $auth, $user, $pass, $mbox) = @_;
-  my $total_message_count;
-  my $msgnumber;
-
-  my $folder = $proto->new ($host, $port);
-  return 0 unless $folder && $folder->$auth ($user, $pass);
-
-  $total_message_count = $folder->message_count ($mbox);
-
-  if ($opt_countp && ! $opt_unread_only)
-    {
-      $folder->close;
-      print $total_message_count, "\n";
-      return 1;
+      $tty->setlflag ($c_lflag & ~&POSIX::ECHO);
+      $tty->setattr ($fd);
     }
 
-  $current_headers{'{FOLDER}'} = join (":", $host, $port, $user);
-  $msgnumber = 1;
+  # Temporarily disable buffering on stderr, which is where prompt is printed.
+  my $fh_orig = select (STDERR);
+  my $stderr_bufp = $|;
+  $| = 1;
+  $prompt = "Password:" unless defined $prompt;
+  print $prompt;
+  my $input = <STDIN>;
+  chomp $input if defined $input;
+  $| = $stderr_bufp;
+  select ($fh_orig);
 
-  while ($msgnumber <= $total_message_count)
+  # Restore echo afterward, if it was originally on;
+  # and restore signal handlers
+  print STDERR "\n";
+  if ($tty)
     {
-      if ($opt_extractp
-          && defined $opt_match_header && $opt_match_header ne ''
-          && $body_line_limit != 0)
-        {
-          # If we're searching for a particular message for extraction, get
-          # just the headers first to see if this is a matching message.
-          # Then and only then should we try retrieving the body below.
-          process_remote_folder_get ($folder, $msgnumber, 0);
-          if (! message_header_pattern_matched_p ())
-            {
-              $msgnumber++;
-              $total_message_lines++;
-              next;
-            }
-        }
-
-      my ($lineno, $lines)
-        = process_remote_folder_get ($folder, $msgnumber, $body_line_limit);
-      $total_message_lines++;
-      $current_headers{'{FLINES}'} = $msgnumber;
-      $current_headers{'{TLINES}'} = $total_message_lines;
-      $current_headers{'{OCTETS}'} = $folder->message_size ($msgnumber)
-        if $header_save_p{'{OCTETS}'};
-
-      maybe_print_headers ($lineno, $lines, $opt_all_headers);
-
-      if (! $ignore_this_message_p && $opt_extractp)
-        {
-          print $lines->[$lineno++], "\n"
-            while (defined $lines->[$lineno]);
-          print "\n" if ($body_line_limit != 0);
-        }
-      $msgnumber++;
-    }
-  $folder->close;
-}
-
-sub process_remote_folder_get ($$$)
-{
-  my ($folder, $msgnumber, $body_line_limit) = @_;
-  my $data = $folder->retrieve_lines ($msgnumber, $body_line_limit);
-  my $header_line_count = $data->[0];
-  my $lines = $data->[1];
-  my $header_contents = '';
-  my $lineno = 0;
-
-  undef %current_headers;
-  while ($lineno < $header_line_count)
-    {
-      if ($header_contents ne ''
-          && $lines->[$lineno] =~ /^$re_header_name/o)
-        {
-          add_header ($header_contents);
-          $header_contents = $lines->[$lineno];
-        }
-      else
-        {
-          $header_contents .= "\n" . $lines->[$lineno]
-            unless ($opt_firstlinep && $header_contents ne '');
-        }
-      $lineno++;
+      $tty->setlflag ($c_lflag);
+      $tty->setattr ($fd);
+      map { $SIG{$_} = $sig_orig{$_} } keys %trap_sigs;
     }
 
-  # Add last buffered header.
-  add_header ($header_contents);
-  return ($lineno, $lines);
-}
-
-# This uses way, way too many free variables
-sub maybe_print_headers ($$$)
-{
-  # $lines should be a reference to an array of lines.
-  my ($lines_header_end, $lines, $opt_all_headers) = @_;
-
-  $ignore_this_message_p = 1;
-
-  if (! ($opt_unread_only
-         && index ($current_headers{STATUS}, "R"))
-      && message_header_pattern_matched_p ())
-    {
-      $ignore_this_message_p = 0;
-      if (! $opt_countp)
-        {
-          printf "From ----------Message-%.3d---------- %s\n",
-                  $total_message_lines, $ctime_now
-            if ($opt_extractp);
-
-          if (defined $lines_header_end && $opt_all_headers)
-            {
-              my $l = 0;
-              print $lines->[$l++], "\n"
-                while ($l < $lines_header_end);
-              return;
-            }
-          print_headers ();
-        }
-    }
+  return $input;
 }
 
 
-sub add_header ($)
+package From::Header;
+
+use strict;
+use POSIX qw(strftime);
+use Encode qw(:all);
+
+sub new
 {
-  my $line = shift;
+  my $type = shift;
+  my $class = ref ($type) || $type;
 
-  return unless ($line =~ /^([^ :]*: )/o);
+  my $self = {};
+  bless $self, $class;
 
-  my $header = uc ($1);
-  # Get rid of trailing `: ';
-  substr ($header, -2) = '';
+  $self->{raw}        = shift;
+  $self->{metadata}   = shift || {};
+  $self->analyze;
+  return $self;
+}
 
-  if (defined $header_save_p{$header})
+sub analyze
+{
+  my $self = shift;
+  local *_ = \$self->{raw};
+
+  my %header;
+  while (/^([^\s]+):[ \t]+/mgc)
     {
-      my $data = substr ($line, length ($1));
-
-      # Store the unparsed header data in the match_header, if defined.
-      $current_headers{$opt_match_header} = $data
-        if (defined $opt_match_header
-            && "{MATCH_$header}" eq $opt_match_header);
-
-      $data = &{$hack_header_function{$header}} ($data)
-        if (!$opt_no_parsep && exists $hack_header_function{$header});
-      $current_headers{$header} = $data;
+      my $printname = $1;
+      my $name = lc $1;
+      my $beg = pos $_;
+      my $end = pos $_ if /(?=\n[\S\n])/mgc;
+      push @{$header{$name}}, [$beg, $end, $printname];
     }
+
+  ::_debug (\%header);
+  $self->{headerdata} = \%header;
+  return;
+}
+
+sub names
+{
+  my $self = shift;
+
+  my $header = $self->{headerdata};
+  my @names = (@_
+               ? map { $header->{$_} && $header->{$_}->[0]->[2] } @_
+               : map { $header->{$_}->[0]->[2]
+                     } sort { $header->{$a}->[0]->[0] <=> $header->{$b}->[0]->[0]
+                            } keys %$header);
+  ::_debug (sub { $self, @names });
+  return wantarray ? @names : \@names;
+}
+
+sub fromto
+{
+  my ($self, $allp) = @_;
+  my $from = join (", ", $self->contents ('from', $allp));
+
+  my $me_re = $::opt{me_match_regexp};
+  if ($me_re && $from =~ /$me_re/o)
+    {
+      my @to = map { $self->contents ($_, 1) } (qw(to cc newsgroups));
+      return $from unless @to;
+      return "To " . join (", ", @to);
+    }
+  return $from;
+}
+
+sub contents
+{
+  my ($self, $name, $allp) = @_;
+
+  my $lname = lc $name;
+
+  return $self->fromto if $lname eq '{fromto}';
+  return $self->{metadata}->{$lname} if exists $self->{metadata}->{$lname};
+  my $data = $self->{headerdata}->{$lname};
+  return unless defined $data;
+
+  my @contents;
+  for my $pair (@$data)
+    {
+      my ($beg, $end) = @$pair;
+      push @contents, substr ($self->{raw}, $beg, $end - $beg);
+      last unless $allp;
+    }
+  ::_debug (sub { $name, @contents });
+  return wantarray ? @contents : \@contents;
+}
+
+# Fold wrapped header contents into a single line
+sub contents1
+{
+  my ($self, $name, $allp) = @_;
+
+  my @contents = $self->contents ($name, $allp);
+  map { s/\r?\n\s+/ /mg; $_ } @contents;
+
+  return wantarray ? @contents : \@contents;
+}
+
+# join all header contents into a single line
+sub allcontents1
+{
+  my ($self, $name) = @_;
+  join (", ", $self->contents1 ($name, 1));
+}
+
+my %header_parser =
+  ( '{fromto}'      => \&_parse_address,
+
+    'return-path'   => \&_parse_address,
+    'sender'        => \&_parse_address,
+    'from'          => \&_parse_address,
+    'reply-to'      => \&_parse_address,
+
+    'to'            => \&_parse_address,
+    'cc'            => \&_parse_address,
+    'bcc'           => \&_parse_address,
+
+    'resent-sender' => \&_parse_address,
+    'resent-from'   => \&_parse_address,
+    'resent-to'     => \&_parse_address,
+    'resent-cc'     => \&_parse_address,
+    'resent-bcc'    => \&_parse_address,
+
+    'date'          => \&_parse_date,
+    'resent-date'   => \&_parse_date,
+
+    'subject'       => \&_parse_subject,
+  );
+
+sub parsed
+{
+  my ($self, $name, $allp) = @_;
+
+  ::_debug ($name);
+
+  my $fn = $header_parser{$name};
+  return $self->contents ($name, $allp) unless $fn;
+
+  my @contents = map { &$fn ($_) } $self->contents ($name, $allp);
+  return wantarray ? @contents : \@contents
+}
+
+sub allparsed
+{
+  my ($self, $name) = @_;
+  join (", ", $self->parsed ($name, 1));
+}
+
+sub allparsed1
+{
+  my ($self, $name) = @_;
+  local $_ = $self->allparsed ($name);
+  s/\r?\n\s+/ /mg;
+  return $_;
+}
+
+sub _parse_subject
+{
+  return $::opt{utf8} ? _parse_rfc1522 ($_) : $_;
 }
 
 # Try to extract real name from From: line when possible.
-sub hack_From_data ($)
+sub _parse_address
 {
-  my $d = shift;
+  local $_ = $_[0];
+  ::_debug ($_);
 
-  # "\<" used below to avoid confusing cperl-mode font-lock;
-  # this is not a perl metacharacter.
-
-  $d = $1
-    if ($d =~ m/\(([^)]+)\)/o           # From: foobar@host (real name)
-        || $d =~ m/"([^"]+)"/o          # From: "real name" <foobar@host>
-        || $d =~ m/"".*?\<([^\>]+)\>/o  # From: "" <foobar@host>
-        || $d =~ m/^(.+?)\</o           # From: real name <foobar@host>
-        || $d =~ m/^\<(.*?)\>/o);       # From: <foobar@host>
+  $_ = $1
+    if (   m/\((.*?)\)/       # From: foobar@host (real name)
+        || m/"(.*?)"/         # From: "real name" <foobar@host>
+        || m/"".*?<(.*?)>/    # From: "" <foobar@host>
+        || m/^(.+?)</         # From: real name <foobar@host>
+        || m/^<(.*?)>/);      # From: <foobar@host>
 
   # Strip any leading and trailing whitespace
-  $d =~ s/^\s+//o;
-  $d =~ s/\s+$//o;
+  s/^\s+//;
+  s/\s+$//;
 
-  parse_rfc1522 ($d);
+  return _parse_rfc1522 ($_) if $::opt{utf8};
+  return $_ unless /=\?.*?\?.\?.*?\?=/;
+  # If not utf8 but real name is rfc1522-encoded, return address.
+  $_ = $_[0];
+  $_ = $1 if /<(.*?)>/ || /^\s*(.*?)\s+\(/;
+  return $_;
 }
 
-my @month_conv = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec');
-
-# Prettify date
-sub hack_Date_data ($)
+sub _parse_rfc1522
 {
-  my $fmt = "%s %-2.2d %-2.2d:%-2.2d";
+  local $_ = shift;
+  my $result = "";
 
-  # Handle dates of the form:
-  #    Mon, 14 Feb 1972 17:29:00 -0500
-  #    14 Feb 1972 17:29:00 -0500 (EST)
-  return sprintf $fmt, $2, $1, $3, $4
-    if ($_[0] =~ /^\s*(?:\D+,?\s+|)(\d+)\s+(\D+)\s+\d+\s+(\d+):(\d+)/o);
-
-  # ISO-8601 date format: YYYY-MM-DD HH:MM:SS-hh:mm
-  # (where hh:mm is the timezone offset from UTC)
-  # This parsing doesn't attempt to convert the originating time zone to
-  # the local time.
-  return sprintf $fmt, $month_conv[$1 -1], $2, $3, $4
-    if ($_[0] =~ /^\s*\d+-(\d+)-(\d+)\s+(\d+):(\d+):\d+/o);
-
-  # Handle dates of the form:
-  #    Sat Jan  1 21:24:52 IST 2000
-  return sprintf $fmt, $1, $2, $3, $4
-    if ($_[0] =~ /\D+\s+(\D{3})\s+(\d+)\s+(\d+):(\d+):\d/o);
-
-  return $_[0];
-}
-
-sub print_headers
-{
-  my $data = (shift || \%current_headers);
-  my $str = "";
-  my $i = 0;
-
-  if (! $data->{'{FROMTO}'})
+  while (/(.*?)=\?(.*?)\?(.)\?(.*?)\?=/gc)
     {
-      if ($opt_me_match
-          && defined $data->{'FROM'}
-          && $data->{'FROM'} =~ /$opt_me_match/o)
-        {
-	  my $to = $data->{'TO'};
-	  $to = $1 if $to =~ /^([^,]+),/o;
-	  $to =~ s/^\s*(.*?)\s*$/$1/o;
-	  $data->{'{FROMTO}'} = 'To ' . hack_From_data ($to);
-        }
-      else
-        {
-	  $data->{'{FROMTO}'} = $data->{'FROM'};
-        }
-    }
+      my $pos = pos $_; # perl 5.8 seems to lose this if encoding
 
-  while (1)
-    {
-      if (!defined $format_vector[$i])
-        {
-          # Truncate output string if appropriate.
-          $str = join ("\n",
-                       map { (length ($_) > $opt_columns)
-                               ? substr ($_, 0, $opt_columns) : $_; }
-                       split (/\n/, $str, -1))
-            if ($opt_columns > 0 && length ($str) > $opt_columns);
-          if ($opt_utf8 && is_utf8 ($str))
-            {
-              # print can't print wide characters; convert back to raw bytes.
-              # The receiver (e.g. xterm) will have to re-decode.
-              $str = encode_utf8 ($str);
-            }
-          print $str;
-          return;
-        }
+      $result .= $1;
+      my $charset  = lc ($2);
+      my $encoding = lc ($3);
 
-      my $header = $vector_header_name[$i];
-      my $format = $format_vector[$i];
-      $str .= sprintf ($format, $data->{$header} || "");
-      $i++;
+      my $s = (  $encoding eq 'q' ? qp_decode     ($4)
+               : $encoding eq 'b' ? base64_decode ($4)
+               : "$4");
+      if ($::opt{utf8})
+        {
+          $s = decode ($charset, $s); # convert to utf8
+          utf8::encode ($s);          # convert back to bytes for now
+        }
+      $result .= $s;
+
+      pos $_ = $pos;
     }
+  return $_ if $result eq "";
+  return $result . substr ($_, pos $_);
 }
 
-sub message_header_pattern_matched_p
+sub _parse_date
 {
-  return 1 if (!defined $opt_match_header || $opt_match_header eq '');
+  local $_ = shift;
 
-  return 1
-    if (defined ($current_headers{$opt_match_header})
-        && ($current_headers{$opt_match_header} =~ /$opt_match_regexp/oi));
+  my ($tm, $offset) = From::Timestamp::_parse_timestamp ($_);
+  return $_ unless $tm;
 
-  return 0;
+  local $ENV{TZ};
+  if (! $::opt{tzdate}) {}
+  elsif (lc $::opt{tzdate} eq 'local' || lc $::opt{tzdate} eq 'tz') {}
+  elsif (lc $::opt{tzdate} eq 'sender' && $offset)
+    {
+      $offset =~ s/(\d\d)(\d\d)$/$1:$2/;
+      $offset =~ y/+-/-+/;
+      $ENV{TZ} = "UTC" . $offset;
+    }
+  elsif ($::opt{tzdate})
+    {
+      $ENV{TZ} = $::opt{tzdate};
+    }
+  my @tminfo = localtime ($tm);
+
+  my $fmt = $::opt{date_format};
+  $fmt = &$fmt (@tminfo) if ref $fmt eq 'CODE';
+  $_ = strftime ($fmt, @tminfo);
+  return $_;
 }
 
-
 my @base64_decode_vector;
-
-sub base64_decode ($)
+sub base64_decode
 {
   return $_[0] unless (length ($_[0]) % 4 == 0);
 
@@ -957,7 +1774,7 @@ sub base64_decode ($)
   return $result;
 }
 
-sub qp_decode ($)
+sub qp_decode
 {
   my $data = shift;
 
@@ -969,416 +1786,738 @@ sub qp_decode ($)
       last if ($p < $[);
       # Convert "=XX" (where XX is the hexidecimal representation
       # of an ascii character) to ascii.
-      substr ($data, $p, 3) = chr hex substr ($data, $p+1, 2);
+      substr ($data, $p, 3) = chr (hex (substr ($data, $p+1, 2)));
       $p++;
     }
   return $data;
 }
 
-# For a description of the windows codepages see emacs 22's
-# lisp/international/codepage.el
-# cp1252 is identical to iso-8859-1.
-@rfc1522_charset = (qw(iso-8859-1 windows-1252 us-ascii));
-my $rfc1522_charset_re;
-
-sub parse_rfc1522 ($)
-{
-  my $input = shift;
-  my $result = "";
-
-  $rfc1522_charset_re = join ("|", @rfc1522_charset) unless $rfc1522_charset_re;
-
-  while ($input =~ m/(.*?)=\?($rfc1522_charset_re)\?([^?]).*?\?([^?]*)\?=/gcio)
-    {
-      $result .= $1;
-      my $charset = lc ($2);
-      my $encoding = lc ($3);
-
-      my $decoded = ($encoding eq 'q'
-                     ? qp_decode ($4)
-                     : ($encoding eq 'b'
-                        ? base64_decode ($4)
-                        : $4));
-      if ($opt_utf8)
-        {
-          $decoded = decode ($charset, $decoded); # string now multibyte
-        }
-
-      $result .= $decoded;
-    }
-  return $input if ($result eq "");
-  return $result . substr ($input, pos $input);
-}
-
 
-package Netstream;
-
-use Socket;
-use Symbol;
-use strict;
-
-# fh may be a filehandle or a reference to an array of handles
-# mode 1 = buffering, 0 = no buffering
-sub set_buffering_mode
-{
-  my ($fh, $mode) = @_;
-  my $orig = select (ref $fh eq 'ARRAY' ? $fh->[0] : $fh);
-
-  for my $handle (ref $fh eq 'ARRAY' ? @$fh : $fh)
-    {
-      select ($handle);
-      $| = ($mode == 0);
-    }
-  select ($orig);
-}
-
-sub open_network_stream ($$)
-{
-  my ($rhostname, $port) = @_;
-
-  my $proto = getprotobyname ("tcp");
-  (undef, undef, $port) = getservbyname ($port, "tcp") if ($port !~ /^\d+$/o);
-
-  my @rhostaddr;
-  if ($rhostname =~ /^[0-9.]+$/o)
-    {
-      push @rhostaddr, inet_aton ($rhostname);
-    }
-  else
-    {
-      @rhostaddr = gethostbyname ($rhostname);
-      return err ($rhostname, "cannot resolve host name.")
-        unless (defined $rhostaddr[0] && $rhostaddr[0] ne "");
-      splice (@rhostaddr, 0, 4);
-    }
-
-  my $sock = gensym;
-  socket ($sock, AF_INET, SOCK_STREAM, $proto) || return err ("socket", $!);
-  while ($#rhostaddr >= 0)
-    {
-      next unless connect ($sock, sockaddr_in ($port, shift @rhostaddr));
-      set_buffering_mode ($sock, 0);
-      return $sock;
-    }
-  return err ("socket", $!);
-}
-
-
-package POP3;
+package From::Timestamp;
 
 use strict;
+use POSIX qw(strftime localtime);
+use Time::Local;
 
-sub new
+my @time_parser_list =
+  ( [ "Time::ParseDate" => \&Time::ParseDate::parsedate ],
+    [ "Date::Parse"     => \&Date::Parse::str2time      ], );
+
+sub _parse_timestamp
 {
-  my ($type, $host, $port) = @_;
-  my $class = ref ($type) || $type;
-  my $self = bless {}, $class;
+  local $_ = shift;
 
-  my $sock = Netstream::open_network_stream ($host, $port) || return undef;
-  $self->{sock} = $sock;
+  # Try this first since we have a few normal cases and it's faster.
+  my @result = cheesy_timestamp_parser ($_);
+  return @result if @result;
 
-  return $self;
-}
-
-# implements `pass' authentication method
-sub pass
-{
-  my ($self, $login, $pass) = @_;
-
-  return 1 if ($self->response_ok_p # greeting
-               && $self->send_command_ok_p ("USER " . $login)
-               && $self->send_command_ok_p ("PASS " . $pass));
-
-  $self->close;
-  return 0;
-}
-
-sub message_count
-{
-  my $self = shift;
-  $self->send_command ("STAT");
-  my $results = $self->parse_response;
-  return $results->[1];
-}
-
-sub message_size
-{
-  my ($self, $msgnumber) = @_;
-  $self->send_command ("LIST $msgnumber");
-  my $results = $self->parse_response;
-  return $results->[2] if ($results->[0] eq "+OK");
-  return undef;
-}
-
-sub retrieve_lines
-{
-  my ($self, $msgnumber, $bodylines) = @_;
-  $bodylines += 0;  # force into numeric context
-
-  $self->send_command ($bodylines < 0
-                       ? "RETR $msgnumber"
-                       : "TOP $msgnumber $bodylines");
-  return undef unless ($self->response_ok_p);
-
-  my $i = 0;
-  my $headers_end = 0;
-  my @lines;
-  my $sock = $self->{sock};
-  while (<$sock>)
+  # Break out bigger guns
+  unless (*time_parser{CODE})
     {
-      s/[\r\n]+$//o;
+      for my $elt (@time_parser_list)
+        {
+          my ($module, $fn) = @$elt;
+          eval "use $module";
+          next if ($@ ne "");
+          *time_parser = $fn;
+          last;
+        }
+      *time_parser = sub { return } unless *time_parser{CODE};
+    }
+  return time_parser ($_);
+}
 
-      # The end of the transmission always ends with a single period on a
-      # line by itself.
-      last if ($_ eq '.');
-      # Otherwise, any period at the beginning of a line is quoted with an
-      # additional period.  Periods after the first aren't quoted, so at
-      # the most we need strip only one.
-      s/^\.//o;
+my %month_conv
+  = (Jan => 1,    Apr => 4,    Jul => 7,    Oct => 10,
+     Feb => 2,    May => 5,    Aug => 8,    Nov => 11,
+     Mar => 3,    Jun => 6,    Sep => 9,    Dec => 12);
 
-      # The first blank line signals the end of headers.
-      $headers_end = $i if ($_ eq '' && $headers_end == 0);
-      push @lines, $_;
-      $i++;
+sub cheesy_timestamp_parser
+{
+  local $_ = shift;
+
+  #return      $_  if /^[0-9]+$/;
+  #return hex ($_) if /^(?:0x)?[0-9a-f]+$/i;
+
+  my ($y, $m, $d, $H, $M, $S, $offset, $tm);
+
+  # Handle dates of the form:
+  #    Sun, 19 Jan 1992 22:44:05 -0500
+  #    21 Dec 1992 17:32:12 -500 (EST)
+  #    01-Sep-2011 16:31:24 -0700
+  # These are the most common.
+  if (/^(?:\D+,?\s+)?(\d+)[\s+|-](\S+)[\s+|-](\d+)\s+(\d+):(\d+):(\d\d)\s+([+-]\d?\d:?\d\d)/)
+    {
+      ($y, $m, $d, $H, $M, $S, $offset) = ($3, $month_conv{$2}, $1, $4, $5, $6, $7);
     }
 
-  return [ $headers_end, \@lines ];
+  # Handle dates of the form:
+  #    Fri, 19 Apr 91 01:07:33 PDT
+  #    Fri, 12 May 95 17:26 MET DST
+  #    23 Dec 92 02:17:25
+  elsif (/^(?:\D+,?\s+)?(\d+)\s+(\S+)\s+(\d+)\s+(\d+):(\d+)(?::(\d\d))?(?:\s+([A-Za-z ]+))?/)
+    {
+      ($y, $m, $d, $H, $M, $S, $offset) = ($3, $month_conv{$2}, $1, $4, $5, $6, $7);
+      $offset = tzconv ($offset) if $offset;
+    }
+
+  # Handle dates of the form:
+  #    Sun Feb 17 23:41:23 1991
+  #    Sat Jan  1 21:24:52 IST 2000
+  #    Tue Jun 18 17:51:38 MET DST 1996
+  elsif (/^[a-z]{3}\s+([a-z]{3})\s+(\d+)\s+(\d+):(\d+):(\d\d)\s*?([a-z]{3,4}(?: DST|))?\s+(\d{4})/i)
+    {
+      ($y, $m, $d, $H, $M, $S, $offset) = ($7, $month_conv{$1}, $2, $3, $4, $5, $6);
+      $offset = tzconv ($offset) if $offset;
+    }
+
+  # ISO-8601 date format: YYYY-MM-DD{T}HH:MM:SS[+-]hh{:}mm
+  # Or sloppy variants.
+  elsif (/^(\d{2,4})\D(\d?\d)\D(\d?\d)\D+(\d?\d)\D(\d?\d)\D(\d?\d)\s*(Z|[+-]\d\d:?\d\d)?/)
+    {
+      ($y, $m, $d, $H, $M, $S, $offset) = ($1, $2, $3, $4, $5, $6, $7);
+    }
+
+  else { return } # unrecognized.
+
+  local $ENV{TZ} = 'UTC' if $offset;
+  $tm = timelocal ($S + 0, $M + 0, $H + 0,
+                   $d + 0, ($m + 0 > 0 ? $m - 1 : 0), normalize_year ($y));
+
+  if ($offset && $offset =~ /^([+-])(\d?\d):?(\d\d)/)
+    {
+      my ($sign, $h, $m) = ($1 . '1', $2, $3);
+      $tm -= $sign * (($h * 3600) + ($m * 60));
+    }
+
+  return unless defined $tm;
+  return wantarray ? ($tm, $offset) : $tm;
 }
 
-sub send_command
+my ($hcurrentyear, $lcurrentyear);
+sub normalize_year
 {
-  my $self = shift;
-  my $sock = $self->{sock};
-  print $sock $_[0], "\r\n";
+  my $y = 0 + shift;
+  return $y        if $y > 999;  # 1000 or higher
+  return $y + 1900 if $y >  99;  #  100 or higher
+
+  unless ($hcurrentyear)
+    {
+      ($hcurrentyear, $lcurrentyear) = ($1, $2)
+        if strftime ("%Y", localtime (time)) =~ /^(\d+?)(\d\d)$/;
+    }
+
+  # For years 0-99, see if the value is equal to or less than the current
+  # year.  If it is, use the current epoch.  If higher, use the previous epoch.
+  my $h = $hcurrentyear;
+  $h-- if $y > $lcurrentyear;
+  return $y + $h * 100;
 }
 
-sub response_ok_p ($)
+my %tzconv;
+sub tzconv
 {
-  my $self = shift;
-  my $response = $self->read_response;
+  my $tz = uc shift;
 
-  return 1 if ($response =~ /^\+OK/oi);
-  return 0;
+  unless (%tzconv)
+    {
+      # This is not meant to be complete, just to pick up the more common
+      # ancient, pre-RFC2822 timezone indicators.
+      %tzconv = ( GMT  => '+0000',  UTC   => '+0000',
+                  EST  => '-0500',  EDT   => '-0400',
+                  CST  => '-0600',  CDT   => '-0500',
+                  MST  => '-0700',  MDT   => '-0600',
+                  PST  => '-0800',  PDT   => '-0700',
+                  WET  => '+0000',  WEST  => '+0100',
+                  CET  => '+0100',  CEST  => '+0200',
+                  EET  => '+0200',  EEST  => '+0300',
+                  JST  => '+0900',
+                  'WET DST' => '+0100', 'MET DST' => '+0200', );
+    }
+  return $tzconv{$tz} if exists $tzconv{$tz};
+
+  # Break out bigger guns.
+  unless (*tz2zone{CODE})
+    {
+       eval "use Time::Timezone ()";
+       if ($@ eq "")
+         {
+           *tz2zone   = \&Time::Timezone::tz2zone;
+           *tz_offset = \&Time::Timezone::tz_offset;
+         }
+       else
+         {
+           *tz2zone = *tz_offset = sub { return };
+         }
+     }
+  use integer;
+  my $z = tz2zone ($tz);
+  return unless $z;
+  my $s = tz_offset ($z);
+  my $h = $s / 3600;
+  my $m = ($s - 3600 * $h) / 60;
+  my $o = sprintf ("%02.2d%02d", $h, $m);
+  $o = "+$o" if $s >= 0;
+  return $o;
 }
 
-sub send_command_ok_p
+# strftime doesn't directly let you display Zulu time correctly.
+# This implementation conforms to iso8601:2004.
+sub strftime_iso8601
 {
-  my $self = shift;
-  $self->send_command (@_);
-  $self->response_ok_p;
-}
+  my $fmt = shift;
 
-sub parse_response
-{
-  my $self = shift;
-  my $response = $self->read_response;
-  $response =~ s/[\r\n]+$//o;
-  [ split (/[ \t]+/o, $response) ];
-}
+  local $_ = strftime ($fmt, @_);
 
-sub read_response
-{
-  my $self = shift;
-  my $sock = $self->{sock};
-  my $line = <$sock>;
-  #$line =~ s/[\r\n]+$//o;
-  return $line;
-}
+  # We pad the end if shortened and not using zulu time consistently,
+  # to keep widths consistent.
+  $fmt =~ /[^\s]%z/ && s=\+0000=Z=
+    && $ENV{TZ} && uc $ENV{TZ} ne 'UTC' && s=$=    =;
 
-sub close
-{
-  my $self = shift;
-  # Should we send a quit in general, or just close the connection?
-  # RFC1725 section 6 says doing the latter avoids entering the UPDATE
-  # state, which should avoid changing any read/unread status headers.
-  # However, some pop3 servers do not make this distinction and update
-  # status headers anyway.
-  #$self->send_command ('QUIT');
-  shutdown ($self->{sock}, 2);  # 2 == SHUTDOWN_BOTH
-  delete $self->{sock};
+  s=%=%%=g;  # re-quote outstanding `%' for reinput to strftime again.
+  return $_;
 }
 
 
-package IMAP;
+::main (@ARGV);
 
-use strict;
+1;
 
-sub new
-{
-  my ($type, $host, $port) = @_;
-  my $class = ref ($type) || $type;
-  my $self = bless {}, $class;
+__END__
 
-  my $sock = Netstream::open_network_stream ($host, $port) || return undef;
-  $self->{sock} = $sock;
+=head1 NAME
 
-  return $self;
-}
+from - summarize mailbox folder
 
-# implements `login' authentication method
-sub login
-{
-  my ($self, $login, $pass) = @_;
+=head1 SYNOPSIS
 
-  return 1
-    if ($self->response_ok_p ("*")  # greeting
-        && $self->send_command_ok_p ("AUTH",
-                                     sprintf ("login %s %s",
-                                              $login, $pass)));
+     {-h|--help|--usage}               {-C|--columns      COLS}
+     {-D|--debug}                      {-f|--format       FMT}
+     {-W|--warnings}                   {-d|--date-format  FMT}
+                                       {-S|--show-date    TZ}
+     {-c|--count-only}                 {--utc|--gmt}
+     {-e|--envelope}
+                                       {-i|--me-match REGEX}
+     {-p|--parse}                      {-M|--match-header REGEX}
+     {-P|--no-parse}                   {-m|--match REGEX}
+                                       {-s|--sender REGEX}
+     {-u|--unread-only}
+     {-n|--message-numbers N1,...}     {-U|--utf8|--utf-8}
+                                       {--no-utf8|--no-utf-8}
+     {-1|--one-line-headers}
+     {-2|--multi-line-headers}         {--user USER}
+     {-a|--all-headers}
+     {-I|--interesting-headers HDRS,...}
+     {-E|--extract [LINES]}
 
-  $self->close;
-  return 0;
-}
+     [folder ...]
 
-sub message_count
-{
-  my ($self, $folder) = @_;
+ The -h option may be repeated up to 3 times for increased verbosity.
 
-  $self->send_command ("EXAMINE", "examine $folder");
-  my $result = $self->read_response ("EXAMINE");
+=head1 OPTIONS
 
-  my $count = $1
-    if $result =~ /^\* (\d+) EXISTS\r?\n/mio;
-  return $count;
-}
+Long-format options may be abbreviated as long as the result is not ambiguous.
 
-sub message_size
-{
-  my ($self, $msgnumber) = @_;
+=over 8
 
-  $self->send_command ("SIZE", "fetch $msgnumber rfc822.size");
-  my $result = $self->read_response ("SIZE");
+=item B<-1>, B<--first-header-line>
 
-  return $1
-    if $result =~ /^\* \d+ FETCH \(RFC822.SIZE (\d+)\)/mi;
-  return undef;
-}
+Un-fold wrapped header lines so they display as a single line.
+This is the default.
 
-sub retrieve_lines
-{
-  my ($self, $msgnumber, $bodylines) = @_;
-  $bodylines += 0;  # force into numeric context
+=item B<-2>, B<--multi-line-headers>
 
-  $self->send_command ("RETR", "fetch $msgnumber rfc822.header");
-  local $_ = $self->read_response ("RETR");
+Do not un-fold wrapper header lines.
+Display them as delivered.
 
-  return undef
-    unless (/^\* \d+ fetch \(rfc822.header {(\d+)}\r?\n/gmio);
-  my $header_octets = $1;
-  my @lines = split (/\r?\n/, substr ($_, pos ($_), $header_octets), -1);
-  # Discard empty null field; this should leave 1 blank line, which is the
-  # header/body separator line.
-  pop @lines;
-  my $headers_end = scalar @lines;
+=item B<-a>, B<--all-headers>
 
-  if ($bodylines < 0)
-    {
-      $self->send_command ("RETR", "fetch $msgnumber body[text]");
-      $_ = $self->read_response ("RETR");
-      push @lines, split (/\r?\n/, substr ($_, pos ($_), $1))
-        if (/^\* \d+ fetch \(BODY\[TEXT\] {(\d+)}\r?\n/gmi);
-    }
-  elsif ($bodylines > 0)
-    {
-      my $text_octets = $self->message_size ($msgnumber) - $header_octets;
-      my $blocksize = 1024;
-      my $text = "";
-      my $newlines = 0;
-      my $octets = 0;
-      while (1)
-        {
-          my $start = $octets;
-          $self->send_command
-            ("RETR", "fetch $msgnumber body[text]<$start.$blocksize>");
-          $_ = $self->read_response ("RETR");
+Show all headers.  Ignores B<--format>.
 
-          last unless (/^\* \d+ fetch \(body\[text\]<$start> {(\d+)}\r?\n/gmi);
-          $octets += $1;
-          my $newtext = substr ($_, pos ($_), $1);
-          $newlines++ while ($newtext =~ /\n/go);
-          $text .= $newtext;
+=item B<-C>, B<--columns=>I<COLS>
 
-          last if ($octets == $text_octets || $newlines >= $bodylines);
-        }
+Truncate lines exceeding I<COLS> length on output.
+If COLS is 0 or no option is specified and output is not to a terminal,
+no truncation is done.
 
-      my @text = split (/\r?\n/, $text, $bodylines+1);
-      pop @text if $newlines > $bodylines;
-      push @lines, @text;
-    }
+The default is the current width of the terminal.
 
-  return [ $headers_end, \@lines ];
-}
+This option has no effect when displaying message bodies;
+only the normal summary mode is affected.
 
-sub send_command
-{
-  my ($self, $tag, $text) = @_;
-  my $sock = $self->{sock};
-  print $sock $tag, " ", $text, "\r\n";
-}
+=item B<-c>, B<--count-only>
 
-sub read_response
-{
-  my $self = shift;
-  my $tag = quotemeta (shift);
-  my $wantarray = wantarray;
+Only count the number of messages that would be displayed,
+without displaying any other information about them.
+E.g. B<-cu> would print the number of unread messages you have.
 
-  my $sock = $self->{sock};
-  my @lines;
-  while (1)
-    {
-      local $_ = <$sock>;
-      push @lines, $_;
-      if (/^\* .*{(\d+)}\r\n$/o)
-        {
-          my $cont = $1;
-          my $pos = 0;
-          while ($pos < $cont)
-            {
-              my $read = read ($sock, $_, $cont - $pos, $pos);
-              $pos += $read;
-            }
-          push @lines, $wantarray ? split (/\n/, $_, -1) : $_ ;
-        }
-      last if (/^$tag (?:OK|NO|BAD|PREAUTH)/);
-    }
+=item B<-D>, B<--debug>
 
-  $wantarray ? @lines : join ("", @lines);
-}
+Show protocol messages and replies, and some parsing results.
 
-sub response_ok_p
-{
-  my ($self, $tag) = @_;
+Warning: this may reveal passwords.
 
-  my @response = $self->read_response ($tag);
-  my $last = pop @response;
+=item B<-d>, B<--date-format>=I<FMT>
 
-  $tag = quotemeta ($tag);
-  return undef unless $last =~ /^$tag (OK|NO|BAD|PREAUTH)/;
-  return 1 if ($1 eq "OK");
-  return 0;
-}
+Format of the %Date field in summary output format (see B<--format>).
+This string can be any format understood by the C<strftime> library function.
+The default conforms to iso8601:2004.
 
-sub send_command_ok_p
-{
-  my ($self, $tag, $text) = @_;
-  $self->send_command ($tag, $text);
-  $self->response_ok_p ($tag);
-}
+=item B<-E>, B<--extract>, B<--extract=>I<LINES>
 
-sub close
-{
-  my $self = shift;
+Print the body of each matched message.
+If the optional argument I<LINES> is supplied,
+print only the first LINES number of lines of the body.
 
-  $self->send_command_ok_p ("LOGOUT", "logout");
-  shutdown ($self->{sock}, 2); # 2 = SHUTDOWN_BOTH
-  delete $self->{sock};
-}
+In this case, the B<--format> option is ignored and a subset of the message
+headers deemed "interesting" presented.  These headers can be specified via
+the B<--interesting-headers> option (which see) or if the B<-all-headers>
+option is specified, the entire original set of headers is displayed.
 
-
-package main;
+=item B<-e>, B<--envelope>
 
-main ();
+Show message envelope instead of headers.
+This causes any formatting options (e.g. B<--columns>) to be ignored.
 
-# local variables:
-# mode: perl
-# end:
+This option only makes sense for local folders and, to a lesser degree, imap folders.
+
+=item B<-f>, B<--format=>I<FMT>
+
+Use I<FMT> as the output format.
+See the section L</"OUTPUT FORMAT"> for details.
+The default is S<"%-3{FMSGNO} %-20.20{FROMTO}  %-0.32Date  %Subject\n">
+
+=item B<-h>, B<--help>
+
+Usage information.
+May be repeated 1-3 times for more verbosity.
+
+=item B<-I>, B<--interesting-headers=>I<H1,H2,...>
+
+When extracting parts or all of message bodies (see B<--extract>),
+display only the enumerated headers of those messages if they exist.
+
+This option can be specified multiple times, and header names can be space
+or comma separated.  The default set of headers are C<From>, C<To>,
+C<Apparently-To>, C<Cc>, C<Newsgroups>, C<Subject>, C<Date>, C<Reply-To>.
+
+=item B<-i>, B<--me-match=>I<REGEXP>
+
+Pattern to match against the C<From> field to determine whether you are the
+sender (affects the C<{FROMTO}> format specifier).
+Defaults to everything up until the first comma in your GECOS information.
+
+=item B<-M>, B<--match-header=>I<REGEXP>
+
+Seach only headers matching REGEXP for patterns specified with B<--match>.
+By default, the headers searched are C<From>, C<To>, C<Cc>, and C<Subject>.
+
+=item B<-m>, B<--match=>I<REGEXP>
+
+Only print messages in which I<REGEXP> could be found in the header(s)
+matching the regexp specified with B<--match-headers>.
+
+=item B<-n>, B<--message-numbers=>I<N1,N2,...|FIRST-LAST|-LAST|FIRST->
+
+Only display specific message numbers.  This option can be specified
+multiple times and ranges are supported.  For example:
+
+=over 10
+
+=item C<1,4,9>
+
+Display messages 1, 4, and 9.
+
+=item C<3-5>
+
+Display messages 3, 4, and 5.
+
+=item C<10->
+
+Skip messages 1-9.
+
+=item C<-10>
+
+Display the last 10 messages.
+
+=back
+
+=item B<-p>, B<--parse>
+
+Do fancy parsing of the C<From>, C<Subject>, and C<Date> fields.
+This is the default unless extracting message bodies.
+
+=item B<-P>, B<--no-parse>
+
+Do not do fancy parsing of the C<From>, C<Subject>, and C<Date> fields.
+
+=item B<-S>, B<--show-date=>I<TZ>
+
+By default, the C<Date> header is parsed and re-formatted per the
+B<--date-format> option, but there are at least two useful time references:
+the time the message was sent with respect to the sender, or the time the
+message was sent with respect to the recipient.
+
+If the I<TZ> parameter is the string C<local>, the time is represented in
+local time, no matter what timezone the original date was in (assuming that
+can be determined, but any rfc2822-compliant timestamp should be).
+
+If the I<TZ> parameter is the string C<sender>, the time will be displayed
+in the original timezone of the message.  The zone or offset itself may or
+may not be displayed, depending on the date format given by
+B<--date-format>, but the default includes it.
+
+Any other value for I<TZ> is interpreted as a time zone specifier a la the
+C<TZ> environment variable.  For example, if the parameter is given as
+C<US/Eastern>, all dates will be displayed in United States Eastern
+Standard/Daylight time.
+
+The options B<--utc> and B<--gmt> are shorthand for S<--show-date=UTC>.
+
+=item B<-s>, B<--sender=>I<ADDR>
+
+Show only messages sent from I<ADDR>.
+This is equivalent to specifying the options
+S<--match-headers='^From|Sender$' --match=ADDR>.
+
+=item B<-U>, B<--user=>I<USER>
+
+Show headers of I<USER>'s messages.  This either selects that user's local
+mbox file or provides the username for network mailboxen whose IMAP or POP
+urls don't specify one.
+
+=item B<-u>, B<--unread-only>
+
+Only show information about unread messages.
+
+Some protocols (e.g. POP) do not store this information, so all messages
+will be treated as unread.
+But this is generally supported for IMAP and local mbox folders.
+
+=item B<--utf8>, B<--utf-8>
+
+Convert header or body contents encoded in other charsets to UTF8 for display.
+
+Furthermore, if B<--parse> is also enabled, decode From, To, and Subject
+header fields with rfc1522-encoded values to UTF8.
+That is, a Subject header with the raw contents
+
+	Subject: =?windows-1252?B?b2ssIG9rLCBzbyBJIGxpZWQu?=
+
+would decode to
+
+        Subject: squeamish ossifrage
+
+=item B<--no-utf8>, B<--no-utf-8>
+
+Do not do any charset conversion or decoding of rfc1522-format headers.
+
+=item B<-V>, B<--version>
+
+Display the version number of this program.
+
+=item B<-W>, B<--warnings>
+
+Enable Perl internal warnings.
+This is mainly for debugging.
+
+=back
+
+=head1 DESCRIPTION
+
+This utility prints out a summary of the messages in your mailbox file to
+show you who your mail is from.  In addition to supporting local
+/var/mail/I<user> mbox files, POP3 and IMAP4 folders are supported as well.
+
+There are essentially two modes of operation: summary and extraction.
+
+In summary mode, each message is summarized by a single line displaying the
+message number in the folder, the sender (or recipient, if you sent the
+message), the date, and subject.  This summary may be changed via the
+B<--format> option and modified by numerous switches documented above.
+By default, some semantic parsing and decoding of the C<From>, C<Date>, and
+C<Subject> headers is performed to display real names and normalized dates.
+
+In B<--extract> mode, a portion or entirety of each message is displayed.
+No semantic parsing of headers or MIME format bodies is currently done,
+e.g. base64-encoded text will not be converted to readable form.
+However, raw characters I<are> converted from non-UTF8 character sets to
+UTF8 if the B<--utf8} option is enabled.
+
+To download the complete contents of an imap folder to a local mbox file,
+the following command could be issued:
+
+	from --no-utf8 -aPE imap://foobar@blurdybloop.com/INBOX > foobar.mbox
+
+=head1 FOLDER SPECIFICATION
+
+=head2 IMAP4
+
+To specify an IMAP folder:
+
+=over 4
+
+=over 4
+
+=item imap://I<USER>:I<PASS>@I<HOST>:I<PORT>/I<MAILBOX>
+
+=back
+
+=back
+
+Fields may be unspecified, in which case:
+
+=over 4
+
+=over 2
+
+=item * I<USER> defaults to your current username
+
+=item * I<PASS> is obtained from the C<FROMPASS> environment variable if not specified.
+
+=item * I<HOST> defaults to C<localhost>
+
+=item * I<PORT> defaults to C<143>
+
+=item * I<MAILBOX> defaults to C<INBOX>
+
+=back
+
+=back
+
+Currently, only the C<PLAIN LOGIN> authentication method is supported.
+
+If no password is specified, you will be prompted to enter one.
+
+=head2 POP3
+
+To specify a POP3 folder:
+
+=over 4
+
+=over 4
+
+=item pop3://I<USER>:I<PASS>@I<HOST>:I<PORT>/
+
+=back
+
+=back
+
+Fields may be unspecified, in which case:
+
+=over 4
+
+=over 2
+
+=item * I<USER> defaults to your current username
+
+=item * I<PASS> is obtained from the C<FROMPASS> environment variable if not specified.
+
+=item * I<HOST> defaults to C<localhost>
+
+=item * I<PORT> defaults to C<143>
+
+=back
+
+=back
+
+Currently, only the C<PASS> authentication method is supported.
+
+If no password is specified, you will be prompted to enter one.
+
+=head1 OUTPUT FORMAT
+
+=head2 Syntax
+
+The I<FMT> specifier to the B<--format> option can contain literal text for
+the output, along with header specifiers in the form
+
+=over 4
+
+=over 4
+
+=item %{{-}{n}{.m}}Header
+
+=back
+
+=back
+
+where
+
+=over 4
+
+=over 2
+
+=item *
+
+B<n> is the line width reserved for the value of B<Header>.
+
+=item *
+
+B<-> means that header strings shorter than B<n> chars are flushed left
+within the field, instead of right.
+
+=item *
+
+B<.m> is the maximum allowed length of the field;
+if the header string is longer than this, it is truncated.
+
+=item *
+
+B<Header> is the name of the header, e.g. C<Subject>.
+
+=back
+
+=back
+
+=head2 Virtual Headers
+
+Some special "header names" are defined for useful information that cannot
+generally be obtained directly from message headers.
+
+These special names, surrounded by curly braces, are:
+
+=over 4
+
+=over 2
+
+=item * B<{TMSGNO}>
+
+The number of this message line irrespective of any folder it may have come
+from (if more than one folder was specified on the command line).
+
+=item * B<{FMSGNO}>
+
+The number of this message in the current folder.
+This number is reset whenever this program begins reading a new folder
+specified on the command line.
+
+=item * B<{FOLDER}>
+
+The name of this folder, as specified on the command line.
+
+=item * B<{FROMTO}>
+
+The sender of the message if it isn't you, or C<To B<recipient>> otherwise.
+
+The option B<--me-match> sets the regexp which matches your email address.
+By default, this is just your current full name (as identified in the password database).
+
+=back
+
+=back
+
+As usual, you can use general format specifiers, e.g C<%-4.3{TMSGNO}>.
+
+=head2 Examples
+
+Given a message with headers of the form
+
+        From: Noah Friedman <friedman@splode.com>
+        To: nobody@prep.ai.mit.edu
+        Subject: example
+        Date: Tue, 18 Oct 94 12:22:50 CDT
+
+Here are some valid format specifiers and the output that results from them.
+(C<-|> indicates the results here; it is not actually printed.)
+
+        "%From  %Subject\n"
+        -| Noah Friedman  example
+
+        "%-19.18From %-13.12Date %-.45Subject\n"
+        -| Noah Friedman       1994-10-18    example
+
+        "To %-19To  %Date  %12Subject\n"
+        -| To nobody@prep.ai.mit.edu  1994-10-18  10:22:50-0700       example
+
+        "   From: %From\nSubject: %Subject\n   Date: %Date\n\n"
+        -|    From: Noah Friedman
+        -| Subject: example
+        -|    Date: 1994-10-18  10:22:50-0700
+        -|
+
+If you use something like last example format specifier,
+you may wish to use the B<--no-parse> option to avoid any parsing
+(and therefore truncation) of the C<From> and C<Date> lines, in which case you would see
+
+        -|    From: Noah Friedman <friedman@splode.com>
+        -| Subject: example
+        -|    Date: Tue, 18 Oct 94 12:22:50 CDT
+        -|
+
+=head1 ENVIRONMENT
+
+=over
+
+=item I<FROMRCPL>
+
+Configuration file to load before parsing options.  This is expected to be
+a perl script which sets fields in the global C<%opt> variable.
+
+For example, if you wanted the date field to ignore the year unless it was
+different from the current year, you could do this:
+
+	use POSIX qw(strftime);
+	my $thisyear = strftime ("%Y", localtime (time)) - 1900;
+	$opt{date_format} = sub { return $_[5] != $thisyear
+                                         ? "%b %d %H:%M %Y"
+                                         : "%b %d %H:%M"
+                                };
+
+Or supposing you wanted to enable B<--utf8> mode automatically in the appropriate locale:
+
+        $opt{utf8} = 1
+          if (   (defined $ENV{LANG}     && $ENV{LANG}     =~ /utf-?8/i)
+              || (defined $ENV{LC_CTYPE} && $ENV{LC_CTYPE} =~ /utf-?8/i));
+
+=item I<FROMUSER>
+
+Default user for local and remote mailboxen.  If not specified, the
+C<LOGNAME> or C<USER> environment variables are used instead.
+
+=item I<FROMPASS>
+
+Password for remote mailboxen, if not included in folder URL.
+If no password is specified, one is prompted for interactively.
+
+=item I<FROMMAIL>, I<MAIL>
+
+Mail folder to open if none is specified on the command line.
+May be a local or remote folder.
+
+C<MAIL> is only used if C<FROMMAIL> is not defined.
+
+=back
+
+=head1 BUGS
+
+Network connections over SSL/TLS, or using STARTTLS, are not yet supported,
+though you can currently work around this this using C<stunnel>.
+
+Only plaintext password authentication schemes are currently supported.
+
+MIME entities are not parsed.
+In extraction mode, for example, it would be useful to have the option to
+display only the text/plain version of multipart/alternative messages,
+or to decode quoted-printable and base64 text.
+
+=head1 SEE ALSO
+
+stunnel(8)
+
+=head1 AUTHOR
+
+Noah Friedman <friedman@splode.com>
+
+=head1 ACKNOWLEDGEMENTS
+
+The C<from> command originally appeared in 3.0BSD.
+
+This Perl implementation is a completely new rewrite inspired by a
+never-published C implementation of Brian Fox's in 1990 for the GNU
+Project.
+
+Support for the C<{FROMTO}> virtual header field was contributed
+by Jonathan Kamens <jik@kamens.brookline.ma.us>.
+
+=cut
