@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from.new,v 1.29 2011/11/26 00:31:24 friedman Exp $
+# $Id: from,v 1.63 2011/11/26 00:51:05 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,6 +22,13 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # Commentary:
+
+# Optional perl modules that will improve the functionality of this program:
+#     Date::Parse
+#     Time::ParseDate
+#     Time::Timezone
+#     Text::CharWidth
+
 # Code:
 
 use strict;
@@ -251,13 +258,11 @@ sub print_message
 {
   my ($msg, $meta, $envelope) = @_;
 
-  if ($::opt{all_headers})
+  if ($opt{all_headers})
     {
-      if ($opt{utf8})
-        {
-          map { utf8::decode ($_) } @$msg;
-          map { utf8::encode ($_) } @$msg;
-        }
+      map { utf8::decode ($_);
+            utf8::encode ($_);
+          } @$msg if $opt{utf8};
 
       print $envelope, "\n" if defined $envelope;
       print @$msg, "\n";
@@ -302,15 +307,35 @@ sub print_message_summary
   my $s;
   if ($opt{utf8})
     {
-      map { utf8::decode ($_) } @name;
+      unless (*mbswidth{CODE})
+        {
+          eval "use Text::CharWidth qw(mbswidth)";
+          *mbswidth = sub { length $_[0] } if $@;
+        }
+
+      # Need to change locale to a utf8 one in order to use mbswidth.
+      use POSIX qw(:locale_h setlocale);
+      my $lang = setlocale (LC_CTYPE);
+      $lang = $1 if $lang =~ /^([^.]+)\./;
+      $lang = "en_US" if !$lang || $lang eq "C";
+      setlocale (LC_CTYPE, "$lang.UTF-8");
+
+      map { utf8::decode ($_);
+            my $pad = mbswidth ($_) - length ($_) - 1;
+            $_ .= ("\0" x $pad) if $pad > 0;
+          } @name;
+
       $s = sprintf ($fmt, @name);
+      $s =~ s/\0+//g;
+      $s =~ s/^(.{$opt{columns}}).*/$1/mgo if $opt{columns};
       utf8::encode ($s);
+      setlocale (LC_CTYPE, "");
     }
   else
     {
       $s = sprintf ($fmt, @name);
+      $s =~ s/^(.{$opt{columns}}).*/$1/mgo if $opt{columns};
     }
-  $s =~ s/^(.{$opt{columns}}).*/$1/mgo if $opt{columns};
   print $s;
 }
 
@@ -381,7 +406,7 @@ sub parse_format_string
                        '{octets}' => 'd',
                      );
   my $start = 0;
-  while (/(?:^|[^%])(?:%%)*%-?[\d.]*([^%\s]+)/gc)
+  while (/(?:(?:|[^%])(?:%%)*)%-?[\d.]*([^%\s]+)/gc)
     {
       my $h = lc ($1);
       push @header, $h;
