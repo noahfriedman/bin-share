@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.63 2011/11/26 00:51:05 friedman Exp $
+# $Id: from,v 1.64 2011/11/26 19:14:33 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -321,7 +321,7 @@ sub print_message_summary
       setlocale (LC_CTYPE, "$lang.UTF-8");
 
       map { utf8::decode ($_);
-            my $pad = mbswidth ($_) - length ($_) - 1;
+            my $pad = mbswidth ($_) - length ($_);
             $_ .= ("\0" x $pad) if $pad > 0;
           } @name;
 
