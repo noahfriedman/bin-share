@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.65 2011/11/26 20:31:25 friedman Exp $
+# $Id: from,v 1.66 2011/11/26 21:27:32 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -1512,7 +1512,7 @@ sub input_noecho
 package From::Header;
 
 use strict;
-use POSIX qw(strftime);
+use POSIX qw(strftime tzset);
 use Encode qw(:all);
 
 sub new
@@ -1738,20 +1738,25 @@ sub _parse_date
   my ($tm, $offset) = From::Timestamp::_parse_timestamp ($_);
   return $_ unless $tm;
 
-  local $ENV{TZ};
-  if (! $::opt{tzdate}) {}
-  elsif (lc $::opt{tzdate} eq 'local' || lc $::opt{tzdate} eq 'tz') {}
-  elsif (lc $::opt{tzdate} eq 'sender' && $offset)
-    {
-      $offset =~ s/(\d\d)(\d\d)$/$1:$2/;
-      $offset =~ y/+-/-+/;
-      $ENV{TZ} = "UTC" . $offset;
-    }
-  elsif ($::opt{tzdate})
-    {
-      $ENV{TZ} = $::opt{tzdate};
-    }
-  my @tminfo = localtime ($tm);
+  my @tminfo;
+  {
+    local $ENV{TZ};
+    if (! $::opt{tzdate}) {}
+    elsif (lc $::opt{tzdate} eq 'local' || lc $::opt{tzdate} eq 'tz') {}
+    elsif (lc $::opt{tzdate} eq 'sender' && $offset)
+      {
+        $offset =~ s/(\d\d)(\d\d)$/$1:$2/;
+        $offset =~ y/+-/-+/;
+        $ENV{TZ} = "UTC" . $offset;
+      }
+    elsif ($::opt{tzdate})
+      {
+        $ENV{TZ} = $::opt{tzdate};
+      }
+    tzset (); # multithreaded perl 5.8.0 requires this
+    @tminfo = localtime ($tm);
+  }
+  tzset();    # restore timezone cache for perl 5.8.0
 
   my $fmt = $::opt{date_format};
   $fmt = &$fmt (@tminfo) if ref $fmt eq 'CODE';
@@ -1908,14 +1913,16 @@ sub cheesy_timestamp_parser
 
   else { return } # unrecognized.
 
-  local $ENV{TZ} = 'UTC' if $offset;
-  $tm = timelocal ($S + 0, $M + 0, $H + 0,
-                   $d + 0, ($m + 0 > 0 ? $m - 1 : 0), normalize_year ($y));
-
+  my @tmargs = ($S + 0, $M + 0, $H + 0,
+                $d + 0, ($m + 0 > 0 ? $m - 1 : 0), normalize_year ($y));
   if ($offset && $offset =~ /^([+-])(\d?\d):?(\d\d)/)
     {
       my ($sign, $h, $m) = ($1 . '1', $2, $3);
-      $tm -= $sign * (($h * 3600) + ($m * 60));
+      $tm = timegm (@tmargs) - ($sign * (($h * 3600) + ($m * 60)));
+    }
+  else
+    {
+      $tm = timelocal (@tmargs);
     }
 
   return unless defined $tm;
