@@ -5,16 +5,17 @@
 # Created: 2001-01-11
 # Public domain.
 
-# $Id: mdf,v 1.9 2011/12/01 01:22:44 friedman Exp $
+# $Id: mdf,v 1.10 2011/12/27 18:19:38 friedman Exp $
 
 # Commentary:
 # Code:
 
 $^W = 1;  # enable warnings
 
-use POSIX qw(uname);
-use Getopt::Long;
 use strict;
+use POSIX qw(uname);
+use Symbol;
+use Getopt::Long;
 
 my $domain = dnsdomain ();
 
@@ -105,18 +106,59 @@ sub print_output
     }
 }
 
-sub parse_options
-{
-  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
-  Getopt::Long::config (qw(bundling auto_abbrev pass_through permute));
-  GetOptions ("s|sort|sort-by=s" => \$sortkey);
-}
-
 sub atoi
 {
   local $_ = shift;
   s/^(\d+).*$/$1/;
   return 0 + $_;
+}
+
+# Convert /dev/mapper/vg-lv to /dev/vg/lv
+sub compact_devicemapper
+{
+  local $_ = shift;
+
+  while (m=^(/dev/mapper/\S+)=gm)
+    {
+      my $s = $1;
+      my $len = length $s;
+      my $end = pos $_;
+
+      # Hyphens within volume groups or volume names are doubled under
+      # /dev/mapper; convert the undoubled hyphens to / before undoubling.
+      $s =~ s=([^-])-([^-])=$1/$2=g;
+      $s =~ s=--=-=g;
+      $s =~ s=mapper/==;
+
+      substr ($_, $end - $len, $len) = $s;
+    }
+  return $_;
+}
+
+sub file_contents
+{
+  my $file = shift;
+
+  my $fh = gensym;
+  die "open: $file: $!\n"
+    unless open ($fh, $file); # filename arg must be expicit
+
+  local $_;
+  my $offset = 0;
+  while (my $bytes = sysread ($fh, $_, 4096, $offset))
+    {
+      last if $bytes <= 0;
+      $offset += $bytes;
+    }
+  close ($fh);
+  return $_;
+}
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  Getopt::Long::config (qw(bundling auto_abbrev pass_through permute));
+  GetOptions ("s|sort|sort-by=s" => \$sortkey);
 }
 
 sub main
@@ -129,28 +171,25 @@ sub main
   exit ($? >> 8) unless $? == 0 && $dfout;
 
   my ($header, $rest) = split (/\n/, $dfout, 2);
-  $header =~ s/mounted on/Mountpoint/io;
-  $header =~ s/available/Avail/io;
-  $header =~ s/capacity/Use%/io;
+  $header =~ s/mounted on/Mountpoint/i;
+  $header =~ s/available/Avail/i;
+  $header =~ s/capacity/Use%/i;
 
-  $rest =~ s/\n\s+/ /go;
-  $rest =~ s=\.$domain:/=:/=gmo if (defined $domain);
-
-  # Convert /dev/mapper/vg-lv to /dev/vg/lv
-  while ($rest =~ m=^(/dev/mapper/\S+)=gm)
+  unless ($header =~ /^Filesystem.*Mountpoint/)
     {
-      my $s = $1;
-      my $len = length $s;
-      my $end = pos $rest;
-
-      # Hyphens within volume groups or volume names are doubled under
-      # /dev/mapper; convert the undoubled hyphens to / before undoubling.
-      $s =~ s=([^-])-([^-])=$1/$2=g;
-      $s =~ s=--=-=g;
-      $s =~ s=mapper/==;
-
-      substr ($rest, $end - $len, $len) = $s;
+      print $dfout;
+      exit $?;
     }
+
+  $rest =~ s/\n\s+/ /g;
+  $rest =~ s=\.$domain:/=:/=gmo if (defined $domain);
+  $rest = compact_devicemapper ($rest);
+
+  if (-f "/proc/self/mountinfo")
+    {
+      my $mountinfo = file_contents ("/proc/self/mountinfo");
+    }
+
 
   my ($lines, $maxwidth) = parse_input ([$header, split (/\n/, $rest)],
                                         $fieldsep);
