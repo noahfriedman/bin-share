@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.24 2012/01/15 07:32:55 friedman Exp $
+# $Id: rpm-pkg-list,v 1.25 2012/04/26 20:26:30 friedman Exp $
 
 # Commentary:
 # Code:
@@ -102,7 +102,7 @@ my %repo_fingerprint
       '49c8885a' => 'rpmfusion-free-f10',       'b1981b68' => 'rpmfusion-nonfree-f10',
       # rpmfusion uses the f10 keys for earlier releases
 
-      'c105b9de' => 'centos-6',                 'fe837f6f' => 'centos-security-6'
+      'c105b9de' => 'centos-6',                 'fe837f6f' => 'centos-security-6',
 
       '9c800aca' => 'SuSE',                     '3d25d3d9' => 'SuSE-security',
 
