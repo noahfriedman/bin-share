@@ -4,7 +4,7 @@
 # Created: 2005-08-10
 # Public domain
 
-# $Id: rdp,v 1.6 2010/12/27 04:44:02 friedman Exp $
+# $Id: rdp,v 1.7 2011/05/19 01:25:08 friedman Exp $
 
 # Commentary:
 
@@ -53,6 +53,7 @@ setup()
 
   case $1 in -fs ) return ;; esac
   case $geom in
+    2560x1600 ) geom=1400x1050 ;;
     1920x1200 ) geom=1400x1050 ;;
     1600x1200 ) geom=1400x1050 ;;
     1680x1050 ) geom=1400x960  ;;
