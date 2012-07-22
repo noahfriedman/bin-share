@@ -1,0 +1,99 @@
+#!/bin/sh
+# $Id$
+
+current_orientation()
+{
+    xrandr -q --verbose --screen ${1-$screen} \
+        | sed -n -e '/ connected/!d' \
+                 -e 's/.*) \([^ ][^ ]*\) (.*/\1/' \
+                 -e   's/normal/0/p' \
+                 -e     's/left/1/p' \
+                 -e 's/inverted/2/p' \
+                 -e    's/right/3/p' \
+                 -e q
+}
+
+new_orientation()
+{
+    case $1 in
+        0 | normal   ) echo 0 ;;
+        1 | left     ) echo 1 ;;
+        2 | inverted ) echo 2 ;;
+        3 | right    ) echo 3 ;;
+
+        l | lturn    ) echo $((((4 + $current_orientation) + 1) % 4)) ;;
+        r | rturn    ) echo $((((4 + $current_orientation) - 1) % 4)) ;;
+    esac
+}
+
+calibrate_evdev()
+{
+    orientation=$1
+    shift
+
+    case $orientation in
+        0 | normal   ) swap=0 invert_x=0 invert_y=0 ;;
+        1 | left     ) swap=1 invert_x=1 invert_y=0 ;;
+        2 | inverted ) swap=0 invert_x=1 invert_y=1 ;;
+        3 | right    ) swap=1 invert_x=0 invert_y=1 ;;
+    esac
+
+    for device in "$@"; do
+        xinput set-prop "$device" "Evdev Axes Swap"      $swap
+        xinput set-prop "$device" "Evdev Axis Inversion" $invert_x $invert_y
+    done
+}
+
+calibrate_ctm()
+{
+    orientation=$1
+    shift
+
+    case $orientation in
+        0 ) matrix=' 1  0  0    0  1  0    0  0  1' ;;
+        1 ) matrix=' 0 -1  1    1  0  0    0  0  1' ;;
+        2 ) matrix='-1  0  1    0 -1  1    0  0  1' ;;
+        3 ) matrix=' 0  1  0   -1  0  1    0  0  1' ;;
+    esac
+
+    set -x
+    for device in "$@"; do
+        xinput set-float-prop "$device" "Coordinate Transformation Matrix" $matrix
+    done
+}
+
+pointer_ids()
+{
+    xinput list | sed -ne '/ pointer /!d' -e 's/.*id=\([0-9]*\).*/\1/p'
+}
+
+main()
+{
+    direction=${1-rturn}
+    screen=${2-0}
+
+    current_orientation=`current_orientation $screen`
+    new_orientation=`new_orientation $direction`
+
+    case $new_orientation in
+        $current_orientation ) return 0 ;;
+    esac
+
+    xrandr -o $new_orientation
+
+    calibrate_evdev $new_orientation \
+        "TPPS/2 IBM TrackPoint" \
+
+#        "SynPS/2 Synaptics TouchPad"
+
+    calibrate_ctm $new_orientation \
+        "Virtual core pointer" \
+        "TPPS/2 IBM TrackPoint" \
+        "SynPS/2 Synaptics TouchPad" \
+        "Wacom ISDv4 90 Pen stylus" \
+        "Wacom ISDv4 90 Pen eraser"
+}
+
+main "$@"
+
+# eof
