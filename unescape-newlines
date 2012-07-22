@@ -1,3 +1,0 @@
-#!/bin/sh
-# $Id: unescape-newlines,v 1.1 1999/12/16 01:46:09 friedman Exp $
-exec sed -ne '/\\$/{H;d;};H;s/.*//;x;s/^\n//;s/\\\n[ 	]*//g;p' ${1+"$@"}
