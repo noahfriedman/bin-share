@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id$
+# $Id: rotate-display,v 1.1 2012/07/22 04:30:11 friedman Exp $
 
 current_orientation()
 {
@@ -23,6 +23,12 @@ new_orientation()
 
         l | lturn    ) echo $((((4 + $current_orientation) + 1) % 4)) ;;
         r | rturn    ) echo $((((4 + $current_orientation) - 1) % 4)) ;;
+
+        t | *tablet )
+            case $current_orientation in
+                0 ) echo 1 ;; # normal -> left
+                * ) echo 0 ;; #    any -> normal
+            esac ;;
     esac
 }
 
@@ -44,6 +50,8 @@ calibrate_evdev()
     done
 }
 
+# Note that some CTM won't be effective for some pointers unless they are
+# put into ABSOLUTE mode first.
 calibrate_ctm()
 {
     orientation=$1
@@ -56,9 +64,8 @@ calibrate_ctm()
         3 ) matrix=' 0  1  0   -1  0  1    0  0  1' ;;
     esac
 
-    set -x
     for device in "$@"; do
-        xinput set-float-prop "$device" "Coordinate Transformation Matrix" $matrix
+        xinput set-prop "$device" "Coordinate Transformation Matrix" $matrix
     done
 }
 
@@ -73,25 +80,27 @@ main()
     screen=${2-0}
 
     current_orientation=`current_orientation $screen`
-    new_orientation=`new_orientation $direction`
+        new_orientation=`new_orientation $direction`
 
     case $new_orientation in
         $current_orientation ) return 0 ;;
     esac
 
+    for id in `pointer_ids`; do
+        props=`xinput list-props $id`
+        case $props in
+            *'Evdev Axes Swap'* )
+                calibrate_evdev $new_orientation $id ;;
+        esac
+
+        case $props in
+            *'Coordinate Transformation Matrix'* )
+                calibrate_ctm   $new_orientation $id ;;
+        esac
+    done
+
     xrandr -o $new_orientation
-
-    calibrate_evdev $new_orientation \
-        "TPPS/2 IBM TrackPoint" \
-
-#        "SynPS/2 Synaptics TouchPad"
-
-    calibrate_ctm $new_orientation \
-        "Virtual core pointer" \
-        "TPPS/2 IBM TrackPoint" \
-        "SynPS/2 Synaptics TouchPad" \
-        "Wacom ISDv4 90 Pen stylus" \
-        "Wacom ISDv4 90 Pen eraser"
+    fancy-xearth -once &
 }
 
 main "$@"
