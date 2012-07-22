@@ -4,7 +4,7 @@
 # Created: 2010-02-17
 # Public domain
 
-# $Id: reset-xkb,v 1.8 2011/07/29 00:46:11 friedman Exp $
+# $Id: reset-xkb,v 1.9 2011/10/26 23:59:41 friedman Exp $
 
 # Commentary:
 
@@ -18,170 +18,181 @@ verbose=t
 
 initialize()
 {
-  # Always use screen 0 because the _XKB_RULES_NAMES property may not
-  # be defined on the other root screens.
-  DISPLAY=${DISPLAY%.[0-9]*}.0
+    # Always use screen 0 because the _XKB_RULES_NAMES property may not
+    # be defined on the other root screens.
+    DISPLAY=${DISPLAY%.[0-9]*}.0
 
-  xkb_rules=${XKB_RULES}
-  xkb_model=${XKB_MODEL}
-  xkb_layout=${XKB_LAYOUT-us}
-  xkb_geometry=${XKB_GEOMETRY}
-  xkb_keycodes=${XKB_KEYCODES}
-  xkb_variant=${XKB_VARIANT}
-  xkb_option=${XKB_OPTION-"
+    xkb_rules=${XKB_RULES}
+    xkb_model=${XKB_MODEL}
+    xkb_layout=${XKB_LAYOUT-us}
+    xkb_geometry=${XKB_GEOMETRY}
+    xkb_keycodes=${XKB_KEYCODES}
+    xkb_variant=${XKB_VARIANT}
+    xkb_option=${XKB_OPTION-"
     ctrl:nocaps
     compose:lwin
-  "}
-# Other xkb_options:
-#   terminate:ctrl_alt_bksp    - Allow Ctrl-Alt-BS to kill X server
-#   srvrkeys:none              - Disable Ctrl-Alt-Fn vt switching
-# See /usr/share/X11/xkb/rules/xorg.lst for others
+    "}
+    # Other xkb_options:
+    #   terminate:ctrl_alt_bksp    - Allow Ctrl-Alt-BS to kill X server
+    #   srvrkeys:none              - Disable Ctrl-Alt-Fn vt switching
+    # See /usr/share/X11/xkb/rules/xorg.lst for others
 }
 
 customize()
 {
-  read_dmi
+    read_dmi
 
-  case $product_version in
-    ThinkPad* )
-      xkb_model=${XKB_MODEL-thinkpad}
+    case $product_version in
+        ThinkPad* )
+            xkb_model=${XKB_MODEL-thinkpad}
 
-      case $product_version in
-        ThinkPad*60*  ) xkb_model=${XKB_MODEL-thinkpad60} ;;
-        ThinkPad*701* ) xkb_model=${XKB_MODEL-thinkpad60} ;;
-      esac ;;
+            case $product_version in
+                ThinkPad*60*  ) xkb_model=${XKB_MODEL-thinkpad60} ;;
+                ThinkPad*701* ) xkb_model=${XKB_MODEL-thinkpad60} ;;
+                *Tablet       ) xkb_model=${XKB_MODEL-thinkpad60} ;;
+            esac ;;
 
-    *"Ideapad S10"* ) :
-      ;;
-  esac
+        *"Ideapad S10"* ) :
+            ;;
+    esac
+}
+
+xmodmap_hacks()
+{
+    case $product_version:$product_version in
+        ThinkPad*:*Tablet )
+            docmd xmodmap -e 'keycode 161 = XF86RotationPB'
+            ;;
+    esac
 }
 
 run_setxkbmap()
 {
-  set ${SETXKBMAP-setxkbmap}
+    set ${SETXKBMAP-setxkbmap}
 
-  # xkb_option handled as a special case later.
-  xkb_vars='xkb_rules
+    # xkb_option handled as a special case later.
+    xkb_vars='xkb_rules
             xkb_model
             xkb_layout
             xkb_variant
             xkb_geometry
             xkb_keycodes
-  '
+    '
 
-  for var in $xkb_vars ; do
-    opt=-${var#xkb_}
-    eval val=\"\$$var\"
+    for var in $xkb_vars ; do
+        opt=-${var#xkb_}
+        eval val=\"\$$var\"
 
-    case $val in
-    '' ) : ;;
-     * ) set "$@" $opt "$val" ;;
-    esac
-  done
+        case $val in
+            '' ) : ;;
+            * ) set "$@" $opt "$val" ;;
+        esac
+    done
 
-  set "$@" -option   # null -option field cancels out existing xkb options
-  for opt in $xkb_option; do
-    set "$@" -option $opt
-  done
+    set "$@" -option   # null -option field cancels out existing xkb options
+    for opt in $xkb_option; do
+        set "$@" -option $opt
+    done
 
-  docmd "$@" -print
+    docmd "$@" -print
 }
 
 load()
 {
-  run_setxkbmap | docmd xkbcomp -w "${XKB_WARNLEVEL-0}" - "$DISPLAY"
+    run_setxkbmap | docmd xkbcomp -w "${XKB_WARNLEVEL-0}" - "$DISPLAY"
+    xmodmap_hacks
 }
 
 read_dmi()
 {
-  dmi=/sys/class/dmi/id
+    dmi=/sys/class/dmi/id
 
-  for prop in $dmi/* ; do
-    test -L $prop && continue
-    test -f $prop || continue
-    test -r $prop || continue
-    read ${prop##*/} < $prop
-  done
+    for prop in $dmi/* ; do
+        test -L $prop && continue
+        test -f $prop || continue
+        test -r $prop || continue
+        read ${prop##*/} < $prop
+    done
 }
 
 delq()
 {
-  for x in "$@"; do
-    case $x in
-      $1 ) continue ;;
-    esac
-    echo "$x"
-  done
+    for x in "$@"; do
+        case $x in
+            $1 ) continue ;;
+        esac
+        echo "$x"
+    done
 }
 
 docmd()
 {
-  case $verbose in
-    t ) echo + "$@" 1>&2 ;;
-  esac
-  "$@"
+    case $verbose in
+        t ) echo + "$@" 1>&2 ;;
+    esac
+    "$@"
 }
 
 option_overrides()
 {
-  progname=${0##*/}
+    progname=${0##*/}
 
-  getopt='
-    { optarg=
-      case $1 in
-        --*=* ) optarg=`echo "$1" | sed -e "1s/^[^=]*=//"` ; shift ;;
-        -* ) case ${2+set} in
-               set ) optarg=$2 ; shift ; shift ;;
-               ""  ) option=$1
-                     case $option in --*=* ) option=${option%%=*} ;; esac
-                     exec 1>&2
-                     echo "$progname: option $bq$option$eq requires argument."
-                     echo "$progname: use $bq--help$eq to list option syntax."
-                     exit 1 ;;
-             esac ;;
-      esac
-    }'
-
-  while : ; do
-    case $# in 0) break ;; esac
-
-    case $1 in
-      -r | --rules    | --r* ) eval "$getopt"; xkb_rules=$optarg    ;;
-      -m | --model    | --m* ) eval "$getopt"; xkb_model=$optarg    ;;
-      -l | --layout   | --l* ) eval "$getopt"; xkb_layout=$optarg   ;;
-      -v | --variant  | --v* ) eval "$getopt"; xkb_variant=$optarg  ;;
-      -g | --geometry | --g* ) eval "$getopt"; xkb_geometry=$optarg ;;
-      -k | --keycodes | --k* ) eval "$getopt"; xkb_keycodes=$optarg ;;
-      -o | --option   | --o* ) eval "$getopt"; xkb_option="$xkb_option $optarg" ;;
-
-      -q | --quiet    | --q* ) verbose=f ; shift ;;
-
-      -- ) shift; break ;; # Stop option processing
-      -? | --* )
+    getopt='
+      { optarg=
         case $1 in
-          --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
-          * )     arg=$1 ;;
+          --*=* ) optarg=`echo "$1" | sed -e "1s/^[^=]*=//"` ; shift ;;
+          -* ) case ${2+set} in
+                 set ) optarg=$2 ; shift ; shift ;;
+                 ""  ) option=$1
+                       case $option in --*=* ) option=${option%%=*} ;; esac
+                       exec 1>&2
+                       echo "$progname: option $bq$option$eq requires argument."
+                       echo "$progname: use $bq--help$eq to list option syntax."
+                       exit 1 ;;
+               esac ;;
         esac
-        exec 1>&2
-        echo "$progname: unknown or ambiguous option $bq$arg$eq"
-        echo "$progname: Use $bq--help$eq for a list of options."
-        exit 1 ;;
-      -??* ) # Split grouped single options into separate args and try again
-        optarg=$1
-        shift
-        set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` "$@"
-        shift ;;
-      * ) break ;;
-    esac
-  done
+      }'
+
+    while : ; do
+        case $# in 0) break ;; esac
+
+        case $1 in
+            -r | --rules    | --r* ) eval "$getopt"; xkb_rules=$optarg    ;;
+            -m | --model    | --m* ) eval "$getopt"; xkb_model=$optarg    ;;
+            -l | --layout   | --l* ) eval "$getopt"; xkb_layout=$optarg   ;;
+            -v | --variant  | --v* ) eval "$getopt"; xkb_variant=$optarg  ;;
+            -g | --geometry | --g* ) eval "$getopt"; xkb_geometry=$optarg ;;
+            -k | --keycodes | --k* ) eval "$getopt"; xkb_keycodes=$optarg ;;
+            -o | --option   | --o* ) eval "$getopt"; xkb_option="$xkb_option $optarg" ;;
+
+            -q | --quiet    | --q* ) verbose=f ; shift ;;
+
+            -- ) shift; break ;; # Stop option processing
+            -? | --* )
+                case $1 in
+                    --*=* ) arg=`echo "$1" | sed -e 's/=.*//'` ;;
+                    * )     arg=$1 ;;
+                esac
+                exec 1>&2
+                echo "$progname: unknown or ambiguous option $bq$arg$eq"
+                echo "$progname: Use $bq--help$eq for a list of options."
+                exit 1 ;;
+            -??* ) # Split grouped single options into separate args and try again
+                optarg=$1
+                shift
+                set fnord `echo "x$optarg" | sed -e 's/^x-//;s/\(.\)/-\1 /g'` "$@"
+                shift ;;
+            * ) break ;;
+        esac
+    done
 }
 
 main()
 {
-  initialize
-  customize
-  option_overrides "$@"
-  load
+    initialize
+    customize
+    option_overrides "$@"
+    load
 }
 
 main "$@"
