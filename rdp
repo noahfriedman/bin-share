@@ -4,7 +4,7 @@
 # Created: 2005-08-10
 # Public domain
 
-# $Id: rdp,v 1.7 2011/05/19 01:25:08 friedman Exp $
+# $Id: rdp,v 1.8 2012/06/15 00:30:58 friedman Exp $
 
 # Commentary:
 
@@ -58,6 +58,7 @@ setup()
     1600x1200 ) geom=1400x1050 ;;
     1680x1050 ) geom=1400x960  ;;
     1400x1050 ) geom=1280x960  ;; # use a 4:3 geometry
+    1366x768  ) geom=1280x700  ;;
     1280x1024 ) geom=1152x864  ;; # note 1280x1024 is 5:4, not 4:3
     1152x864  ) geom=1024x768  ;;
     1024x600  ) geom=800x480   ;;
