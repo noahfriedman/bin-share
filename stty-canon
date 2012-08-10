@@ -1,0 +1,40 @@
+#!/bin/sh
+# $Id$
+
+#stty_canon()
+{
+    # These are issued as a series of separate commands in case some of
+    # them aren't recognized; stty might not evaluate the rest of the
+    # arguments.
+
+    stty icanon tabs
+    stty intr '^C' kill '^U' quit '^\\' eof '^D'
+    stty susp '^Z'
+    stty -ixon -ixoff -ixany
+    stty onlcr -ocrnl -onlret
+
+    case $1 in
+        -safe ) shift ;;
+        # these settings can make some terminals unusable.
+        *     ) stty cs8 -istrip -iexten -parenb ;;
+    esac
+
+    case $EMACS in
+        t ) stty -icrnl -inlcr -onlcr -echo ;;
+    esac
+
+    case $TERM in
+        xterm ) stty erase '^?'
+                stty opost 2> /dev/null
+                ;;
+    esac
+
+    case $# in
+        0 ) : ;;
+        * ) stty ${1+"$@"} ;;
+    esac
+}
+
+#stty_canon ${1+"$@"}
+
+# eof
