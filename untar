@@ -4,7 +4,7 @@
 # Created: 1996-01-15
 # Public domain
 
-# $Id: untar,v 1.22 2012/06/14 23:38:35 friedman Exp $
+# $Id: untar,v 1.23 2012/08/13 22:08:23 friedman Exp $
 
 # Commentary:
 
@@ -114,8 +114,8 @@ extract()
         *.pkg ) # mac pkg files
             # pkgutil --expand "$file" .
             basename=${file##*/}
-            outdir=${basename%.pkg}.app
-            7z x -o"$outdir" "$file" ;;
+            pkgdir=${basename%.pkg}.app
+            7z x -o"$pkgdir" "$file" ;;
     esac
 }
 
