@@ -4,7 +4,7 @@
 # Created: 1996-01-15
 # Public domain
 
-# $Id: untar,v 1.23 2012/08/13 22:08:23 friedman Exp $
+# $Id: untar,v 1.24 2012/08/25 00:33:19 friedman Exp $
 
 # Commentary:
 
@@ -78,6 +78,9 @@ extract()
 
         *.tar.xz | *.txz ) # xz uses LZMA, but isn't compatible with `lzma'
             ${XZ-xz} -dc "$file" | ${TAR-tar} -xpvf - ;;
+
+        *.tar.lz | *.tlz ) # lzip uses LZMA, but isn't compatible with `lzma'
+            ${LZIP-lzip} -dc "$file" | ${TAR-tar} -xpvf - ;;
 
         *.tar.lzma )
             ${LZMA-lzma} -dc "$file" | ${TAR-tar} -xpvf - ;;
