@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# $Id$
+# $Id: mklinktree,v 2.1 2011/11/06 02:53:58 friedman Exp $
 
 $^W = 1; # enable warnings
 
@@ -7,15 +7,94 @@ use FindBin;
 use lib "$FindBin::Bin/../../lib/perl";
 use lib "$ENV{HOME}/lib/perl";
 
-use NF::FileUtil qw(:file);
+use strict;
+use Carp;
+use Getopt::Long;
+use Pod::Usage;
+use NF::FileUtil qw(:file :symlink);
 
-$NF::FileUtil::verbose = 1;
+my $symlinkp;
+
+sub link_or_copy_tree_regexp
+{
+  my ($from, $to, $re) = @_;
+
+  if (defined $re)
+    {
+      eval "\$re = qr$re";
+      croak $@ if $@;
+    }
+
+  my $opfn = sub { link_or_copy (@_) if (!defined $re) || $_[0] =~ $re };
+  dup_tree ($_[0], $_[1], $opfn);
+}
+
+sub symlink_tree_regexp
+{
+  my ($from, $to, $re) = @_;
+
+  if (defined $re)
+    {
+      eval "\$re = qr$re";
+      croak $@ if $@;
+    }
+
+  my $linkfn = ($from =~ m|^/| ? \&xsymlink : \&xsymlink_relative);
+  my $opfn = sub { &$linkfn (@_) if (!defined $re) || $_[0] =~ $re };
+  dup_tree ($_[0], $_[1], $opfn);
+}
+
+sub parse_options
+{
+  my $help = -1;
+
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev no_require_order no_ignore_case));
+  my $succ = $parser->getoptions
+    ('h|help|usage+'            => \$help,
+     'v|verbose'                => \$NF::FileUtil::verbose,
+     's|symlink'                => \$symlinkp,
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)     unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
+}
 
 sub main
 {
-  mklinktree ($_[0], $_[1]);
+  parse_options (\@_);
+
+  my $fn = $symlinkp ? \&symlink_tree_regexp : \&link_or_copy_tree_regexp ;
+  my $result = &$fn ($_[0], $_[1], $_[2]);
+  $result = 0 unless defined $result;
+  exit ($result == 0);
 }
 
 main (@ARGV);
 
 1;
+
+__END__
+
+=head1 NAME
+
+mklinktree - Copy directory recursively via hard or symbolic links
+
+=head1 SYNOPSIS
+
+     {-h|--help|--usage}
+     {-s|--symbolic}
+     from to
+
+ The -h option may be repeated up to 3 times for increased verbosity.
+
+=head1 DESCRIPTION
+
+This command mirrors the source directory to the target directory, making
+hard links to the original files rather than creating new files with a copy
+of the source contents.  If the B<--symbolic> option is specified, the
+destination tree contains symbolic links back to the source.
+
+=cut
