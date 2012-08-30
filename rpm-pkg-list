@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.26 2012/04/26 20:36:17 friedman Exp $
+# $Id: rpm-pkg-list,v 1.27 2012/05/30 16:44:27 friedman Exp $
 
 # Commentary:
 # Code:
@@ -133,7 +133,7 @@ my %repo_fingerprint
       '(none)'   => '(unknown)',  # unsigned, so dont know what repo it came from
     );
 
-my $datefmt = $ENV{DATEFMT} || '%Y/%m/%d:%H:%M:%S' ;
+my $datefmt = $ENV{DATEFMT} || '%Y-%m-%d %H:%M:%S' ;
 
 sub fieldnames
 {
