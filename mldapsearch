@@ -1,0 +1,78 @@
+#!/usr/bin/env perl
+# mldapsearch --- my ldapsearch implementation
+
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2012-09-28
+# Public domain.
+
+# $Id$
+
+use Net::LDAP;
+use Getopt::Long;
+use strict;
+
+$^W = 1;
+
+our %opt = ( host    => "ldap",
+             scope   => 'sub',
+             onerror => 'die',
+             verify  => 'none',
+           );
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev));
+  my $succ = $parser->getoptions
+    ( "debug:i"        => \$opt{debug},
+      "b|root|base=s"  => \$opt{base},
+      "h|host=s",      => \$opt{host},
+      "D|bind=s",      => \$opt{bind},
+      "w|pswd|pass=s", => \$opt{password},
+      "p|port=s",      => \$opt{port},
+      "s|scope=s",     => \$opt{scope},
+      "P|cert=s"       => \$opt{cafile},
+    );
+
+  $opt{debug} = 1 if defined $opt{debug} && $opt{debug} == 0;
+  if ($opt{debug})
+    {
+      my $n = 0;
+      map { $n = ($n << 1) | $_ } split //, $opt{debug};
+      $opt{debug} = $n;
+    }
+}
+
+sub baseDN
+{
+  map { return $_ unless $_ eq "o=netscaperoot"
+      } $_[0]->root_dse->get_value ("namingContexts");
+}
+
+sub main
+{
+  parse_options (\@_);
+  my $ldap = Net::LDAP->new ($opt{host}, %opt) || die "$@\n";
+  $ldap->bind ($opt{bind}, %opt) if defined $opt{bind};
+
+  $_[0] = sprintf ("uid=%s", $_[0]) unless $_[0] =~ /=/;
+  my (@srch, @attr);
+  map { my $array = /=/ ? \@srch : \@attr;
+        push @$array, $_
+      } @_;
+
+  my $filter = sprintf ("(|%s)", join ("", map { "($_)" } @srch));
+  $opt{filter} = $filter;
+
+  $opt{attrs} = \@attr if @attr;
+  $opt{base} = baseDN ($ldap) unless defined $opt{base};
+
+  my $result = $ldap->search (%opt);
+  print $_->ldif while $_ = $result->shift_entry;
+}
+
+main (@ARGV);
+
+1;
