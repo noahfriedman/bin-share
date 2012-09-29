@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id$
+# $Id: mldapsearch,v 1.1 2012/09/28 22:05:58 friedman Exp $
 
 use Net::LDAP;
 use Getopt::Long;
@@ -63,7 +63,7 @@ sub main
         push @$array, $_
       } @_;
 
-  my $filter = sprintf ("(|%s)", join ("", map { "($_)" } @srch));
+  my $filter = sprintf ("(|%s)", join ("", map { /^\(/ ? $_ : "($_)" } @srch));
   $opt{filter} = $filter;
 
   $opt{attrs} = \@attr if @attr;
