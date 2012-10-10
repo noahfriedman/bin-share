@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id$
+# $Id: flac2mp3,v 1.1 2009/10/28 18:56:57 friedman Exp $
 
 decode_flac()
 {
@@ -8,23 +8,64 @@ decode_flac()
 
 encode_mp3()
 {
-  set x --nohist -h -p --preset standard "$@"
+  set x --nohist -h -p --preset standard --vbr-new "$@"
   shift
   if ! [ -t 1 ]; then set x --silent; shift; fi
 
   lame "$@"
 }
 
+tag_mp3()
+{
+  flac=$1
+  flacdir=`dirname "$flac"`
+  mp3=$2
+
+  eval set fnord \
+      `metaflac --export-tags-to=- "$flac" \
+           | sed -e 'h
+                     s/^[^=]*=//
+                     s/^/"/
+                     s/$/"/
+                     x
+                     s/=.*//
+                     y/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
+                           /^title$/s//track/
+                            /^date$/s//year/
+                     /^tracknumber$/s//track/
+                     s/^/--/
+                     G
+                     s/\n/ /
+                    '`
+
+  for apic in FRONT_COVER BACK_COVER LEAFLET OTHER ; do
+      if [ -f "$flacdir/$apic.JPG" ]; then
+          set "$@" --add-image="$flacdir/$apic:$apic"
+      fi
+  done
+  shift
+
+  eyeD3 \
+      --no-tagging-time-frame \
+      --set-encoding utf16-LE \
+      --to-v2.3 \
+      "$@" \
+      "$mp3"
+
+  touch -r "$flac" "$mp3"
+}
+
 flac_to_mp3()
 {
   flac=$1
   base=`basename "$flac" .flac`
-  wav=_flac2mp3_$$.wav
+  wav=/tmp/_flac2mp3_$$.wav
   mp3=$base.mp3
 
   decode_flac -o "$wav" "$flac" &&
   encode_mp3 "$wav" "$mp3"
   rm -f "$wav"
+  tag_mp3 "$flac" "$mp3"
 }
 
 main()
