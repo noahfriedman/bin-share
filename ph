@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id$
+# $Id: ph,v 1.1 2012/09/29 01:16:14 friedman Exp $
 
 use Net::LDAP;
 use Getopt::Long;
@@ -78,10 +78,40 @@ sub maxlen
   return $max;
 }
 
-sub basedn
+# Query server to find out what directory roots are available, and if more
+# than one, use hostname's fqdn to guess most likely relevant one.
+sub baseDN
 {
-  map { return $_ unless $_ eq "o=netscaperoot"
-      } $_[0]->root_dse->get_value ("namingContexts");
+  my @nc = $_[0]->root_dse->get_value ("namingContexts");
+  map { return $_ unless lc $_ eq "o=netscaperoot" } @nc if @nc <= 2;
+
+  use POSIX qw(uname);
+  my $nodename = (uname())[1];
+  unless ($nodename =~ /\./) { # try to get FQDN
+    my @n = gethostbyname ($nodename);
+    if (@n) {
+      for my $h ($n[0], split (/\s+/, $n[1])) {
+        if ($h =~ /\./) {
+          $nodename = $h;
+          last;
+        }
+      }
+    }
+  }
+  my @dc = split (/\./, lc $nodename);
+  # Create "normalized" table by forcing lcase and stripping whitespace
+  my %nc = map { my $key = lc $_;
+                 $key =~ s/\s+//g;
+                 $key => $_ ;
+               } @nc;
+  # Search for "dc=foo,dc=com" and "o=foo.com"
+  map { map { return $nc{$_} if exists $nc{$_}
+            } (join (",", map { "dc=$_" } @dc),
+               "o=" . join (".", @dc));
+        shift @dc;
+      } @dc;
+
+  return @nc[0]; # if all else fails, return first advertised.
 }
 
 sub make_filter
@@ -151,7 +181,7 @@ sub main
 
   $opt{filter} = make_filter (@_);
   $opt{attrs}  = [map { $_->[0] } @attrmap];
-  $opt{base}   = basedn ($ldap) unless defined $opt{base};
+  $opt{base}   = baseDN ($ldap) unless defined $opt{base};
 
   result_print ($ldap->search (%opt));
 }
