@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: ph,v 1.1 2012/09/29 01:16:14 friedman Exp $
+# $Id: ph,v 1.2 2012/11/27 21:39:26 friedman Exp $
 
 use Net::LDAP;
 use Getopt::Long;
@@ -19,7 +19,7 @@ my %opt =
     onerror => 'die',
   );
 
-# Display ldap attributes with optional different lable.
+# Display ldap attributes with optional different label.
 # This also controls the order in which fields are displayed.
 my @attrmap =
   ([cn                          => 'name'         ],
