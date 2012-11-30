@@ -4,7 +4,7 @@
 # Created: 2002-03-16
 # Public domain
 
-# $Id: perror,v 1.4 2010/04/20 19:48:27 friedman Exp $
+# $Id: perror,v 1.5 2012/11/30 01:16:14 friedman Exp $
 
 # Commentary:
 # Code:
@@ -20,9 +20,11 @@ my $emaxlen = 0;
 
 sub init
 {
-  for my $errname (keys %Errno::)
+  for my $errname (@Errno::EXPORT_OK)
     {
-      my $errnum = ${$Errno::{$errname}};
+      # In newer versions of perl, the number is just a scalar.
+      # In older versions, each was a subroutine.
+      my $errnum = ${$Errno::{$errname}} || &{$Errno::{$errname}};
       next unless defined $errnum;
       local $! = $errnum;
       my $errmsg = $! . "";
@@ -54,14 +56,14 @@ sub printmatches
 sub main
 {
   init ();
-  unless (@ARGV)
+  unless (@_)
     {
       printmatches (\@errno_data);
       exit (0);
     }
 
   my %match;
-  for my $arg (@ARGV)
+  for my $arg (@_)
     {
       if ($arg =~ m|^/(.*?)/$|o)
         {
@@ -81,6 +83,6 @@ sub main
   printmatches ([values %match]) if %match;
 }
 
-main ();
+main (@ARGV);
 
 # perror ends here
