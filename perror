@@ -4,28 +4,25 @@
 # Created: 2002-03-16
 # Public domain
 
-# $Id: perror,v 1.3 2003/02/21 05:18:16 friedman Exp $
+# $Id: perror,v 1.4 2010/04/20 19:48:27 friedman Exp $
 
 # Commentary:
 # Code:
 
 $^W = 1; # enable warnings
 
-use POSIX qw(:errno_h);
+use Errno;
 use strict;
 
 my @errno_data;
 my %errno_data;
+my $emaxlen = 0;
 
 sub init
 {
-  my $tags = $POSIX::EXPORT_TAGS{errno_h};
-
-  for my $errname (@$tags)
+  for my $errname (keys %Errno::)
     {
-      next if $errname eq q(errno);
-
-      my $errnum = eval { no strict qw(refs); &$errname };
+      my $errnum = ${$Errno::{$errname}};
       next unless defined $errnum;
       local $! = $errnum;
       my $errmsg = $! . "";
@@ -41,13 +38,16 @@ sub init
       $errno_data{lc $errmsg}  = $data;
       $errno_data{$altname}    = $data;
       $errno_data{lc $altname} = $data;
+
+      my $l = length $errname;
+      $emaxlen = $l if $l > $emaxlen;
     }
 }
 
 sub printmatches
 {
   my $data = shift;
-  map { printf "%s\t%d\t%s\n", @$_ }
+  map { printf "%-${emaxlen}s  %3d  %s\n", @$_ }
       sort { $a->[1] <=> $b->[1] } @$data;
 }
 
