@@ -1,0 +1,142 @@
+#!/usr/bin/env perl
+# duptree --- copy directories recursively
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2012-08-28
+# Public domain
+
+# $Id$
+
+# Commentary:
+# Code:
+
+$^W = 1; # enable warnings
+
+use FindBin;
+use lib "$FindBin::Bin/../../lib/perl";
+use lib "$ENV{HOME}/lib/perl";
+
+use strict;
+use Carp;
+use Getopt::Long;
+use Pod::Usage;
+use NF::FileUtil qw(:file :symlink);
+
+sub COPY    { 0 }
+sub LINK    { 1 }
+sub SYMLINK { 2 }
+
+my %opt = ( mode     => COPY,
+            match_re => undef,
+            subst_re => undef,
+            verbose  => 0,
+          );
+
+sub duptree
+{
+  my ($from, $to) = @_;
+  my $fn;
+
+  if    ($opt{mode} == COPY)    { $fn = sub { copy_file ($_[0], $_[1], 1) } }
+  elsif ($opt{mode} == LINK)    { $fn = \&link_or_copy }
+  elsif ($opt{mode} == SYMLINK) { $fn = ($from =~ m|^/| ? \&xsymlink : \&xsymlink_relative) }
+
+  my $match_re = $opt{match_re};
+  my $subst_fn = $opt{subst_fn};
+  my $opfn = sub
+    {
+      my ($from, $to) = @_;
+      return if defined $match_re && ! $from =~ $match_re;
+      &$subst_fn ($to) if $subst_fn;
+      &$fn ($from, $to);
+    };
+
+  dup_tree ($from, $to, $opfn);
+}
+
+sub parse_options
+{
+  my $help = -1;
+
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev no_require_order no_ignore_case));
+  my $succ = $parser->getoptions
+    ('h|help|usage+'            => \$help,
+     'v|verbose'                => sub { $opt{verbose} = 1 },
+     'q|quiet'                  => sub { $opt{verbose} = 0 },
+
+     'C|copy'                   => sub { $opt{mode} = COPY },
+     'H|hardlink|hard-link'     => sub { $opt{mode} = LINK },
+     'S|symlink|sym-link'       => sub { $opt{mode} = SYMLINK },
+
+     'm|match=s'                => sub { $opt{match_re} = $_[1] },
+     'r|replace=s'              => sub { $opt{subst_re} = $_[1] },
+     'fat|vfat|ntfs'            => sub { $opt{subst_re} = 's/[:*?"<>|\\\\]/_/g' },
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)     unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
+
+  $NF::FileUtil::verbose = $opt{verbose};
+  if ($opt{verbose})
+    {
+      use NF::Diag;
+      NF::Diag->display_timestamp (0);
+      NF::Diag->display_progname (0);
+      NF::Diag->display_pid (0);
+    }
+
+  if ($opt{subst_re})
+    {
+      # subst_re can be a sequence of s/// expressions.
+      # They should modify the original first arg.
+      $opt{subst_fn} = eval "sub { local \$_ = \$_[0];
+                                   $opt{subst_re};
+                                   \$_[0] = \$_;
+                                 }";
+      croak $@ if $@;
+    }
+}
+
+sub main
+{
+  parse_options (\@_);
+
+  my $result = duptree (@_);
+  $result = 0 unless defined $result;
+  exit ($result == 0);
+}
+
+main (@ARGV);
+
+1;
+
+__END__
+
+=head1 NAME
+
+duptree - copy directory recursively
+
+=head1 SYNOPSIS
+
+     {-h|--help|--usage}
+
+     {-C|--copy}
+     {-H|--hardlink}
+     {-S|--symlink}
+
+     {-m|--match    REGEXP}
+     {-r|--replace  PERLSUBST}
+
+     {--fat|--vfat|--ntfs}
+
+     from to
+
+ The -h option may be repeated up to 3 times for increased verbosity.
+
+=head1 DESCRIPTION
+
+This command mirrors the source directory to the target directory.
+
+=cut
