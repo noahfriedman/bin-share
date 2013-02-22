@@ -1,18 +1,14 @@
-#!/bin/sh
-exec ${PERL-perl} -Sx $0 ${1+"$@"}
-#!perl
-
-# $Id: dateclock,v 1.1 2000/03/09 20:14:02 friedman Exp $
+#!/usr/bin/env perl
+# $Id: dateclock,v 1.2 2002/09/12 10:07:50 friedman Exp $
 
 use POSIX;
 
 $| = 1;
 while (1)
   {
-    print strftime ("\r%a %b %e %H:%M:%S %Z %Y", localtime ());
+    print strftime ("\r%Y-%m-%d %H:%M:%S %z", localtime),
+          strftime (" %H:%MZ", gmtime);
     select (undef, undef, undef, 0.50);
   }
 
-# local variables:
-# mode: perl
-# end:
+# eof
