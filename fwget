@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# $Id$
+
+for url in "$@"; do
+  file=${url%\?*}
+  file=${file##*/}
+  set wget -nc -O "$file" "$url"
+  echo + "$@" 1>&2
+  "$@"
+done
+
+# eof
