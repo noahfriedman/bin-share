@@ -4,14 +4,15 @@
 # Created: 2010-08-30
 # Public domain
 
-# $Id$
+# $Id: pmwget,v 1.1 2010/08/31 17:47:13 friedman Exp $
 
 htget()
 {
   url=${1#http://}
   host=${url%%/*}
   path=/${url#*/}
-  file=${path##*/}
+  file=${path%\?*}
+  file=${file##*/}
 
   { echo -e GET $path HTTP/1.0'\r'
     echo -e Host: $host'\r'
