@@ -1,0 +1,14 @@
+#!/bin/sh
+# $Id$
+
+exec links                  \
+    -dump                   \
+    -dump-width       80    \
+    -dump-charset     utf-8 \
+    -no-connect        1    \
+    -no-home           1    \
+    -no-numbering           \
+    -no-references          \
+    "$@"
+
+# eof
