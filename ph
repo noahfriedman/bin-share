@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: ph,v 1.2 2012/11/27 21:39:26 friedman Exp $
+# $Id: ph,v 1.3 2012/11/27 21:56:22 friedman Exp $
 
 use Net::LDAP;
 use Getopt::Long;
@@ -48,20 +48,14 @@ my $max_attrlen = 0;
 
 my @search_attr = (qw(cn sn telephonenumber pager mobile));
 
-sub parse_options
-{
-  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
-
-  my $parser = Getopt::Long::Parser->new;
-  $parser->configure (qw(bundling autoabbrev));
-  my $succ = $parser->getoptions
-    ( "b|root|base=s"  => \$opt{base},
-      "h|host=s",      => \$opt{host},
-      "D|bind=s",      => \$opt{bind},
-      "w|pswd|pass=s", => \$opt{password},
-      "p|port=s",      => \$opt{port},
-    );
-}
+my %format_attr =
+  ( telephonenumber             => \&format_phone,
+    homephone                   => \&format_phone,
+    mobile                      => \&format_phone,
+    pager                       => \&format_phone,
+    faxnumber                   => \&format_phone,
+    facsimiletelephonenumber    => \&format_phone,
+  );
 
 sub maxlen
 {
@@ -127,6 +121,25 @@ sub make_filter
   sprintf ("(|%s)", join ("", map { "($_)" } @f));
 }
 
+# Some ad-hoc reformatting for ease of reading.
+sub format_phone
+{
+  local $_ = $_[1];
+
+  s/[.-\s\(\)]*//g;
+
+  return "+44 $1 $2" if /^(?:011)?(?:44)?0?(118\d)(\d{6})$/; # UK; bad p4 ldap formatting
+
+  return  "+1 $1 $2 $3"           if /^1?(\d{3})(\d{3})(\d{4})$/; # US
+  return  "+$1 $2 $3"             if /^(?:011|\+)?(44)(\d{4})(\d{4,6})$/; # UK
+  return  "+$1 $2 $3 $4 $5 $6 $7" if /^(?:011|\+)?(33)(\d)(\d\d)(\d\d)(\d\d)(\d\d)$/; # FR
+
+  return  "+$1 $2 $3 $4" if /^(?:011|\+)?(61)0?(4\d\d)(\d{3})(\d{3})$/; # AU mobile
+  return  "+$1 $2 $3 $4" if /^(?:011|\+)?(61)0?(\d)(\d{4})(\d{4})$/; # AU
+
+  return $_[1];
+}
+
 sub result_format
 {
   my $result = shift;
@@ -147,7 +160,12 @@ sub result_format
 
       map { my $key = $remap{$_} || $_;
             my $val = $entry->get_value ($_);
-            $node{$key} = $val if defined $val;
+            if (defined $val)
+              {
+                my $fmtfn = $format_attr{$_};
+                $val = &$fmtfn ($_, $val) if ref $fmtfn eq 'CODE';
+                $node{$key} = $val;
+              }
           } $entry->attributes;
       push @entry, \%node;
     }
@@ -171,6 +189,21 @@ sub result_print
           } @attr;
       print "\n";
     }
+}
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev));
+  my $succ = $parser->getoptions
+    ( "b|root|base=s"  => \$opt{base},
+      "h|host=s",      => \$opt{host},
+      "D|bind=s",      => \$opt{bind},
+      "w|pswd|pass=s", => \$opt{password},
+      "p|port=s",      => \$opt{port},
+    );
 }
 
 sub main
