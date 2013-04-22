@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.29 2012/11/02 23:45:09 friedman Exp $
+# $Id: rpm-pkg-list,v 1.30 2012/11/05 22:09:25 friedman Exp $
 
 # Commentary:
 # Code:
@@ -94,6 +94,8 @@ my %repo_fingerprint
       '30c9ecf8' => 'fedora-test',
       '1cddbca9' => 'fedora-rawhide',
       '731002fa' => 'fedora-legacy',
+
+      'fd431d51' => 'rhel-6',
 
       '8296fa0f' => 'rpmfusion-free-f17',       'd2382b83' => 'rpmfusion-nonfree-f17',
       'adf25d9c' => 'rpmfusion-free-f16',       '952f3af8' => 'rpmfusion-nonfree-f16',
