@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: flac2mp3,v 1.3 2012/10/10 01:46:02 friedman Exp $
+# $Id: flac2mp3,v 1.4 2012/10/10 06:38:19 friedman Exp $
 
 decode_flac()
 {
@@ -34,7 +34,8 @@ tag_mp3()
                      /^tracknumber$/s//track/
                      s/^/--/
                      G
-                     s/\n/ /
+                     s/\n/=/
+                     /^--comment/s/=/=::/
                     '`
 
   for apic in FRONT_COVER BACK_COVER LEAFLET OTHER ; do
