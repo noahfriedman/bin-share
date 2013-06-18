@@ -1,0 +1,36 @@
+#!/bin/sh
+# $Id$
+
+wav_to_ogg()
+{
+  wav=$1
+  shift
+
+  base=`basename "$wav" .wav`
+  ogg=$base.ogg
+
+  oggenc \
+      --quality=10 \
+      --ignorelength \
+      --output="$ogg" \
+      "$wav" \
+      "$@"
+}
+
+main()
+{
+  case $1 in
+    -1 ) shift
+         wav_to_ogg "$@" ;;
+     * )
+         for wav in "$@"; do
+           echo "$wav"
+           wav_to_ogg "$wav"
+           echo
+         done ;;
+  esac
+}
+
+main "$@"
+
+# eof
