@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.66 2011/11/26 21:27:32 friedman Exp $
+# $Id: from,v 1.67 2011/11/30 22:17:17 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -1535,7 +1535,7 @@ sub analyze
   local *_ = \$self->{raw};
 
   my %header;
-  while (/^([^\s]+):[ \t]+/mgc)
+  while (/^([^\s:]+):[ \t]*/mgc)
     {
       my $printname = $1;
       my $name = lc $1;
