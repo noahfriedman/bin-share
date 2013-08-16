@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.67 2011/11/30 22:17:17 friedman Exp $
+# $Id: from,v 1.68 2013/07/16 21:24:11 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,13 +22,6 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # Commentary:
-
-# Optional perl modules that will improve the functionality of this program:
-#     Date::Parse
-#     Time::ParseDate
-#     Time::Timezone
-#     Text::CharWidth
-
 # Code:
 
 use strict;
@@ -36,7 +29,16 @@ use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "2.0";
+our $version = "2.0.1";
+
+# Optional perl modules that will improve the functionality of this program:
+our @optional_modules
+  = qw( Date::Parse
+        Time::ParseDate
+        Time::Timezone
+        Text::CharWidth
+     );
+
 our %opt;
 
 sub parse_options
@@ -117,7 +119,7 @@ sub parse_options
 
   if ($opt{show_version})
     {
-      print "Version ", $version, "\n";
+      show_version();
       exit (0);
     }
 
@@ -128,6 +130,19 @@ sub parse_options
   $opt{interesting} = (@{$opt{interesting}}
                        ? [map { split (/[\s,]+/, $_) } @{$opt{interesting}}]
                        : \@interesting_default);
+}
+
+sub show_version
+{
+  print "Version ", $version, "\n";
+
+  if ($::debug)
+    {
+      print "\nOptional modules:\n";
+      map { eval "use $_";
+            printf("\t%s\t\t%s\n", $_, ($@ ? "no" : "yes"));
+          } @optional_modules;
+    }
 }
 
 sub main
@@ -1701,7 +1716,7 @@ sub _parse_address
 
 sub _parse_rfc1522
 {
-  local $_ = shift;
+  local $_ = $_[0];
   my $result = "";
 
   # Remove whitespace between adjacent encoded regions (per section 6.2)
@@ -1720,8 +1735,16 @@ sub _parse_rfc1522
                : "$4");
       if ($::opt{utf8})
         {
-          $s = decode ($charset, $s); # convert to utf8
-          utf8::encode ($s);          # convert back to bytes for now
+          eval { $s = decode ($charset, $s); # convert to utf8
+                 utf8::encode ($s);          # convert back to bytes for now
+               };
+          if ($@)
+            {
+              # Just return original encoded text if there is a decoding problem.
+              # e.g. perl 5.14.4 doesn't recognize the gb18030 charset.
+              ::_debug ($@);
+              return $_[0];
+            }
         }
       $result .= $s;
 
