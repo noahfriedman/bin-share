@@ -4,7 +4,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Public domain.
 
-# $Id: dist-chmod,v 1.4 2005/10/02 18:38:43 friedman Exp $
+# $Id: dist-chmod,v 1.5 2005/11/22 20:39:54 friedman Exp $
 
 setgid=
 sticky=
@@ -41,6 +41,7 @@ case $bits in
   ''      ) :                      ;;
   *[=+-]* ) fmode=$fmode,$bits     ;;
   *       ) fmode=$fmode,${bits}-w ;;
+  [0-9]*  ) fmode=$bits
 esac
 
 chmod $verbose -R $fmode ${1+"$@"}
