@@ -1,0 +1,56 @@
+#!/usr/bin/env perl
+# cmd-rpm --- show path of commands names and associated rpm package name
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2014-01-05
+# Public domain
+
+# $Id$
+
+# Commentary:
+# Code:
+
+$^W = 1; # enable warnings
+
+use strict;
+
+sub uniq_PATH
+{
+  my @path = split (/:/, $_ || $ENV{PATH});
+  my (@npath, %seen);
+
+  map { $_ = "." if $_ eq "";
+        my @st = stat $_;
+        my $id = "$st[0]:$st[1]";
+
+        push @npath, $_ unless exists $seen{$id};
+        $seen{$id} = undef;
+      } @path;
+
+  return @npath;
+}
+
+sub xpath
+{
+  my @path = uniq_PATH ();
+  map { my $f = $_;
+        map { $f =~ m=/= ? $f : -f "$_/$f" && -x _ ? "$_/$f" : () } @path;
+      } @_;
+}
+
+sub main
+{
+  my @files = xpath (@_);
+  my @pkg   = split (/[\r\n]+/, `rpm --qf '%{N}\n' -qf @files` || exit (1));
+
+  my $w = (sort { $b <=> $a } map { length $_ } @files)[0]; # maxlen
+  my $fmt = "%-${w}s  %s\n";
+  while (@files)
+    {
+      $pkg[0] = "" if $pkg[0] =~ /not owned by any package$/;
+      printf($fmt, shift @files, shift @pkg);
+    }
+}
+
+main (@ARGV);
+
+# eof
