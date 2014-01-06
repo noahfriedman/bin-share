@@ -1,31 +1,46 @@
 #!/usr/bin/env perl
-# mdf --- df wrapper to align columns for legibility
-
+# mdf --- df wrapper for better, portable display
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2001-01-11
 # Public domain.
 
-# $Id: mdf,v 1.10 2011/12/27 18:19:38 friedman Exp $
-
-# Commentary:
-# Code:
+# $Id$
 
 $^W = 1;  # enable warnings
 
 use strict;
-use POSIX qw(uname);
-use Symbol;
 use Getopt::Long;
+use Pod::Usage;
+use POSIX;
+use Symbol;
+use bignum;
 
-my $domain = dnsdomain ();
+(my $progname = $0) =~ s|.*/||;
 
-my $fieldsep = "[ \t]+";
-my %right_justify = ( 1 => 1, 2 => 1, 3 => 1, 4 => 1);
-my $width_limit;  # not currently used
-my $widthpad = 1; # extra padding to add between columns
+my $version = "2.0";
 
-my $sortkey;
-my %sortby =
+my %mult
+  = ( b      => 512,          human => 1024,
+      blk    => 512,          si    => 1000,
+      blks   => 512,
+      blocks => 512,
+
+      k      => 1024,         t   => 1024 ** 4,    z   => 1024 ** 7,
+      kib    => 1024,         tib => 1024 ** 4,    zib => 1024 ** 7,
+      kb     => 1000,         tb  => 1000 ** 4,    zb  => 1000 ** 7,
+
+      m      => 1024 ** 2,    p   => 1024 ** 5,    y   => 1024 ** 8,
+      mib    => 1024 ** 2,    pib => 1024 ** 5,    yib => 1024 ** 8,
+      mb     => 1000 ** 2,    pb  => 1000 ** 5,    yb  => 1000 ** 8,
+
+      g      => 1024 ** 3,    e   => 1024 ** 6,
+      gib    => 1024 ** 3,    eib => 1024 ** 6,
+      gb     => 1000 ** 3,    eb  => 1000 ** 6,
+    );
+
+my @unit = (qw(B K M G T P E Z Y));
+
+my %sortkey =
   ( dev        => 0,         size       => 1,
     device     => q(dev),    used       => 2,
     '/dev'     => q(dev),    avail      => 3,
@@ -35,183 +50,376 @@ my %sortby =
     '%'        => q(pct),    mountpoint => q(mnt),
     'use%'     => q(pct),    fs         => q(mnt),
     'used%'    => q(pct),    filesystem => q(mnt),
+    'cap'      => q(pct),
+    'capacity' => q(pct),
   );
+
+my @rjustify = qw(0 1 1 1 1 0);
+
+our %opt = ( blocksize => 'human',
+             sort      => [],
+           );
+
+my ($u_system, $u_nodename, $u_release, $u_version, $u_machine) = uname ();
 
 sub dnsdomain
 {
-  my @uname = uname ();
-  my $nodename = $uname[1];
+  local $_ = $u_nodename;
 
-  unless ($nodename =~ /\./)
+  unless (/\./)
     {
       use Socket;
-      my $addr  = gethostbyname ($nodename);
-      $nodename = gethostbyaddr ($addr, AF_INET);
+      my $addr  = gethostbyname ($_);
+      return unless defined $addr;
+      $_ = gethostbyaddr ($addr, AF_INET);
     }
-  return unless (defined $nodename && $nodename =~ /\./);
+  return unless defined $_ && /\./;
 
-  $nodename =~ s/^[^.]+\.//;
-  return $nodename;
-}
-
-sub parse_input
-{
-  my $lines = shift;
-  my $fieldsep = shift;
-  my @parsedlines;
-  my @maxwidth;
-
-  for my $line (@$lines)
-    {
-      my @fields = split (/$fieldsep/o, $line, -1);
-      push @parsedlines, \@fields;
-
-      my $i = 0;
-      for my $f (@fields)
-        {
-          my $l = length $f;
-          $maxwidth[$i] = $l
-            if (!defined $maxwidth[$i] || $l > $maxwidth[$i]);
-          $i++;
-        }
-    }
-  return \@parsedlines, \@maxwidth;
-}
-
-sub print_output
-{
-  my ($lines, $maxwidth) = @_;
-
-  my @fmts;
-  my $i = 0;
-  for my $width (@$maxwidth)
-    {
-      my $w = (defined $width_limit ? min ($width, $width_limit) : $width);
-      push @fmts, join ("",
-                        $i == 0 ? "" : " " x $widthpad,
-                        (exists $right_justify{$i} ? "%" : "%-"),
-                        $w,
-                        (defined $width_limit ? "." . ($w-1) : ""),
-                        "s");
-      $i++;
-    }
-  $fmts[$#fmts] = "%s" if (substr ($fmts[$#fmts], 1, 1) eq '-');
-  my $fmtstr = join (" ", @fmts);
-
-  for my $l (@$lines)
-    {
-      my $s = sprintf ($fmtstr, @$l);
-      $s =~ s/\s+$//;
-      print $s, "\n";
-    }
-}
-
-sub atoi
-{
-  local $_ = shift;
-  s/^(\d+).*$/$1/;
-  return 0 + $_;
-}
-
-# Convert /dev/mapper/vg-lv to /dev/vg/lv
-sub compact_devicemapper
-{
-  local $_ = shift;
-
-  while (m=^(/dev/mapper/\S+)=gm)
-    {
-      my $s = $1;
-      my $len = length $s;
-      my $end = pos $_;
-
-      # Hyphens within volume groups or volume names are doubled under
-      # /dev/mapper; convert the undoubled hyphens to / before undoubling.
-      $s =~ s=([^-])-([^-])=$1/$2=g;
-      $s =~ s=--=-=g;
-      $s =~ s=mapper/==;
-
-      substr ($_, $end - $len, $len) = $s;
-    }
+  s/^[^.]+\.//;
   return $_;
 }
 
-sub file_contents
+sub xcat
 {
-  my $file = shift;
-
   my $fh = gensym;
-  die "open: $file: $!\n"
-    unless open ($fh, $file); # filename arg must be expicit
+  open ($fh, $_[0]) || die "$!";
+  local $/ = undef;
+  return <$fh>;
+}
 
-  local $_;
-  my $offset = 0;
-  while (my $bytes = sysread ($fh, $_, 4096, $offset))
+sub next_in_path
+{
+  my $this = shift || $0;
+  my @st_me = stat $0;
+  (my $prog = $this) =~ s=.*/==;
+  (my $dir  = $this) =~ s=/[^/]+$==;
+
+  my @p = split (/:/, $ENV{PATH});
+  if ($prog ne $dir)
     {
-      last if $bytes <= 0;
-      $offset += $bytes;
+      # First search for instances of program later in path than this one.
+      # If nothing is found, wrap around to the beginning of the path.
+      # But never select this program file.
+      my $re_dir = quotemeta ($dir);
+      (my $afterpath = $ENV{PATH}) =~ s=(?:^|.*:)$re_dir(?::|$)==;
+      unshift @p, split (/:/, $afterpath);
     }
-  close ($fh);
+
+  map { $_ = "." if $_ eq "";
+        my $f = "$_/$prog";
+
+        if (-f $f && -x _)
+          {
+            my @st = stat _;
+            return $f unless $st[0] == $st_me[0] && $st[1] == $st_me[1];
+          }
+      } @p;
+
+  die "$progname: cannot find an instance of $prog in PATH other than $this\n";
+}
+
+sub compact_devmapper
+{
+  local $_ = shift;
+  return $_ unless m=^/dev/mapper/=;
+  # Hyphens within volume groups or volume names are doubled under
+  # /dev/mapper; convert the undoubled hyphens to / before undoubling.
+  s=([^-])-([^-])=$1/$2=g;
+  s=--=-=g;
+  s=mapper/==;
   return $_;
+}
+
+# Return an array of array of fields
+sub fieldarray { map { [split (/\s+/, $_)] } split (/[\r\n]+/, $_[0]) }
+
+my %df_cmd = ( hpux    => 'bdf',
+               default => 'df',
+             );
+
+my %df_arg = ( linux   => [qw(--all --block-size=1)],
+               hpux    => [],
+               aix     => [qw(-k -P)],
+               default => [qw(-a -k)],
+             );
+
+# Returns array of vectors where each elt is:
+#     (0) fs
+#     (1) total
+#     (2) used
+#     (3) avail
+#     (4) pct
+#     (5) mntpt
+sub get_df
+{
+  my $dfcmd  =   $df_cmd{$^O} || $df_cmd{default};
+  my @dfargs = @{$df_arg{$^O} || $df_arg{default}};
+
+  my $df = ($progname eq $dfcmd ? next_in_path ($0) : next_in_path ($dfcmd));
+  my $data = qx{ $df @dfargs @_ };
+  exit ($? >> 8) unless $? == 0 && $data;
+
+  my $dnsdomain = dnsdomain ();
+  $data =~ s=\.$dnsdomain:/=:/=gmo if defined $dnsdomain;
+  $data =~ s/\n\s+/ /g; # join continuation lines
+
+  my $linuxp = ($^O eq 'linux');
+  map { my @elt  =  split (/\s+/, $_, 6);
+        $elt[0]  =  compact_devmapper ($elt[0]);
+        for my $n (1..3)
+          {
+            $elt[$n]  =  0 if $elt[$n] eq '-';
+            $elt[$n] *=  1024 unless $linuxp;
+          }
+        $elt[4]  =~ s/%//g;
+        $elt[5]  = "" unless @elt > 5;
+        \@elt
+      } split (/[\r\n]+/, $data);
+}
+
+# (0) mount ID:  unique identifier of the mount (may be reused after umount)
+# (1) parent ID:  ID of parent (or of self for the top of the mount tree)
+# (2) major:minor:  value of st_dev for files on filesystem
+# (3) root:  root of the mount within the filesystem
+# (4) mount point:  mount point relative to the process's root
+# (5-) varies depending on kernel version
+sub parse_mountinfo
+{
+  my $minfo = "/proc/self/mountinfo";
+  return unless -f $minfo;
+  my @lines = fieldarray (xcat ($minfo));
+
+  my %root;
+  map { $root{$_->[2]} = $_->[4] if !defined $root{$_->[2]} && $_->[3] eq "/";
+      } @lines;
+
+  my %mdev;
+  map { ($mdev{$_->[4]} = $root{$_->[2]} . $_->[3]) =~ s=^//=/=
+          if defined $root{$_->[2]} && $_->[3] ne "/";
+      } @lines;
+  return %mdev;
+}
+
+sub round
+{
+  my ($n, $places, $roundup) = @_;
+  my $shift = ($places ? 10**$places : ($n < 10 ? 10 : 1));
+  $n *= $shift;
+
+  my $int  = int ($n);
+  my $frac = $n - $int;
+
+  my $round;
+  if    ($frac < .5)    { $round = $int     }
+  elsif ($frac > .5)    { $round = $int + 1 }
+  elsif ($int & 1 == 1) { $round = $int + 1 } # round odd up
+  else                  { $round = $int     } # round even down
+
+  return $round / $shift;
+}
+
+sub expand_unit
+{
+  local $_ = shift;
+
+  /^(\d*)([a-z]*)$/i;
+  my $n = $1 || 1;
+  if ($2)
+    {
+      my $u = lc $2;
+      die "$progname: $2: invalid unit\n" unless defined $mult{$u};
+
+      if ($opt{si})
+        {
+          if ($opt{blocksize} eq 'human')
+            { $u = 'si' }
+          elsif ($mult{$u} != 512)
+            {
+              $u .= "b" unless $u =~ /b$/;
+              $u =~ s/i//;
+            }
+        }
+      return $n * $mult{$u};
+    }
+  return $n;
+}
+
+sub to_unit
+{
+  my $val = shift;
+  return $val unless $val;
+
+  if ($opt{blocksize} eq 'human' || $opt{blocksize} eq 'si')
+    {
+      my $factor = expand_unit ($opt{blocksize});
+      my $n = 0;
+      while ($val >= $factor)
+        {
+          $val /= $factor;
+          $n++;
+        }
+      return round ($val, @_) . $unit[$n];
+    }
+  elsif ($opt{header_unit})
+    {
+      $opt{blocksize} =~ /^(\d*)([a-z]*)$/i;
+      my $unit = $2 ? expand_unit ($2) : 1024;
+      # if x == 2^n, only nth bit in x is set.
+      # subtracting 1 flips all bits via a borrow; the logical AND is zero.
+      # If x != 2^n, x-1 will flip all bits up to and including the first 1,
+      # but will not negate the entire value and & will not produce zero.
+      my $non_pow2 = $unit & ($unit - 1);
+      $opt{si} = 1 if $non_pow2;
+
+      my $factor = $non_pow2 ? 1000 : 1024;
+      my $n = 0;
+      while ($val >= $factor && $val % $factor == 0)
+        {
+          $val /= $factor;
+          $n++;
+        }
+      return join ("", round ($val, @_), $unit[$n],
+                   ($n == 0 ? "" : ($opt{si} ? "B" : "iB")));
+    }
+  else
+    {
+      $val /= expand_unit ($opt{blocksize});
+    }
+  return round ($val, @_);
+}
+
+sub make_format
+{
+  my $fmt = join ("  ", map { $_ ? "%%%ds" : "%%-%ds" } @rjustify) . "\n";
+  my @len = map { length $_ } @{shift @_};
+  map { for (my $i = 0; $i < @len; $i++)
+          {
+            my $l = length $_->[$i];
+            $len[$i] = $l if $l > $len[$i];
+          }
+      } @_;
+
+  sprintf ($fmt, @len);
+}
+
+sub sortrows
+{
+  return @_ unless $opt{sort};
+  my @field = @{$opt{sort}};
+
+  my @sorted = sort { my $p = 0;
+                      map { $p = ("$a->[$_]$b->[$_]" =~ /^\d+$/
+                                  ? $a->[$_] <=> $b->[$_]
+                                  : $a->[$_] cmp $b->[$_]
+                                 ) unless $p } @field;
+                      $p
+                    } @_;
+  @sorted = reverse @sorted if $opt{reverse_sort};
+  return @sorted;
 }
 
 sub parse_options
 {
   local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
-  Getopt::Long::config (qw(bundling auto_abbrev pass_through permute));
-  GetOptions ("s|sort|sort-by=s" => \$sortkey);
+  my $help; # no init; perl 5.8 will treat as REF() instead of SCALAR()
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev));
+
+  my $succ = $parser->getoptions
+    ("help|usage+"              => \$help,
+     'V|version',               => \$opt{show_version},
+
+     "a|all"                    => \$opt{all},
+     "A|bind-mounts"            => \$opt{showbinds},
+     "H|no-header"              => \$opt{noheader},
+
+     "r|reverse"                => \$opt{reverse_sort},
+     "s|sort=s"                 => sub { push @{$opt{sort}}, $_[1] },
+
+     "si"                       =>      \$opt{si},
+     "b|blocksize|block-size=s" =>      \$opt{blocksize},
+     "k"                        => sub { $opt{blocksize} = '1k'    },
+     "m"                        => sub { $opt{blocksize} = '1m'    },
+     "g"                        => sub { $opt{blocksize} = '1g'    },
+     "h|human-readable"         => sub { $opt{blocksize} = 'human' },
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)         unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help - 1) if $help > 0;
+
+  if ($opt{show_version})
+    {
+      print "$progname version ", $version, "\n";
+      exit (0);
+    }
+
+  if (@{$opt{sort}})
+    {
+      my @sortby = map { split (/[\s,]+/, $_) } @{$opt{sort}};
+      map { my $orig = $_;
+            $_ = $sortkey{lc $_} while defined $sortkey{lc $_};
+            die "$progname: $orig: unknown sort key\n" unless /^\d+$/;
+          } @sortby;
+      $opt{sort} = \@sortby;
+    }
+  else
+    {
+      delete $opt{sort};
+    }
 }
 
 sub main
 {
   parse_options (\@_);
 
-  my $dfcmd = exists $ENV{DF} ? $ENV{DF} : 'df';
-  push @_, "-k" unless (scalar @_ > 0);
-  my $dfout = qx{ $dfcmd @_ };
-  exit ($? >> 8) unless $? == 0 && $dfout;
-
-  my ($header, $rest) = split (/\n/, $dfout, 2);
-  $header =~ s/mounted on/Mountpoint/i;
-  $header =~ s/available/Avail/i;
-  $header =~ s/capacity/Use%/i;
-
-  unless ($header =~ /^Filesystem.*Mountpoint/)
+  my @df = get_df (@_);
+  shift @df; # discard header
+  if ($df[0]->[0] eq 'rootfs')
     {
-      print $dfout;
-      exit $?;
+      # Later distributions link /etc/mtab to /proc/mounts,
+      # which has a dummy rootfs entry.
+      shift @df;
+      for (my $i = 0; $i < @df; $i++)
+        {
+          next unless $df[$i]->[5] eq "/";
+          unshift @df, splice (@df, $i, 1);
+          last;
+        }
     }
 
-  $rest =~ s/\n\s+/ /g;
-  $rest =~ s=\.$domain:/=:/=gmo if (defined $domain);
-  $rest = compact_devicemapper ($rest);
+  my %mdev = parse_mountinfo ();
+  # Do not show zero-size pseudofilesystems by default.
+  @df = grep { $_->[1]                } @df unless $opt{all};
+  @df = grep { !exists $mdev{$_->[5]} } @df unless $opt{all} || $opt{showbinds};
 
-  if (-f "/proc/self/mountinfo")
+  # Fix bind mount "devices"
+  map { $_->[0] = $mdev{$_->[5]} if $mdev{$_->[5]} } @df;
+  # Sort before we process numbers
+  @df = sortrows (@df) if $opt{sort};
+
+  map { $_->[1] = to_unit ($_->[1]);
+        $_->[2] = to_unit ($_->[2]);
+        $_->[3] = to_unit ($_->[3]);
+        $_->[4] .= "%" unless $_->[4] eq "-";
+      } @df;
+
+  unless ($opt{noheader})
     {
-      my $mountinfo = file_contents ("/proc/self/mountinfo");
+      my @hdr = (qw(Filesystem Size Used Avail Use%), "Mountpoint");
+      unless ($opt{blocksize} eq 'human')
+        {
+          local $opt{header_unit} = 1;
+          $hdr[1] = to_unit (expand_unit ($opt{blocksize}), 1) . "-blocks";
+        }
+      $hdr[1] .= "(SI)" if $opt{si};
+      unshift @df, \@hdr;
     }
 
-
-  my ($lines, $maxwidth) = parse_input ([$header, split (/\n/, $rest)],
-                                        $fieldsep);
-  $header = shift @$lines;
-
-  if (defined $sortkey)
-    {
-      $sortkey = $sortby{lc $sortkey} while defined $sortkey && $sortkey !~ /^\d+$/;
-      $sortkey = 5 unless defined $sortkey ;
-
-      our (@a, @b);
-      my $sortfn = ($right_justify{$sortkey}
-                    ? sub { atoi ($a->[$sortkey]) <=> atoi ($b->[$sortkey]) }
-                    : sub {       $a->[$sortkey]  cmp       $b->[$sortkey]  });
-
-      $lines = [sort $sortfn @$lines];
-    }
-
-  unshift @$lines, $header;
-  print_output ($lines, $maxwidth);
+  my $fmt = make_format (@df);
+  map { printf($fmt, @$_) } @df;
 }
 
 main (@ARGV);
 
-# mdf ends here
+# eof
