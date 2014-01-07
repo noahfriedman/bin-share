@@ -4,7 +4,7 @@
 # Created: 2001-01-11
 # Public domain.
 
-# $Id$
+# $Id: mdf,v 1.12 2014/01/06 10:35:39 friedman Exp $
 
 $^W = 1;  # enable warnings
 
@@ -17,7 +17,7 @@ use bignum;
 
 (my $progname = $0) =~ s|.*/||;
 
-my $version = "2.0";
+my $version = "2.0.1";
 
 my %mult
   = ( b      => 512,          human => 1024,
@@ -156,6 +156,9 @@ sub get_df
   my @dfargs = @{$df_arg{$^O} || $df_arg{default}};
 
   my $df = ($progname eq $dfcmd ? next_in_path ($0) : next_in_path ($dfcmd));
+  push @dfargs, "-l" if $opt{local};
+  push @dfargs, "-i" if $opt{inodes};
+
   my $data = qx{ $df @dfargs @_ };
   exit ($? >> 8) unless $? == 0 && $data;
 
@@ -327,18 +330,25 @@ sub parse_options
   $parser->configure (qw(bundling autoabbrev));
 
   my $succ = $parser->getoptions
-    ("help|usage+"              => \$help,
+    ("help"                     => sub { $help = 3 },
+     "usage"                    => sub { $help = 1 },
      'V|version',               => \$opt{show_version},
 
+     "H|no-header"              => \$opt{noheader},
      "a|all"                    => \$opt{all},
      "A|bind-mounts"            => \$opt{showbinds},
-     "H|no-header"              => \$opt{noheader},
+     "l|local"                  => \$opt{local},
+
+     "i|inodes"                 => sub { $opt{inodes}    = 1;
+                                         $opt{blocksize} = 1
+                                           if $opt{blocksize} eq 'human';
+                                       },
 
      "r|reverse"                => \$opt{reverse_sort},
      "s|sort=s"                 => sub { push @{$opt{sort}}, $_[1] },
 
      "si"                       =>      \$opt{si},
-     "b|blocksize|block-size=s" =>      \$opt{blocksize},
+     "B|blocksize|block-size=s" =>      \$opt{blocksize},
      "k"                        => sub { $opt{blocksize} = '1k'    },
      "m"                        => sub { $opt{blocksize} = '1m'    },
      "g"                        => sub { $opt{blocksize} = '1g'    },
@@ -351,6 +361,7 @@ sub parse_options
   if ($opt{show_version})
     {
       print "$progname version ", $version, "\n";
+      print "This program is public domain.\n";
       exit (0);
     }
 
@@ -364,9 +375,7 @@ sub parse_options
       $opt{sort} = \@sortby;
     }
   else
-    {
-      delete $opt{sort};
-    }
+    { delete $opt{sort} }
 }
 
 sub main
@@ -406,11 +415,17 @@ sub main
 
   unless ($opt{noheader})
     {
-      my @hdr = (qw(Filesystem Size Used Avail Use%), "Mountpoint");
-      unless ($opt{blocksize} eq 'human')
+      my @hdr = ($opt{inodes}
+                 ? (qw(Filesystem Inodes IUsed IFree IUse% Mountpoint))
+                 : (qw(Filesystem   Size  Used Avail  Use% Mountpoint)));
+
+      if ($opt{blocksize} ne 'human'
+          && !($opt{inodes} && $opt{blocksize} == 1))
         {
           local $opt{header_unit} = 1;
-          $hdr[1] = to_unit (expand_unit ($opt{blocksize}), 1) . "-blocks";
+          $hdr[1] = to_unit (expand_unit ($opt{blocksize}), 1);
+          $hdr[1] =~ s/B$// if $opt{inodes};
+          $hdr[1] .= $opt{inodes} ? "-inodes" : "-blocks";
         }
       $hdr[1] .= "(SI)" if $opt{si};
       unshift @df, \@hdr;
@@ -422,4 +437,139 @@ sub main
 
 main (@ARGV);
 
-# eof
+
+__END__
+
+=head1 NAME
+
+mdf - wrapper for df to provide more consistent formatting
+
+=head1 SYNOPSIS
+
+ mdf  {--help}   (more verbose)    {-V|--version}
+      {--usage}  (less verbose)
+
+      {-a|--all}                   {-B|--blocksize|--block-size  SIZE}
+      {-A|--bind-mounts}           {-h|--human-readable}
+      {-l|--local}                 {--si}
+                                   {-k|-m|-g}
+
+      {-H|--no-header}             {-s|--sort  KEY1,KEY2,...}
+      {-i|--inodes}                {-r|--reverse}
+
+      {file ...}
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--help>, B<--usage>
+
+Display usage information and exit.
+The B<--help> option is more verbose than B<--usage>.
+
+=item B<--version>
+
+Output version information and exit.
+
+=item B<-a>, B<--all>
+
+Include dummy file systems and (linux only) C<bind> mounts.
+
+=item B<-A>, B<--bind-mounts>  (linux only)
+
+Display bind mounts.  That is, display additional mountpoints of all or
+parts of a filesystem whose primary mount is already displayed.
+
+In this case the "device" column for the mount is the path from whence the
+mount was made.
+
+=item B<-l>, B<--local>
+
+Limit listing to local file systems.
+
+=item B<-B>, B<--block-size=>I<SIZE>
+
+Scale sizes by I<SIZE> before printing them.
+
+I<SIZE> is an integer and optional case-insensitive unit
+(example: C<10m> is 10*1024*1024).
+Units are:
+
+=over 4
+
+=over 2
+
+=item Powers of 1024: C<k>, C<m>, C<g>, C<t>, C<p>, C<e>, C<z>, C<y>
+
+=item Powers of 1024: C<KiB>, C<MiB>, ...
+
+=item Powers of 1000: C<kb>, C<mb>, ...
+
+=back
+
+=back
+
+For example C<-B m> or C<-B 1024kib> prints sizes in units of 1,048,576 bytes.
+
+=item B<-h>, B<--human-readable>
+
+Print sizes in human readable format (e.g., C<1K>, C<234M>, C<2G>).
+
+=item B<--si>
+
+Likewise, but use powers of 1000, not 1024.
+
+=item B<-H>, B<--no-header>
+
+Do not display column headers.
+
+=item B<-i>, B<--inodes>
+
+List inode information instead of block usage.
+
+=item B<-k>, B<-m>, B<-g>
+
+Like C<--block-size=1K>, C<--block-size=1M>, or C<--block-size=1G>, respectively.
+
+=item B<-s>, B<--sort=>I<K1,K2,...>
+
+Sort rows by comparing columns I<K1>, I<K2>, etc.
+That is, compare column I<K1> or each row and if they
+are equivalent, move on to compare column I<K2>.
+
+Columns known to be numeric are compared numerically.
+(E.g. so that C<2> isn't considered greater than C<10>.)
+Other columns are sorted lexicographically ordering to current locale.
+
+Recognized column names (and number) include:
+
+=over 4
+
+=over 2
+
+=item 0 : C<dev>, C<device>, C</dev>
+
+=item 1 : C<size>
+
+=item 2 : C<used>
+
+=item 3 : C<avail>
+
+=item 4 : C<pct>, C<percent>, C<%>, C<used%>, C<cap>, C<capacity>
+
+=item 5 : C<mnt>, C<mount>, C<mountpoint>, C<fs>, C<filesystem>
+
+=back
+
+=back
+
+=item B<-r>, B<--reverse>
+
+Reverse sorting order specified by B<--sort>.
+
+=back
+
+=cut
+
+# mdf ends here
