@@ -4,7 +4,7 @@
 # Created: 2001-01-11
 # Public domain.
 
-# $Id: mdf,v 1.12 2014/01/06 10:35:39 friedman Exp $
+# $Id: mdf,v 1.13 2014/01/07 09:59:23 friedman Exp $
 
 $^W = 1;  # enable warnings
 
@@ -180,6 +180,13 @@ sub get_df
       } split (/[\r\n]+/, $data);
 }
 
+sub mountinfo
+{
+  my $minfo = $_[0] || "/proc/self/mountinfo";
+  return unless -f $minfo;
+  return fieldarray (xcat ($minfo));
+}
+
 # (0) mount ID:  unique identifier of the mount (may be reused after umount)
 # (1) parent ID:  ID of parent (or of self for the top of the mount tree)
 # (2) major:minor:  value of st_dev for files on filesystem
@@ -188,19 +195,47 @@ sub get_df
 # (5-) varies depending on kernel version
 sub parse_mountinfo
 {
-  my $minfo = "/proc/self/mountinfo";
-  return unless -f $minfo;
-  my @lines = fieldarray (xcat ($minfo));
-
   my %root;
   map { $root{$_->[2]} = $_->[4] if !defined $root{$_->[2]} && $_->[3] eq "/";
-      } @lines;
+      } @_;
 
   my %mdev;
   map { ($mdev{$_->[4]} = $root{$_->[2]} . $_->[3]) =~ s=^//=/=
           if defined $root{$_->[2]} && $_->[3] ne "/";
-      } @lines;
+      } @_;
   return %mdev;
+}
+
+# Determines which mount entries are duplicates because they appear under a
+# directory that is bind-mounted in multiple places.
+sub duplicate_binds
+{
+  my $m = shift;
+  my %mdev = %$m;
+
+  my %seen;
+  my %dup;
+  map { if ($_->[3] ne "/")
+          {
+            my $key  = $_->[2] . " " . $_->[3];
+            my $this = $_->[4];
+
+            if ($seen{$key} && $this ne $seen{$key})
+              {
+                while ($this ne "")
+                  {
+                    if (exists $mdev{$this})
+                      {
+                        $dup{$this} = undef;
+                        last;
+                      }
+                    $this =~ s=/[^/]*$==;
+                  }
+              }
+            else { $seen{$key} = $_->[4] }
+          }
+      } @_;
+  return %dup;
 }
 
 sub round
@@ -327,7 +362,7 @@ sub parse_options
   my $help; # no init; perl 5.8 will treat as REF() instead of SCALAR()
 
   my $parser = Getopt::Long::Parser->new;
-  $parser->configure (qw(bundling autoabbrev));
+  $parser->configure (qw(bundling autoabbrev gnu_compat));
 
   my $succ = $parser->getoptions
     ("help"                     => sub { $help = 3 },
@@ -397,10 +432,25 @@ sub main
         }
     }
 
-  my %mdev = parse_mountinfo ();
+  my @mountinfo = mountinfo ();
+  my %mdev = parse_mountinfo (@mountinfo);
   # Do not show zero-size pseudofilesystems by default.
   @df = grep { $_->[1]                } @df unless $opt{all};
   @df = grep { !exists $mdev{$_->[5]} } @df unless $opt{all} || $opt{showbinds};
+  if ($opt{showbinds} && !$opt{all})
+    {
+      # dup is a table of entries which are redundant with some other entry,
+      # but not of entries which themselves appear multiple times.
+      # That can happen if an identical mount is made twice.
+      # We still want to show that mount one time.
+      my %dup = duplicate_binds (\%mdev, @mountinfo);
+      my %seen;
+      @df = grep { my $dir = $_->[5];
+                   my $uniq = !(exists $dup{$dir} || exists $seen{$dir});
+                   $seen{$dir} = undef;
+                   $uniq;
+                 } @df;
+    }
 
   # Fix bind mount "devices"
   map { $_->[0] = $mdev{$_->[5]} if $mdev{$_->[5]} } @df;
