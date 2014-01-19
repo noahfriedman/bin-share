@@ -1,12 +1,12 @@
 #!/usr/bin/env perl
 # from --- show you who your mail is from
 
-# Copyright (C) 1992, 1995-2000, 2002, 2003, 2011 Noah S. Friedman
+# Copyright (C) 1992, 1995-2000, 2002, 2003, 2011, 2014 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.68 2013/07/16 21:24:11 friedman Exp $
+# $Id: from,v 1.69 2013/08/16 01:23:06 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,12 +24,13 @@
 # Commentary:
 # Code:
 
+use 5.8.0;  # Not tested with anything older.  YMMV.
 use strict;
 use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "2.0.1";
+our $version = "2.1.0";
 
 # Optional perl modules that will improve the functionality of this program:
 our @optional_modules
@@ -52,7 +53,7 @@ sub parse_options
       parsep        => 1,
       onelinep      => 1,
 
-      header_regexp => '^(?:From|To|Cc|Subject)$',
+      header_regexp => '^(?:Resent-)?(?:Sender|From|To|Cc|Subject)$',
       interesting   => [],
 
       user          => default_user(),
@@ -134,13 +135,18 @@ sub parse_options
 
 sub show_version
 {
-  print "Version ", $version, "\n";
+  print "from ", $version, "\n";
 
   if ($::debug)
     {
+      From::Socket::__init() unless $::SOCKLIB;
+
+      printf "\nUsing %s v%vd\n", $^X, $^V;
+      print "\nSocket library:       $::SOCKLIB\n";
+      print "Socket library (SSL): $::SOCKLIB_SSL\n";
       print "\nOptional modules:\n";
       map { eval "use $_";
-            printf("\t%s\t\t%s\n", $_, ($@ ? "no" : "yes"));
+            printf("\t%-20s %s\n", $_, ($@ ? "no" : "yes"));
           } @optional_modules;
     }
 }
@@ -533,7 +539,7 @@ sub _verbose
 
 sub _error
 {
-  my $msg = join (": ", $progname, "Error", @_);
+  my $msg = join (": ", $progname, "error", @_);
   $msg .= "\n" unless substr ($msg, -1, 1) eq "\n";
 
   if ($errors_fatal)
@@ -608,174 +614,66 @@ sub printobj
 *strftime_iso8601 = \&From::Timestamp::strftime_iso8601;
 
 
-package From::ONS;
+package From::Socket;
 
-use strict;
-use Symbol;
-use Socket;
-use Fcntl;
-use POSIX qw(:errno_h);
-
-# mode 1 = buffering, 0 = no buffering
-sub set_buffering_mode
+sub __init
 {
-  my $mode = shift;
-  my $orig = select ($_[0]);
-
-  map { select ($_);
-        $| = ($mode == 0);
-      } @_;
-  select ($orig);
-}
-
-# mode 1 = blocking, 0 = non-blocking
-sub set_blocking_mode
-{
-  my $mode = shift;
-
-  if ($^O eq "MSWin32")
+  for my $try (qw(IO::Socket::IP
+                  IO::Socket::INET))
     {
-      # Note: only socket handles can be made non-blocking on w32.
-      # This definition comes from winsock.h
-      my $FIONBIO = (0x80000000 | (4 << 16) | (ord ('f') << 8) | 126);
-      my $nonblocking = pack ("i", $mode ? 0 : 1);
-
-      map { my $result = ioctl ($_, $FIONBIO, $nonblocking);
-            ::_error ("set_blocking_mode", $!) unless defined $result;
-          } @_;
-    }
-  else
-    {
-      map { my $flags = fcntl ($_, F_GETFL, 0);
-            my $newflags = ($mode
-                            ? $flags & ~(O_NONBLOCK)
-                            : $flags | O_NONBLOCK);
-
-            fcntl ($_, F_SETFL, $newflags)
-              if ($flags != $newflags);
-          } @_;
-    }
-}
-
-my $h_errno = 0;
-my %herrstr = (-1 => "Resolver internal error",
-                0 => "Resolver Error 0 (no error)",
-                1 => "Unknown host",
-                2 => "Host name lookup failure",
-                3 => "Unknown server error",
-                4 => "No address associated with name");
-
-sub ipaddrp { $_[0] =~ /^[\d.]+$/ }
-
-sub herrstr
-{
-  my $null_if_no_error = shift;
-
-  return if ($null_if_no_error && $h_errno == 0);
-  return $herrstr{$h_errno};
-}
-
-sub ons_err
-{
-  my $h = herrstr (1);
-  ::_error (@_, $h);
-  return;
-}
-
-sub ons_gethostbyname
-{
-  my $name = shift;
-
-  $h_errno = $? = 0;
-  my @data = gethostbyname ($name);
-  return @data if @data;
-  $h_errno = $? if ($? != 0);
-  return; # distinct from `return undef' in an array context.
-}
-
-sub ons_gethostbyaddr
-{
-  my ($addr, $type) = @_;
-
-  $type = AF_INET unless defined $type;
-  $h_errno = $? = 0;
-  my $name = gethostbyaddr ($addr, $type);
-  $h_errno = $? if (!defined $name && $? != 0);
-
-  return (defined $name && $name ne "") ? $name : inet_ntoa ($addr);
-}
-
-# Currently the timeout argument applies independently to each connection
-# attempt for multiaddressed hosts.  Should this change?
-sub open_network_stream
-{
-  my ($rhostname, $port, $timeout) = @_;
-
-  my $proto = getprotobyname ("tcp");
-  (undef, undef, $port) = getservbyname ($port, "tcp") if ($port !~ /^\d+$/);
-
-  my @rhostaddr;
-  if (ipaddrp ($rhostname))
-    {
-      push @rhostaddr, inet_aton ($rhostname);
-    }
-  else
-    {
-      @rhostaddr = ons_gethostbyname ($rhostname);
-      return ons_err ($rhostname)
-        unless (defined $rhostaddr[0] && $rhostaddr[0] ne "");
-      splice (@rhostaddr, 0, 4);
+      $::SOCKLIB = $try;
+      eval "use $try";
+      last unless $@;
     }
 
-  my $sock = gensym;
-  while (scalar @rhostaddr > 0)
+  eval "use IO::Socket::SSL";
+  $::SOCKLIB_SSL = $@ ? q(From::Stunnel) : q(IO::Socket::SSL);
+}
+
+sub mkpipe
+{
+  __init unless $::SOCKLIB;
+
+  my @pair = $::SOCKLIB->socketpair (&AF_UNIX, &SOCK_STREAM, &PF_UNSPEC);
+  map { $_->autoflush (1) } @pair;
+  return @pair;
+}
+
+sub connect_internal
+{
+  __init unless $::SOCKLIB;
+
+  my $class = shift;
+  my %p = @_;
+
+  ::_debug (sub { $class, \%p });
+  my $fh = $class->new ( Type => &SOCK_STREAM, @_);
+  unless ($fh)
     {
-      close ($sock) if (defined fileno ($sock));
-      socket ($sock, AF_INET, SOCK_STREAM, $proto)
-        || return ::_error ("socket", $!);
-
-      # If a timeout is specified, put socket into non-blocking mode and
-      # select on it; if the connection succeeds before the timer expires,
-      # put the socket back in blocking mode and return it.
-      if (defined $timeout)
-        {
-          set_blocking_mode (0, $sock);
-          my $status = connect ($sock, sockaddr_in ($port, shift @rhostaddr));
-          if ((!defined $status || $status == -1)
-              && ($! == 0 || $! == EINPROGRESS))
-            {
-              my ($wbits, $tmout) = ('', $timeout);
-              vec ($wbits, fileno ($sock), 1) = 1;
-              my $n = select (undef, $wbits, undef, $tmout);
-
-              next if ($n == -1);
-
-              if ($n != 1)
-                {
-                  $! = ETIMEDOUT;
-                  next;
-                }
-
-              # We got an event before timeout, but don't know what kind.
-              # Check to make sure the connection actually succeeded.
-              my $so_error = getsockopt ($sock, SOL_SOCKET, SO_ERROR);
-              if (defined $so_error && unpack ('i', $so_error) != 0)
-                {
-                  $! = unpack ('i', $so_error);
-                  next;
-                }
-
-              set_blocking_mode (1, $sock);
-              return $sock;
-            }
-        }
-      else
-        {
-          connect ($sock, sockaddr_in ($port, shift @rhostaddr))
-            && return $sock;
-        }
+      ::_error ($p{PeerHost}, $@);
+      return;
     }
-  return ::_error ("socket", $!);
+
+  $fh->autoflush (1);
+  $fh->blocking (1);
+  return $fh;
+}
+
+sub connect
+{
+  shift if $_[0] eq __PACKAGE__;
+  connect_internal ($::SOCKLIB, @_);
+}
+
+sub connect_ssl
+{
+  shift if $_[0] eq __PACKAGE__;
+
+  # TODO: If $::SOCKLIB_SSL->can ('SSL_verify_mode'), should add
+  # certificate-checking flags here based on user config.
+  connect_internal ($::SOCKLIB_SSL,
+                    SSL_version => 'tlsv1',
+                    @_);
 }
 
 
@@ -805,11 +703,21 @@ sub connect
   my $self = shift;
 
   $self->disconnect;
-  ::_debug (sub { $self->{host}, $self->{port} });
-  $self->{fh} = From::ONS::open_network_stream
-    ($self->{host}, $self->{port}, $self->{timeout});
+  my $fh = From::Socket->connect (PeerHost => $self->{host},
+                                  PeerPort => $self->{port},
+                                  @_);
+  return unless $fh;
+  $self->{fh} = $fh;
+}
 
-  From::ONS::set_buffering_mode (0, $self->{fh});
+sub disconnect
+{
+  my $self = shift;
+  return unless (exists $self->{fh});
+
+  ::_debug();
+  shutdown ($self->{fh}, 2);  # 2 == SHUTDOWN_BOTH
+  delete $self->{fh};
 }
 
 sub command
@@ -818,17 +726,64 @@ sub command
   { my $args = \@_; ::_debug (sub { @$args }) }
 
   my $cmd = join (" ", @_);
-  $cmd =~ s/\r?\n//g;
   $cmd .= "\r\n";
-  send ($self->{fh}, $cmd, 0);
+  # send/recv doesn't work properly with IO::Socket::SSL (as of perl 5.14)
+  #send ($self->{fh}, $cmd, 0);
+  $self->{fh}->syswrite ($cmd);
 }
 
-sub disconnect
+
+package From::Stunnel;
+
+use strict;
+use POSIX qw(:sys_wait_h);
+
+*new = *connect; # symbol alias
+
+sub connect
 {
-  my $self = shift;
-  return unless (exists $self->{fh});
-  shutdown ($self->{fh}, 2);  # 2 == SHUTDOWN_BOTH
-  delete $self->{fh};
+  my $class = shift;
+  my %param = @_;
+
+  local $^F = 255;
+  my ($rc, $wc) = From::Socket::mkpipe ();
+  my ($rh, $wh) = From::Socket::mkpipe ();
+
+  my $pid = fork;
+  unless (defined $pid)
+    {
+      ::_error ('fork', $!);
+      exit (1);
+    }
+  if ($pid) # parent
+    {
+      # Check to see if it failed immediately
+      select (undef, undef, undef, .05); # usleep
+      if (waitpid ($pid, WNOHANG) == -1)
+        {
+          map { close ($_) } ($rc, $wc, $rh, $wh);
+          return;
+        }
+
+      close ($rc);
+      map { print $wc $_, "\n" }
+        ("foreground = no",
+         "syslog = no",
+         "client = yes",
+         "compression = deflate",
+         "connect = $param{PeerHost}:$param{PeerPort}",
+        );
+      map { close ($_) } ($rc, $wc, $wh);
+    }
+  else
+    {
+      open (STDIN,  "<&=" . fileno ($wh));
+      open (STDOUT, ">&=" . fileno ($wh));
+      map { close ($_) } ($rh, $wh, $wc);
+      exec ("stunnel", "-fd", fileno ($rc))
+        || die "$progname: exec stunnel: $!\n";
+    }
+  return $rh;
 }
 
 
@@ -844,10 +799,11 @@ sub new
   my $class = ref ($type) || $type;
   my $self = $class->SUPER::new (@_);
 
-  $self->{port}   = "imap"  unless $self->{port};
   $self->{folder} = "INBOX" unless $self->{folder};
 
   $self->connect;
+  return unless $self->{fh};
+
   $self->response_ok_p ("*");
   return unless $self->login ($self->{user}, $self->{pass});
   $self->message_count;  # sets folder
@@ -1086,6 +1042,25 @@ sub retrieve
 }
 
 
+package From::Mailbox::Imaps; # See rfc3501
+
+use strict;
+
+our @ISA = qw(From::Mailbox::Imap);
+
+sub connect
+{
+  my $self = shift;
+
+  $self->disconnect;
+  my $fh = From::Socket->connect_ssl (PeerHost => $self->{host},
+                                      PeerPort => $self->{port},
+                                      @_);
+  return unless $fh;
+  $self->{fh} = $fh;
+}
+
+
 package From::Mailbox::Pop3;
 
 use strict;
@@ -1099,9 +1074,9 @@ sub new
   my $class = ref ($type) || $type;
   my $self = $class->SUPER::new (@_);
 
-  $self->{port} = "pop3" unless defined $self->{port};
-
   $self->connect;
+  return unless $self->{fh};
+
   $self->response_ok_p;
   return unless $self->login ($self->{user}, $self->{pass});
   return $self;
@@ -1197,7 +1172,8 @@ sub retrieve
   return unless $self->response_ok_p;
 
   my $fh = $self->{fh};
-  From::ONS::set_blocking_mode (0, $fh);
+  $fh->blocking (0);
+
   local $_;
   my $pos = 0;
   while (1)
@@ -1208,7 +1184,7 @@ sub retrieve
                && substr ($_, -4) =~ /^\.[\r\n]/m);
       $pos += $rsz if defined $rsz;
     }
-  From::ONS::set_blocking_mode (1, $fh);
+  $fh->blocking (1);
 
   s/\r\n/\n/gm;
 
@@ -1219,10 +1195,29 @@ sub retrieve
 }
 
 
+package From::Mailbox::Pop3s;
+
+use strict;
+
+our @ISA = qw(From::Mailbox::Pop3);
+
+sub connect
+{
+  my $self = shift;
+
+  $self->disconnect;
+  my $fh = From::Socket->connect_ssl (PeerHost => $self->{host},
+                                      PeerPort => $self->{port},
+                                      @_);
+  return unless $fh;
+  $self->{fh} = $fh;
+}
+
+
 package From::Mailbox::MboxFile;
 
 use strict;
-use Symbol;
+use IO::Handle;
 
 our @ISA = qw(From::NetCmd);
 
@@ -1239,7 +1234,7 @@ sub new
 
 sub xopen
 {
-  my $fh = gensym;
+  my $fh = IO::Handle->new;
 
   unless (open ($fh, $_[0], @_[1 .. $#_])) # filename arg must be expicit
     {
@@ -1380,6 +1375,17 @@ package From::Mailbox;
 use strict;
 use POSIX;
 
+my %protoclass =
+  ( imap4s => 'From::Mailbox::Imaps',     imap4 => 'From::Mailbox::Imap',
+    imap3s => 'From::Mailbox::Imaps',     imap3 => 'From::Mailbox::Imap',
+    imaps  => 'From::Mailbox::Imaps',     imap  => 'From::Mailbox::Imap',
+
+    pop3s  => 'From::Mailbox::Pop3s',     pop3  => 'From::Mailbox::Pop3',
+    pops   => 'From::Mailbox::Pop3s',     pop   => 'From::Mailbox::Pop3',
+
+    mbox   => 'From::Mailbox::MboxFile',  file  => 'From::Mailbox::MboxFile',
+  );
+
 sub new
 {
   my $class = shift;  # notused
@@ -1390,11 +1396,18 @@ sub new
   my %spec = _parse_spec ($loc);
 
   my $proto = lc ($spec{proto});
-  return _new_imap (%spec, @_) if $proto =~ /^imap4?$/;
-  return _new_pop3 (%spec, @_) if $proto =~ /^pop3?$/;
-  return _new_mbox (%spec, @_) if $proto eq 'file';
+  my $class = $protoclass{$proto};
 
-  ::_error ($proto, "unsupported protocol");
+  unless (defined $class)
+    {
+      ::_error ($proto, "unsupported protocol");
+      return;
+    }
+
+  ($spec{port} = lc $class) =~ s/^.*::// unless (defined $spec{port});
+  $spec{pass} = input_noecho () unless defined $spec{pass} || $class =~ /file$/i;
+  $spec{folder} = $spec{path} if defined $spec{path} && !defined $spec{folder};
+  return $class->new (%spec);
 }
 
 sub _parse_spec
@@ -1405,20 +1418,23 @@ sub _parse_spec
   my $loc;
 
   ($proto, $loc, $path) = ($1, $2, $3)
-    if m|^(.*?)://([^/]*)/?(.*)?|;
+    if m=^(.*?)://(.*?(?<!\\)(?>\\\\)*)(?:/(.*)?|$)=;
 
-  if ($loc =~ /^(.*?)@(.*)/)
+  if ($loc =~ /^(.*)@([^@]*)$/)
     {
       my ($userpass, $hostport) = ($1, $2);
-      ($user, $pass) = split (/:/, $userpass, 2);
-      ($host, $port) = split (/:/, $hostport, 2);
+      ($user, $pass) = split (/(?<!\\)(?>\\\\)*:/, $userpass, 2);
+      ($host, $port) = split (/(?<!\\)(?>\\\\)*:/, $hostport, 2);
     }
   else
     {
-      ($host, $port) = split (/:/, $loc, 2);
+      ($host, $port) = split (/(?<!\\)(?>\\\\)*:/, $loc, 2);
     }
 
-  s|(://.*?):.*?\@|$1:*\@|;  # strip password from url if present
+  # unescape \'d chars
+  map { s/\\(.)/$1/g } ($user, $pass, $host, $port);
+
+  s|(://.*?(?<!\\)(?>\\\\)*):.*\@|$1:*\@|;  # strip password from url if present
   my %data = ( url   => $_,
                proto => $proto,
                user  => (defined $user ? $user : $::opt{user}),
@@ -1429,36 +1445,10 @@ sub _parse_spec
              );
   map { delete $data{$_} unless defined $data{$_} && $data{$_} ne ""
       } keys %data;
-  ::_debug (sub { map { sprintf ("%s => %s", $_, $data{$_}) if $_ ne 'pass'
+  ::_debug (sub { map { sprintf ("%s => %s", $_,
+                                 ($_ eq 'pass' ? "*" : $data{$_}))
                       } sort keys %data });
   return wantarray ? %data : \%data;
-}
-
-sub _new_imap
-{
-  my %data = @_;
-
-  $data{port} = "imap"          unless defined $data{port};
-  $data{pass} = input_noecho () unless defined $data{pass};
-  $data{folder} = $data{path} if defined $data{path} && !defined $data{folder};
-  return From::Mailbox::Imap->new (%data);
-}
-
-sub _new_pop3
-{
-  my %data = @_;
-
-  $data{port} = "pop3"          unless defined $data{port};
-  $data{pass} = input_noecho () unless defined $data{pass};
-  return From::Mailbox::Pop3->new (%data);
-}
-
-sub _new_mbox
-{
-  my %data = @_;
-
-  $data{folder} = $data{path} if defined $data{path} && !defined $data{folder};
-  return From::Mailbox::MboxFile->new (%data);
 }
 
 sub input_noecho
@@ -2055,10 +2045,10 @@ from - summarize mailbox folder
                                        {-S|--show-date    TZ}
      {-c|--count-only}                 {--utc|--gmt}
      {-e|--envelope}
-                                       {-i|--me-match REGEX}
+                                       {-i|--me-match     REGEX}
      {-p|--parse}                      {-M|--match-header REGEX}
-     {-P|--no-parse}                   {-m|--match REGEX}
-                                       {-s|--sender REGEX}
+     {-P|--no-parse}                   {-m|--match        REGEX}
+                                       {-s|--sender       REGEX}
      {-u|--unread-only}
      {-n|--message-numbers N1,...}     {-U|--utf8|--utf-8}
                                        {--no-utf8|--no-utf-8}
@@ -2241,14 +2231,14 @@ S<--match-headers='^From|Sender$' --match=ADDR>.
 =item B<-U>, B<--user=>I<USER>
 
 Show headers of I<USER>'s messages.  This either selects that user's local
-mbox file or provides the username for network mailboxen whose IMAP or POP
+mbox file or provides the username for network mailboxen whose IMAP or POP3
 urls don't specify one.
 
 =item B<-u>, B<--unread-only>
 
 Only show information about unread messages.
 
-Some protocols (e.g. POP) do not store this information, so all messages
+Some protocols (e.g. POP3) do not store this information, so all messages
 will be treated as unread.
 But this is generally supported for IMAP and local mbox folders.
 
@@ -2319,9 +2309,17 @@ To specify an IMAP folder:
 
 =item imap://I<USER>:I<PASS>@I<HOST>:I<PORT>/I<MAILBOX>
 
+=item imaps://I<USER>:I<PASS>@I<HOST>:I<PORT>/I<MAILBOX>
+
 =back
 
 =back
+
+If C</> or C<:> characters form part of a username or password, they can be
+preceded with a backslash (C<\>) character to prevent them from being
+parsed as a field delimiter.  Since the C<@> character cannot be part of a
+host name, only the final occurrence is treated as a field delimiter.  So
+this character can be escaped as well, but it is not required.
 
 Fields may be unspecified, in which case:
 
@@ -2335,7 +2333,7 @@ Fields may be unspecified, in which case:
 
 =item * I<HOST> defaults to C<localhost>
 
-=item * I<PORT> defaults to C<143>
+=item * I<PORT> defaults to C<143> (imap) or C<993> (imaps)
 
 =item * I<MAILBOX> defaults to C<INBOX>
 
@@ -2357,9 +2355,13 @@ To specify a POP3 folder:
 
 =item pop3://I<USER>:I<PASS>@I<HOST>:I<PORT>/
 
+=item pop3s://I<USER>:I<PASS>@I<HOST>:I<PORT>/
+
 =back
 
 =back
+
+Escaping field-delimiting characters is available here as with IMAP URIs (see above).
 
 Fields may be unspecified, in which case:
 
@@ -2373,7 +2375,7 @@ Fields may be unspecified, in which case:
 
 =item * I<HOST> defaults to C<localhost>
 
-=item * I<PORT> defaults to C<143>
+=item * I<PORT> defaults to C<110> (pop3) or C<995> (pop3s)
 
 =back
 
@@ -2549,8 +2551,9 @@ C<MAIL> is only used if C<FROMMAIL> is not defined.
 
 =head1 BUGS
 
-Network connections over SSL/TLS, or using STARTTLS, are not yet supported,
-though you can currently work around this this using C<stunnel>.
+Encrypted network connections using STARTTLS are not yet supported,
+although TLS itself is available if your perl installation includes the
+C<IO::Socket::SSL> class, or the C<stunnel> program is available.
 
 Only plaintext password authentication schemes are currently supported.
 
