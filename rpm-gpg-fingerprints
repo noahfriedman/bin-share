@@ -1,0 +1,31 @@
+#!/usr/bin/env perl
+# rpm-gpg-fingerprints -- display fingerprint and key descriptions
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2014-01-25
+# Public domain
+
+# $Id$
+
+$^W = 1;
+use strict;
+
+sub main
+{
+  my @cmd = (qw(rpm --nodigest --nosignature -q --qf),
+             "%{provideversion}\x1%{providename}\n", 'gpg-pubkey');
+  open (RPM, "-|") || exec (@cmd);
+  local $/ = undef;
+  local $_ = <RPM>;
+  my @line = map { [split (/\x1/, $_)] } split (/\n/, $_);
+
+  map { my ($key, $val) = @$_;
+        $_->[0] =~ s=^.*?(........)-.*=$1=;
+        $_->[1] =~ s=gpg\((.*)\)=$1=;
+
+        print "$_->[0]\t$_->[1]\n"
+      } sort { $a->[1] cmp $b->[1] } @line;
+}
+
+main;
+
+# eof
