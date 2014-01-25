@@ -4,7 +4,7 @@
 # Created: 2001-01-11
 # Public domain.
 
-# $Id: mdf,v 1.13 2014/01/07 09:59:23 friedman Exp $
+# $Id: mdf,v 1.14 2014/01/12 05:17:34 friedman Exp $
 
 $^W = 1;  # enable warnings
 
@@ -390,6 +390,7 @@ sub parse_options
      "h|human-readable"         => sub { $opt{blocksize} = 'human' },
     );
 
+  $help ||= 0; # but if not set yet, we need to set it here now.
   pod2usage (-exitstatus => 1, -verbose => 0)         unless $succ;
   pod2usage (-exitstatus => 0, -verbose => $help - 1) if $help > 0;
 
