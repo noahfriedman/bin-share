@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.30 2012/11/05 22:09:25 friedman Exp $
+# $Id: rpm-pkg-list,v 1.31 2013/04/22 18:03:56 friedman Exp $
 
 # Commentary:
 # Code:
@@ -76,6 +76,9 @@ my %field_alias
 
 my %repo_fingerprint
   = (
+      'a668b376' => 'fedora-21',                'a0a7badb' => 'fedora-21-secondary',
+      '246110c1' => 'fedora-20',                'efe550f5' => 'fedora-20-secondary',
+      'fb4b18e6' => 'fedora-19',                'ba094068' => 'fedora-19-secondary',
       '22b3b81a' => 'fedora-18',                '34e166fa' => 'fedora-18-secondary',
       '1aca3465' => 'fedora-17',                'f8df67e6' => 'fedora-17-secondary',
       'a82ba4b7' => 'fedora-16',                '10d90a9e' => 'fedora-16-secondary',
@@ -97,6 +100,10 @@ my %repo_fingerprint
 
       'fd431d51' => 'rhel-6',
 
+      '6446d859' => 'rpmfusion-free-f21',       'a668b376' => 'rpmfusion-nonfree-f21',
+      'ae688223' => 'rpmfusion-free-f20',       'b5f29883' => 'rpmfusion-nonfree-f20',
+      '172ff33d' => 'rpmfusion-free-f19',       'cd30c86b' => 'rpmfusion-nonfree-f19',
+      '982e0a7c' => 'rpmfusion-free-f18',
       '8296fa0f' => 'rpmfusion-free-f17',       'd2382b83' => 'rpmfusion-nonfree-f17',
       'adf25d9c' => 'rpmfusion-free-f16',       '952f3af8' => 'rpmfusion-nonfree-f16',
       '00a4d52b' => 'rpmfusion-free-f15',       '6d0c8ec2' => 'rpmfusion-nonfree-f15',
