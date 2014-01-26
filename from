@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.69 2013/08/16 01:23:06 friedman Exp $
+# $Id: from,v 1.70 2014/01/19 23:24:45 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -41,6 +41,8 @@ our @optional_modules
      );
 
 our %opt;
+our %SSL_options;
+our ($SOCKLIB, $SOCKLIB_SSL);
 
 sub parse_options
 {
@@ -58,6 +60,9 @@ sub parse_options
 
       user          => default_user(),
       columns       => output_columns(),
+
+      c_timeout     => 10,
+      stunnel_prog  => $ENV{STUNNEL} || "stunnel",
     );
 
   my @interesting_default =
@@ -65,7 +70,7 @@ sub parse_options
 
   # Precedence for defs (highest->lowest): options, ~/.fromrc.pl, default
   my $fromrc = $ENV{FROMRCPL} || "$ENV{HOME}/.fromrc.pl";
-  eval { require "$fromrc" } if -f $fromrc;
+  eval { do "$fromrc" } if -f $fromrc;
   _error ($fromrc, $@) if ($@ ne "" && $@ !~ /not return a true value/);
 
   local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
@@ -99,7 +104,7 @@ sub parse_options
      'C|columns=i'              =>      \$opt{columns},
      'f|format=s'               => sub { $opt{format}      = interpolate ($_[1]) },
      'd|date-format=s'          => sub { $opt{date_format} = interpolate ($_[1]) },
-     'S|show-date=s'            =>      \$opt{tzdate},
+     'T|time-zone|tz=s'         =>      \$opt{tzdate},
      'utc|gmt'                  => sub { $opt{tzdate}      = 'UTC' },
 
      'i|me-match=s'             =>      \$opt{me_match_regexp},
@@ -108,8 +113,18 @@ sub parse_options
      's|sender=s'               => sub { $opt{header_regexp} = '^From|Sender$';
                                          $opt{match_regexp}  = $_[1] },
 
+     'S|starttls'               =>      \$opt{starttls},
+     'ssl-ca-file=s'            =>      \$SSL_options{SSL_ca_file},
+     'ssl-ca-path=s'            =>      \$SSL_options{SSL_ca_path},
+     'ssl-verify-hostname'      =>      \$opt{ssl_verify_hostname},
+     'ssl-no-verify'            =>      \$opt{ssl_no_verify},
+     'force-stunnel'            =>      \$opt{force_stunnel},
+     'stunnel-program=s'        =>      \$opt{stunnel_prog},
+
+     'connect-timeout|timeout'  =>      \$opt{c_timeout},
+
      'U|user=s'                 =>      \$opt{user},
-     'password=s'               =>      \$opt{pass}, # undoc, and don't use!
+     'password=s'               =>      \$opt{pass}, # don't use!
 
      'utf8|utf-8!'              =>      \$opt{utf8},
      'V|version',               =>      \$opt{show_version},
@@ -131,6 +146,8 @@ sub parse_options
   $opt{interesting} = (@{$opt{interesting}}
                        ? [map { split (/[\s,]+/, $_) } @{$opt{interesting}}]
                        : \@interesting_default);
+
+  ::_debug ({state=>1}, \%opt, \%SSL_options);
 }
 
 sub show_version
@@ -139,11 +156,11 @@ sub show_version
 
   if ($::debug)
     {
-      From::Socket::__init() unless $::SOCKLIB;
+      From::Socket::__init() unless $SOCKLIB;
 
       printf "\nUsing %s v%vd\n", $^X, $^V;
-      print "\nSocket library:       $::SOCKLIB\n";
-      print "Socket library (SSL): $::SOCKLIB_SSL\n";
+      print "\nSocket library:       $SOCKLIB\n";
+      print "Socket library (SSL): $SOCKLIB_SSL\n";
       print "\nOptional modules:\n";
       map { eval "use $_";
             printf("\t%-20s %s\n", $_, ($@ ? "no" : "yes"));
@@ -292,7 +309,7 @@ sub print_message
 
   print $envelope, "\n" if defined $envelope;
   my $header = From::Header->new ($msg->[0], $meta);
-  my $contents = $::opt{onelinep} ? 'contents1' : 'contents';
+  my $contents = $opt{onelinep} ? 'contents1' : 'contents';
   map { my ($name) = $header->names (lc $_);
         map { if ($name)
                 {
@@ -564,11 +581,19 @@ sub _debug
   my $fn  = $caller[3];
   $fn =~ s/.*:://;
 
+  my $state = 0;
+  if (@_ && ref $_[0] eq 'HASH' && exists $_[0]->{state})
+    {
+      $state = 1;
+      shift;
+    }
+
   my $args = join (", ", map { printobj ($_) } @_);
   $args =~ s/\r/\\r/mg;
   $args =~ s/\n/\\n/mg;
 
-  my $msg = sprintf ("** %s->%s (%s)\n", $pkg, $fn, $args);
+  my $fmt = $state ? "** %s::%s : %s\n" : "** %s->%s (%s)\n";
+  my $msg = sprintf ($fmt, $pkg, $fn, $args);
   print STDERR $msg;
   return;
 }
@@ -578,7 +603,7 @@ sub printobj
   my $obj = shift;
   my @list;
 
-  return undef unless (defined $obj);
+  return "undef" unless (defined $obj);
   my $ref = ref $obj;
 
   if ($ref eq 'ARRAY')
@@ -610,47 +635,72 @@ sub printobj
   return "\"$obj\"";
 }
 
+# For rc file convenience.
+sub command_output
+{
+  local $_ = `@_`;
+  chomp; # delete any trailing newline
+  return $_;
+}
+
 # Make it convenient for users to use this in their .fromrc.pl
 *strftime_iso8601 = \&From::Timestamp::strftime_iso8601;
 
 
 package From::Socket;
 
+use strict;
+use Symbol;
+
+my $stunnel_class = q(From::Socket::Stunnel);
+
 sub __init
 {
   for my $try (qw(IO::Socket::IP
                   IO::Socket::INET))
     {
-      $::SOCKLIB = $try;
+      $SOCKLIB = $try;
       eval "use $try";
       last unless $@;
     }
 
-  eval "use IO::Socket::SSL";
-  $::SOCKLIB_SSL = $@ ? q(From::Stunnel) : q(IO::Socket::SSL);
+  if ($opt{force_stunnel})
+    {
+      $SOCKLIB_SSL = $stunnel_class;
+    }
+  else
+    {
+      my $ssl_debug = $::debug ? "qw(debug3)" : "";
+      eval "use IO::Socket::SSL $ssl_debug";
+      $SOCKLIB_SSL = $@ ? $stunnel_class : q(IO::Socket::SSL);
+    }
 }
 
-sub mkpipe
+sub _connect_internal
 {
-  __init unless $::SOCKLIB;
-
-  my @pair = $::SOCKLIB->socketpair (&AF_UNIX, &SOCK_STREAM, &PF_UNSPEC);
-  map { $_->autoflush (1) } @pair;
-  return @pair;
-}
-
-sub connect_internal
-{
-  __init unless $::SOCKLIB;
-
+  my $self  = shift;
   my $class = shift;
-  my %p = @_;
 
-  ::_debug (sub { $class, \%p });
-  my $fh = $class->new ( Type => &SOCK_STREAM, @_);
+  my $fh;
+  my %p = (Type    => &SOCK_STREAM,
+           Timeout => $opt{c_timeout},
+           @_);
+
+  # There is nothing elegant about this at all.
+  if ($class eq $stunnel_class)
+    {
+      my %s = $self->_ssl_args;
+      ::_debug (sub { $class, \%s, \%p });
+      $fh = $class->new ( self => $self, %s, %p);
+    }
+  else
+    {
+      ::_debug (sub { $class, \%p });
+      $fh = $class->new (%p);
+    }
   unless ($fh)
     {
-      ::_error ($p{PeerHost}, $@);
+      ::_error ($self->{uri}, $@);
       return;
     }
 
@@ -661,25 +711,212 @@ sub connect_internal
 
 sub connect
 {
-  shift if $_[0] eq __PACKAGE__;
-  connect_internal ($::SOCKLIB, @_);
+  __init unless $SOCKLIB;
+
+  my $self = shift;
+  my $class = ($opt{starttls} && $SOCKLIB_SSL eq $stunnel_class
+               ? $SOCKLIB_SSL
+               : $SOCKLIB);
+
+  $self->_connect_internal ($class, @_);
 }
 
 sub connect_ssl
 {
-  shift if $_[0] eq __PACKAGE__;
+  __init unless $SOCKLIB;
 
-  # TODO: If $::SOCKLIB_SSL->can ('SSL_verify_mode'), should add
-  # certificate-checking flags here based on user config.
-  connect_internal ($::SOCKLIB_SSL,
-                    SSL_version => 'tlsv1',
-                    @_);
+  my $self = shift;
+  my $fh = $self->_connect_internal ($SOCKLIB_SSL, $self->_ssl_args, @_);
+  ::_debug (sub { ({state=>1},
+                   $fh->get_cipher,
+                   $fh->dump_peer_certificate,
+                  ) if $fh->can ('get_cipher')
+                }) if $fh;
+  $self->{tls_started} = 1 if $fh;
+  return $fh;
+}
+
+sub starttls
+{
+  my $self = shift;
+  return 1 if $self->{tls_started};
+
+  if ($SOCKLIB_SSL->can ('start_SSL'))
+    {
+      my %sslargs = ($self->_ssl_args);
+      ::_debug ({state=>1}, 'STARTTLS', \%sslargs);
+      unless ($SOCKLIB_SSL->start_SSL ($self->{fh}, %sslargs))
+        {
+          ::_error ($self->{uri}, $SOCKLIB_SSL->errstr ());
+          $self->disconnect;
+          return 0;
+        }
+      $self->{tls_started} = 1;
+    }
+}
+
+sub mkpipe
+{
+  __init unless $SOCKLIB;
+
+  # use &fn so that these do not need to be defined at compile-time.
+  my @pair = $SOCKLIB->socketpair (&AF_UNIX, &SOCK_STREAM, &PF_UNSPEC);
+  map { $_->autoflush (1) } @pair;
+  return @pair;
+}
+
+sub _ssl_args
+{
+  my $self = shift;
+
+  (my $proto = $self->{proto}) =~ s=s$==;
+
+  my %param = (SSL_version         => 'TLSv1',
+               SSL_verify_mode     => ($opt{ssl_no_verify} ? 0 : 2|4),
+               SSL_verify_callback => sub { $self->_ssl_verifycb (@_) },
+               %SSL_options,
+              );
+
+  unless ($param{SSL_ca_file})
+    {
+      my $cafile = $self->_ssl_cafile;
+      $param{SSL_ca_file} = $cafile if $cafile;
+    }
+
+  unless ($param{SSL_ca_path})
+    {
+      if ($param{SSL_ca_file})
+        {
+          ($param{SSL_ca_path} = $param{SSL_ca_file}) =~ s=/+[^/]*$=/=;
+        }
+      else
+        {
+          my @cadirs = $self->_ssl_certdirs;
+          $param{SSL_ca_path} = $cadirs[0] if @cadirs;
+        }
+    }
+  return %param;
+}
+
+sub _ssl_certdirs
+{
+  my $self = shift;
+
+  my @found;
+  map { push @found, $_ if -d $_
+      } qw(/etc/pki/tls/certs
+           /etc/ssl/certs
+           /etc/ssl );
+  return @found;
+}
+
+sub _ssl_cafile
+{
+  my $self = shift;
+
+  map { my $dir = $_;
+        map { return "$dir/$_" if -r "$dir/$_"
+            } qw(ca-bundle.crt
+                 ca-root.crt
+                 cert.pem );
+      } (@_ || $self->_ssl_certdirs);
+  return; # void
+}
+
+# Callback
+sub _ssl_verifycb
+{
+  my $self = shift;
+  my ($valid, $certstore_addr, $attrib_str, $liberrstr, $cert_addr) = @_;
+  ::_debug ({state=>1}, \@_);
+
+  return 1      if $opt{ssl_no_verify};
+  return $valid if $valid || !$opt{ssl_verify_hostname};
+
+   my $fh    = $self->{fh};
+  (my $proto = $self->{proto}) =~ s=s$==;
+
+  my $vfn = qualify_to_ref (q(verify_hostname_of_cert), ref $fh || $SOCKLIB_SSL);
+  return &{*$vfn{CODE}} ($self->{host}, $cert_addr, $proto);
+}
+
+
+package From::Socket::Stunnel;
+
+use strict;
+use POSIX qw(:sys_wait_h);
+
+our @ISA = qw(From::Socket);
+
+*new = *connect; # symbol alias
+
+sub connect
+{
+  my $class = shift;
+  my %param = @_;
+
+  my $self = $param{self};
+
+  local $^F = 255;
+  my ($rc, $wc) = $class->mkpipe ();
+  my ($rh, $wh) = $class->mkpipe ();
+
+  $SIG{CHLD} = q(IGNORE);
+  my $pid = fork;
+  unless (defined $pid)
+    {
+      ::_error ('fork', $!);
+      exit (1);
+    }
+  if ($pid) # parent
+    {
+      close ($rc);
+      my @conf = ("foreground     = no",
+                  "syslog         = no",
+
+                  "client         = yes",
+                  "connect        = $param{PeerHost}:$param{PeerPort}",
+                  "TIMEOUTconnect = $param{Timeout}",
+                  "compression    = deflate",
+
+                  "ciphers        = HIGH",
+                  "sslVersion     = $param{SSL_version}",
+                 );
+      push @conf, "CApath         = $param{SSL_ca_path}" if $param{SSL_ca_path};
+      push @conf, "CAfile         = $param{SSL_ca_file}" if $param{SSL_ca_file};
+      push @conf, ("debug         = debug",
+                   "foreground    = yes", # override; diagnostics on stderr
+                  ) if $::debug;
+      if ($opt{starttls} && $self->{proto} !~ /s$/)
+        {
+          push @conf, "protocol = $self->{proto}";
+          # Not sure if this is the right choice.
+          push @conf, "TIMEOUTbusy = $param{Timeout}";
+        }
+
+      map { ::_debug ({state=>1}, $_);
+            print $wc $_, "\n"
+          } @conf;
+      map { close ($_) } ($rc, $wc, $wh);
+    }
+  else
+    {
+      open (STDIN,  "<&=" . fileno ($wh));
+      open (STDOUT, ">&=" . fileno ($wh));
+      map { close ($_) } ($rh, $wh, $wc);
+      exec ($opt{stunnel_prog}, "-fd", fileno ($rc))
+        || die "$progname: exec $opt{stunnel}: $!\n";
+    }
+  $self->{tls_started} = 1 if $opt{starttls};
+  return $rh;
 }
 
 
 package From::NetCmd;
 
 use strict;
+
+our @ISA = qw(From::Socket);
 
 sub new
 {
@@ -694,7 +931,7 @@ sub new
     {
       $self->{$key} = $val;
     }
-  $self->{host} = "localhost" unless defined $self->{host};
+  $self->{host} ||= "localhost";
   return $self;
 }
 
@@ -703,7 +940,7 @@ sub connect
   my $self = shift;
 
   $self->disconnect;
-  my $fh = From::Socket->connect (PeerHost => $self->{host},
+  my $fh = $self->SUPER::connect (PeerHost => $self->{host},
                                   PeerPort => $self->{port},
                                   @_);
   return unless $fh;
@@ -713,77 +950,32 @@ sub connect
 sub disconnect
 {
   my $self = shift;
-  return unless (exists $self->{fh});
+  my $fh = $self->{fh};
+  return unless $fh;
 
-  ::_debug();
-  shutdown ($self->{fh}, 2);  # 2 == SHUTDOWN_BOTH
+  ::_debug ($self->{uri});
+  $fh->shutdown (2); # 2 == SHUTDOWN_BOTH
+  $fh->close;
   delete $self->{fh};
 }
 
 sub command
 {
   my $self = shift;
-  { my $args = \@_; ::_debug (sub { @$args }) }
+  { my $args = \@_;
+    ::_debug (sub { if (@$args == 4
+                        && lc $args->[0] eq 'auth'
+                        && lc $args->[1] eq 'login')
+                      { my @elide = @$args; $elide[3] = '*'; @elide }
+                    elsif (@$args == 2 && lc $args->[0] eq 'pass')
+                      { my @elide = @$args; $elide[1] = '*'; @elide }
+                    else { @$args }
+                  })
+  }
 
-  my $cmd = join (" ", @_);
-  $cmd .= "\r\n";
-  # send/recv doesn't work properly with IO::Socket::SSL (as of perl 5.14)
-  #send ($self->{fh}, $cmd, 0);
-  $self->{fh}->syswrite ($cmd);
-}
-
-
-package From::Stunnel;
-
-use strict;
-use POSIX qw(:sys_wait_h);
-
-*new = *connect; # symbol alias
-
-sub connect
-{
-  my $class = shift;
-  my %param = @_;
-
-  local $^F = 255;
-  my ($rc, $wc) = From::Socket::mkpipe ();
-  my ($rh, $wh) = From::Socket::mkpipe ();
-
-  my $pid = fork;
-  unless (defined $pid)
-    {
-      ::_error ('fork', $!);
-      exit (1);
-    }
-  if ($pid) # parent
-    {
-      # Check to see if it failed immediately
-      select (undef, undef, undef, .05); # usleep
-      if (waitpid ($pid, WNOHANG) == -1)
-        {
-          map { close ($_) } ($rc, $wc, $rh, $wh);
-          return;
-        }
-
-      close ($rc);
-      map { print $wc $_, "\n" }
-        ("foreground = no",
-         "syslog = no",
-         "client = yes",
-         "compression = deflate",
-         "connect = $param{PeerHost}:$param{PeerPort}",
-        );
-      map { close ($_) } ($rc, $wc, $wh);
-    }
-  else
-    {
-      open (STDIN,  "<&=" . fileno ($wh));
-      open (STDOUT, ">&=" . fileno ($wh));
-      map { close ($_) } ($rh, $wh, $wc);
-      exec ("stunnel", "-fd", fileno ($rc))
-        || die "$progname: exec stunnel: $!\n";
-    }
-  return $rh;
+  my $fh = $self->{fh};
+  return unless $fh;
+  $fh->write (join (" ", @_) . "\r\n");
 }
 
 
@@ -805,9 +997,18 @@ sub new
   return unless $self->{fh};
 
   $self->response_ok_p ("*");
+  return if ($opt{starttls} && !$self->starttls);
   return unless $self->login ($self->{user}, $self->{pass});
   $self->message_count;  # sets folder
   return $self;
+}
+
+sub starttls
+{
+  my $self = shift;
+  return 1 if $self->{tls_started};
+  return unless $self->command_ok_p ("STARTTLS", "STARTTLS");
+  $self->SUPER::starttls ();
 }
 
 # If called with no arguments, return last response.
@@ -831,6 +1032,7 @@ sub response
   while (1)
     {
       local $_ = <$fh>;
+      last unless defined $_;
       push @lines, $_;
       if (/^\* .*{(\d+)}\r?\n$/)
         {
@@ -838,8 +1040,9 @@ sub response
           my $pos = 0;
           while ($pos < $cont)
             {
-              my $read = read ($fh, $_, $cont - $pos, $pos);
-              $pos += $read;
+              my $read = $fh->read ($_, $cont - $pos, $pos);
+              last unless defined $read;
+              $pos += $read if defined $read;
             }
           push @lines, $wantarray ? split (/(\n)/, $_, -1) : $_ ;
         }
@@ -879,7 +1082,7 @@ sub login
 
   $self->disconnect;
   my @response = $self->response;
-  ::_error ($self->{url}, @response);
+  ::_error ($self->{uri}, @response);
   return;
 }
 
@@ -970,8 +1173,8 @@ sub envelope
   my $rawdate = $1 if $result =~ /internaldate "(.*?)"/i; # delivery date
   my $addr    = $1 if $result =~ /^Return-Path:\s+<(.*?)>/m;
 
-  local $::opt{date_format} = "%a %b %e %H:%M:%S %Y";
-  local $::opt{tzdate}      = 'sender';
+  local $opt{date_format} = "%a %b %e %H:%M:%S %Y";
+  local $opt{tzdate}      = 'sender';
   my $date = From::Header::_parse_date ($rawdate);
 
   return "From $addr  $date";
@@ -1053,7 +1256,7 @@ sub connect
   my $self = shift;
 
   $self->disconnect;
-  my $fh = From::Socket->connect_ssl (PeerHost => $self->{host},
+  my $fh = $self->SUPER::connect_ssl (PeerHost => $self->{host},
                                       PeerPort => $self->{port},
                                       @_);
   return unless $fh;
@@ -1078,8 +1281,16 @@ sub new
   return unless $self->{fh};
 
   $self->response_ok_p;
+  return if $opt{starttls} && $self->{proto} eq 'pop3' && !$self->starttls;
   return unless $self->login ($self->{user}, $self->{pass});
   return $self;
+}
+
+sub starttls
+{
+  my $self = shift;
+  return unless $self->command_ok_p ("STLS");
+  $self->SUPER::starttls ();
 }
 
 sub response
@@ -1116,7 +1327,7 @@ sub login
                && $self->command_ok_p ("PASS", $pass));
 
   $self->disconnect;
-  ::_error ($self->{url}, $self->{response});
+  ::_error ($self->{uri}, $self->{response});
   return;
 }
 
@@ -1178,7 +1389,7 @@ sub retrieve
   my $pos = 0;
   while (1)
     {
-      my $rsz = read ($fh, $_, 1024, $pos);
+      my $rsz = $fh->read ($_, 1024, $pos);
       last if (!defined $rsz
                && length $_ > 4
                && substr ($_, -4) =~ /^\.[\r\n]/m);
@@ -1206,7 +1417,7 @@ sub connect
   my $self = shift;
 
   $self->disconnect;
-  my $fh = From::Socket->connect_ssl (PeerHost => $self->{host},
+  my $fh = $self->SUPER::connect_ssl (PeerHost => $self->{host},
                                       PeerPort => $self->{port},
                                       @_);
   return unless $fh;
@@ -1246,21 +1457,9 @@ sub xopen
 
 sub file_contents
 {
-  my $file = shift;
-
-  my $fh = xopen ($file);
-  return unless $fh;
-
-  local $_;
-  my $pos = 0;
-  while (1)
-    {
-      my $rsz = read ($fh, $_, -s $fh, $pos);
-      last if $rsz == 0;
-      $pos += $rsz;
-    }
-  close ($fh);
-  return $_;
+  my $fh = xopen ($_[0]) || return;
+  local $/ = undef;
+  scalar <$fh>;
 }
 
 sub analyze
@@ -1432,13 +1631,13 @@ sub _parse_spec
     }
 
   # unescape \'d chars
-  map { s/\\(.)/$1/g } ($user, $pass, $host, $port);
+  map { s/\\(.)/$1/g if defined $_ } ($user, $pass, $host, $port);
 
-  s|(://.*?(?<!\\)(?>\\\\)*):.*\@|$1:*\@|;  # strip password from url if present
-  my %data = ( url   => $_,
+  s|(://.*?(?<!\\)(?>\\\\)*):.*\@|$1:*\@|;  # strip password from uri if present
+  my %data = ( uri   => $_,
                proto => $proto,
-               user  => (defined $user ? $user : $::opt{user}),
-               pass  => (defined $pass ? $pass : $::opt{pass}),
+               user  => (defined $user ? $user : $opt{user}),
+               pass  => (defined $pass ? $pass : $opt{pass}),
                host  => $host,
                port  => $port,
                path  => $path,
@@ -1573,7 +1772,7 @@ sub fromto
   my ($self, $allp) = @_;
   my $from = join (", ", $self->contents ('from', $allp));
 
-  my $me_re = $::opt{me_match_regexp};
+  my $me_re = $opt{me_match_regexp};
   if ($me_re && $from =~ /$me_re/o)
     {
       my @to = map { $self->contents ($_, 1) } (qw(to cc newsgroups));
@@ -1676,7 +1875,7 @@ sub allparsed1
 
 sub _parse_subject
 {
-  return $::opt{utf8} ? _parse_rfc1522 ($_) : $_;
+  return $opt{utf8} ? _parse_rfc1522 ($_) : $_;
 }
 
 # Try to extract real name from From: line when possible.
@@ -1696,7 +1895,7 @@ sub _parse_address
   s/^\s+//;
   s/\s+$//;
 
-  return _parse_rfc1522 ($_) if $::opt{utf8};
+  return _parse_rfc1522 ($_) if $opt{utf8};
   return $_ unless /=\?.*?\?.\?.*?\?=/;
   # If not utf8 but real name is rfc1522-encoded, return address.
   $_ = $_[0];
@@ -1723,7 +1922,7 @@ sub _parse_rfc1522
       my $s = (  $encoding eq 'q' ? qp_decode     ($4)
                : $encoding eq 'b' ? base64_decode ($4)
                : "$4");
-      if ($::opt{utf8})
+      if ($opt{utf8})
         {
           eval { $s = decode ($charset, $s); # convert to utf8
                  utf8::encode ($s);          # convert back to bytes for now
@@ -1754,24 +1953,24 @@ sub _parse_date
   my @tminfo;
   {
     local $ENV{TZ};
-    if (! $::opt{tzdate}) {}
-    elsif (lc $::opt{tzdate} eq 'local' || lc $::opt{tzdate} eq 'tz') {}
-    elsif (lc $::opt{tzdate} eq 'sender' && $offset)
+    if (! $opt{tzdate}) {}
+    elsif (lc $opt{tzdate} eq 'local' || lc $opt{tzdate} eq 'tz') {}
+    elsif (lc $opt{tzdate} eq 'sender' && $offset)
       {
         $offset =~ s/(\d\d)(\d\d)$/$1:$2/;
         $offset =~ y/+-/-+/;
         $ENV{TZ} = "UTC" . $offset;
       }
-    elsif ($::opt{tzdate})
+    elsif ($opt{tzdate})
       {
-        $ENV{TZ} = $::opt{tzdate};
+        $ENV{TZ} = $opt{tzdate};
       }
     tzset (); # multithreaded perl 5.8.0 requires this
     @tminfo = localtime ($tm);
   }
   tzset();    # restore timezone cache for perl 5.8.0
 
-  my $fmt = $::opt{date_format};
+  my $fmt = $opt{date_format};
   $fmt = &$fmt (@tminfo) if ref $fmt eq 'CODE';
   $_ = strftime ($fmt, @tminfo);
   return $_;
@@ -2039,24 +2238,31 @@ from - summarize mailbox folder
 
 =head1 SYNOPSIS
 
-     {-h|--help|--usage}               {-C|--columns      COLS}
-     {-D|--debug}                      {-f|--format       FMT}
-     {-W|--warnings}                   {-d|--date-format  FMT}
-                                       {-S|--show-date    TZ}
-     {-c|--count-only}                 {--utc|--gmt}
+     {-h|--help|--usage}                   {-C|--columns      COLS}
+     {-D|--debug}                          {-f|--format       FMT}
+     {-W|--warnings}                       {-d|--date-format  FMT}
+                                           {-T|--time-zone    TZ}
+     {-c|--count-only}                     {--utc|--gmt}
      {-e|--envelope}
-                                       {-i|--me-match     REGEX}
-     {-p|--parse}                      {-M|--match-header REGEX}
-     {-P|--no-parse}                   {-m|--match        REGEX}
-                                       {-s|--sender       REGEX}
+                                           {-i|--me-match     REGEX}
+     {-p|--parse}                          {-M|--match-header REGEX}
+     {-P|--no-parse}                       {-m|--match        REGEX}
+                                           {-s|--sender       REGEX}
      {-u|--unread-only}
-     {-n|--message-numbers N1,...}     {-U|--utf8|--utf-8}
-                                       {--no-utf8|--no-utf-8}
+     {-n|--message-numbers N1,...}         {-U|--utf8|--utf-8}
+                                           {--no-utf8|--no-utf-8}
      {-1|--one-line-headers}
-     {-2|--multi-line-headers}         {--user USER}
-     {-a|--all-headers}
+     {-2|--multi-line-headers}             {--user USER}
+     {-a|--all-headers}                    {--pass PASS} (don't use this)
      {-I|--interesting-headers HDRS,...}
      {-E|--extract [LINES]}
+
+     {-S|--starttls}
+     {--ssl-verify-hostname}               {--ssl-ca-file     FILE}
+     {--ssl-no-verify}                     {--ssl-ca-path     DIR}
+     {--force-stunnel}                     {--stunnel-program PROGRAM}
+
+     {--connect-timeout SECONDS}
 
      [folder ...]
 
@@ -2066,7 +2272,11 @@ from - summarize mailbox folder
 
 Long-format options may be abbreviated as long as the result is not ambiguous.
 
-=over 8
+=head2 FORMATTING OPTIONS
+
+=over 2
+
+=over 4
 
 =item B<-1>, B<--first-header-line>
 
@@ -2099,12 +2309,6 @@ Only count the number of messages that would be displayed,
 without displaying any other information about them.
 E.g. B<-cu> would print the number of unread messages you have.
 
-=item B<-D>, B<--debug>
-
-Show protocol messages and replies, and some parsing results.
-
-Warning: this may reveal passwords.
-
 =item B<-d>, B<--date-format>=I<FMT>
 
 Format of the %Date field in summary output format (see B<--format>).
@@ -2134,11 +2338,6 @@ This option only makes sense for local folders and, to a lesser degree, imap fol
 Use I<FMT> as the output format.
 See the section L</"OUTPUT FORMAT"> for details.
 The default is S<"%-3{FMSGNO} %-20.20{FROMTO}  %-0.32Date  %Subject\n">
-
-=item B<-h>, B<--help>
-
-Usage information.
-May be repeated 1-3 times for more verbosity.
 
 =item B<-I>, B<--interesting-headers=>I<H1,H2,...>
 
@@ -2170,21 +2369,21 @@ matching the regexp specified with B<--match-headers>.
 Only display specific message numbers.  This option can be specified
 multiple times and ranges are supported.  For example:
 
-=over 10
+=over 2
 
-=item C<1,4,9>
+=item * C<1,4,9>
 
 Display messages 1, 4, and 9.
 
-=item C<3-5>
+=item * C<3-5>
 
 Display messages 3, 4, and 5.
 
-=item C<10->
+=item * C<10->
 
 Skip messages 1-9.
 
-=item C<-10>
+=item * C<-10>
 
 Display the last 10 messages.
 
@@ -2199,7 +2398,7 @@ This is the default unless extracting message bodies.
 
 Do not do fancy parsing of the C<From>, C<Subject>, and C<Date> fields.
 
-=item B<-S>, B<--show-date=>I<TZ>
+=item B<-T>, B<--time-zone=>I<TZ>
 
 By default, the C<Date> header is parsed and re-formatted per the
 B<--date-format> option, but there are at least two useful time references:
@@ -2220,7 +2419,7 @@ C<TZ> environment variable.  For example, if the parameter is given as
 C<US/Eastern>, all dates will be displayed in United States Eastern
 Standard/Daylight time.
 
-The options B<--utc> and B<--gmt> are shorthand for S<--show-date=UTC>.
+The options B<--utc> and B<--gmt> are shorthand for S<--time-zone=UTC>.
 
 =item B<-s>, B<--sender=>I<ADDR>
 
@@ -2260,22 +2459,106 @@ would decode to
 
 Do not do any charset conversion or decoding of rfc1522-format headers.
 
+=back
+
+=back
+
+=head2 CONNECTION AND SSL OPTIONS
+
+=over 2
+
+=over 4
+
+=item B<--timeout>=I<seconds>, B<--connect-timeout>=I<seconds>    (default: 10)
+
+Abort if connection cannot be established within this many seconds.
+(See the L</"BUGS"> section for caveats about this.)
+
+=item B<-S>, B<--starttls>
+
+Initiate encryption after establishing plain connection but before login.
+This option has no effect if connecting via C<imaps> or C<pops>,
+which establish encryption immediately.
+
+=item B<--ssl-ca-file>=I<certificate_file>
+
+Location of CA (Certificate Authority) bundle.
+If not specified, a few typical locations will be searched.
+
+=item B<--ssl-ca-path>=I<certificate_directory>
+
+Location of certificate files.
+If not specified, a few typical locations will be searched.
+
+=item B<--ssl-verify-hostname>
+
+If server certificate is not signed by recognized authority, compare the
+subject CN (Common Name) and matching aliases against the server name or
+address, and accept the certificate if they match.
+
+This is less secure than verification via the certificate signature chain.
+Use of this option is not recommended.
+
+=item B<--ssl-no-verify>
+
+Do no certificate verification at all; just encrypt the connection.
+Use of this option is discouraged.
+
+=item B<--force-stunnel>
+
+Use the C<stunnel> program for an encrypted tunnel even if the native SSL
+interface is available to this program.
+
+=item B<--stunnel-program>=I<program_name>    (default: C<stunnel>)
+
+Name of the stunnel program to call.  This can be a fully-qualified name or
+a relative name that will be searched for in the user's PATH.
+
+=back
+
+=back
+
+=head2 DEBUGGING AND DIAGNOSTIC OPTIONS
+
+=over 2
+
+=over 4
+
+=item B<-h>, B<--help>
+
+Usage information.
+May be repeated 1-3 times for more verbosity.
+
 =item B<-V>, B<--version>
 
 Display the version number of this program.
+
+Combined with the B<--debug> option, display extra information about SSL
+libraries and optional modules used.
 
 =item B<-W>, B<--warnings>
 
 Enable Perl internal warnings.
 This is mainly for debugging.
 
+=item B<-D>, B<--debug>
+
+Show protocol messages and replies, and some parsing results.
+
+Warning: while passwords are elided from the output in every anticipated
+case, it is possible that one may be displayed.
+
+=back
+
 =back
 
 =head1 DESCRIPTION
 
-This utility prints out a summary of the messages in your mailbox file to
-show you who your mail is from.  In addition to supporting local
-/var/mail/I<user> mbox files, POP3 and IMAP4 folders are supported as well.
+This utility prints out a summary of the messages in a mailbox to show you
+who your mail is from.  Local mbox files, POP3, and IMAP4 folders can be
+specified.  Encryption with SSL, including STARTTLS support, is available
+if your perl installation includes the C<IO::Socket::SSL> class or the
+C<stunnel> program is available.
 
 There are essentially two modes of operation: summary and extraction.
 
@@ -2290,7 +2573,7 @@ In B<--extract> mode, a portion or entirety of each message is displayed.
 No semantic parsing of headers or MIME format bodies is currently done,
 e.g. base64-encoded text will not be converted to readable form.
 However, raw characters I<are> converted from non-UTF8 character sets to
-UTF8 if the B<--utf8} option is enabled.
+UTF8 if the B<--utf8> option is enabled.
 
 To download the complete contents of an imap folder to a local mbox file,
 the following command could be issued:
@@ -2384,6 +2667,22 @@ Fields may be unspecified, in which case:
 Currently, only the C<PASS> authentication method is supported.
 
 If no password is specified, you will be prompted to enter one.
+
+=head2 MBOX
+
+To specify a local MBOX folder:
+
+=over 4
+
+=over 4
+
+=item file://path/to/mbox
+
+=item /path/to/mbox
+
+=back
+
+=back
 
 =head1 OUTPUT FORMAT
 
@@ -2551,16 +2850,18 @@ C<MAIL> is only used if C<FROMMAIL> is not defined.
 
 =head1 BUGS
 
-Encrypted network connections using STARTTLS are not yet supported,
-although TLS itself is available if your perl installation includes the
-C<IO::Socket::SSL> class, or the C<stunnel> program is available.
-
-Only plaintext password authentication schemes are currently supported.
+Only plaintext authentication schemes are currently supported.
 
 MIME entities are not parsed.
 In extraction mode, for example, it would be useful to have the option to
 display only the text/plain version of multipart/alternative messages,
 or to decode quoted-printable and base64 text.
+
+The C<IO::Socket::SSL> class does not implement connection timeouts as of
+perl v5.14.  I don't know why.
+
+The Pop3 support is relatively primitive.  This isn't likely to change,
+since this protocol is barely worth supporting at all.
 
 =head1 SEE ALSO
 
@@ -2574,11 +2875,11 @@ Noah Friedman <friedman@splode.com>
 
 The C<from> command originally appeared in 3.0BSD.
 
-This Perl implementation is a completely new rewrite inspired by a
-never-published C implementation of Brian Fox's in 1990 for the GNU
-Project.
+This Perl-based implementation drew much inspiration from a
+C implementation written by Brian Fox in 1990 for the GNU Project,
+which they never released.
 
-Support for the C<{FROMTO}> virtual header field was contributed
-by Jonathan Kamens <jik@kamens.brookline.ma.us>.
+Support for the C<{FROMTO}> virtual header field was originally contributed
+by Jonathan Kamens <jik@kamens.us>.
 
 =cut
