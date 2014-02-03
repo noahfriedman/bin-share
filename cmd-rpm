@@ -4,7 +4,7 @@
 # Created: 2014-01-05
 # Public domain
 
-# $Id$
+# $Id: cmd-rpm,v 1.1 2014/01/05 21:26:18 friedman Exp $
 
 # Commentary:
 # Code:
@@ -18,13 +18,16 @@ sub uniq_PATH
   my @path = split (/:/, $_ || $ENV{PATH});
   my (@npath, %seen);
 
-  map { $_ = "." if $_ eq "";
-        my @st = stat $_;
-        my $id = "$st[0]:$st[1]";
+  for my $d (@path)
+    {
+      $d = "." if $d eq "";
+      my @st = stat $d;
+      next unless @st;
 
-        push @npath, $_ unless exists $seen{$id};
-        $seen{$id} = undef;
-      } @path;
+      my $id = "$st[0]:$st[1]";
+      push @npath, $d unless exists $seen{$id};
+      $seen{$id} = undef;
+    }
 
   return @npath;
 }
