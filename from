@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.70 2014/01/19 23:24:45 friedman Exp $
+# $Id: from,v 1.71 2014/01/26 19:49:00 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "2.1.0";
+our $version = "2.2.0";
 
 # Optional perl modules that will improve the functionality of this program:
 our @optional_modules
@@ -49,20 +49,24 @@ sub parse_options
   my $help = -1;
 
   %opt =
-    ( format        => "%-3{FMSGNO} %-20.20{FROMTO}  %-0.32Date  %Subject\n",
-      date_format   => sub { strftime_iso8601 ("%Y-%m-%d  %H:%M:%S%z", @_) },
-      tzdate        => 'sender',
-      parsep        => 1,
-      onelinep      => 1,
+    ( format          => "%-3{FMSGNO} %-20.20{FROMTO}  %-0.32Date  %Subject\n",
+      date_format     => sub { strftime_iso8601 ("%Y-%m-%d  %H:%M:%S%z", @_) },
+      tzdate          => 'sender',
+      parsep          => 1,
+      onelinep        => 1,
 
-      header_regexp => '^(?:Resent-)?(?:Sender|From|To|Cc|Subject)$',
-      interesting   => [],
+      header_regexp   => '^(?:Resent-)?(?:Sender|From|To|Cc|Subject)$',
+      interesting     => [],
+      message_numbers => [],
 
-      user          => default_user(),
-      columns       => output_columns(),
+      user            => default_user(),
+      columns         => output_columns(),
 
-      c_timeout     => 10,
-      stunnel_prog  => $ENV{STUNNEL} || "stunnel",
+      c_timeout       => 10,
+      prefer_stunnel  => 1,
+      stunnel_prog    => $ENV{STUNNEL} || "stunnel",
+
+      batch_size      => 64,  # set to 0 to retrieve all at once
     );
 
   my @interesting_default =
@@ -80,7 +84,7 @@ sub parse_options
 
   my $succ = $parser->getoptions
     ('h|help|usage+'            =>      \$help,
-     'D|debug!'                 =>      \$::debug,
+     'D|debug+'                 =>      \$::debug,
      'W|warnings!'              =>      \$^W,
 
      'c|count-only'             =>      \$opt{countp},
@@ -90,7 +94,8 @@ sub parse_options
      'P'                        => sub { $opt{parsep} = 0 },
 
      'u|unread-only'            =>      \$opt{unread_only},
-     'n|message-numbers=s'      => sub { $opt{message_numbers} .= $_[1] . ' '},
+     'n|message-numbers=s@'     =>       $opt{message_numbers}, #arrayraf
+     'batch-size|batch=i'       =>      \$opt{batch_size},
 
      '1|one-line-headers'       =>      \$opt{onelinep},
      '2|multi-line-headers'     => sub { $opt{onelinep}      = 0 },
@@ -103,7 +108,7 @@ sub parse_options
 
      'C|columns=i'              =>      \$opt{columns},
      'f|format=s'               => sub { $opt{format}      = interpolate ($_[1]) },
-     'd|date-format=s'          => sub { $opt{date_format} = interpolate ($_[1]) },
+     'd|date-format:s'          => sub { $opt{date_format} = interpolate ($_[1]) },
      'T|time-zone|tz=s'         =>      \$opt{tzdate},
      'utc|gmt'                  => sub { $opt{tzdate}      = 'UTC' },
 
@@ -118,11 +123,11 @@ sub parse_options
      'ssl-ca-path=s'            =>      \$SSL_options{SSL_ca_path},
      'ssl-verify-hostname'      =>      \$opt{ssl_verify_hostname},
      'ssl-no-verify'            =>      \$opt{ssl_no_verify},
-     'force-stunnel'            =>      \$opt{force_stunnel},
+     'prefer-perl-ssl!'         => sub { $opt{prefer_stunnel} = ! $_[1] },
+     'prefer-stunnel!'          => sub { $opt{prefer_stunnel} = $_[1] },
      'stunnel-program=s'        =>      \$opt{stunnel_prog},
-
      'connect-timeout|timeout'  =>      \$opt{c_timeout},
-
+     'prefer-socklib=s'         => sub { $opt{prefer_socklib} .= $_[1] . ' '},
      'U|user=s'                 =>      \$opt{user},
      'password=s'               =>      \$opt{pass}, # don't use!
 
@@ -142,6 +147,14 @@ sub parse_options
   $opt{pass}            = $ENV{FROMPASS}     unless defined $opt{pass};
   $opt{me_match_regexp} = default_me_match() unless defined $opt{me_match_regexp};
   $opt{format_parsed}   = parse_format_string ($opt{format});
+  {
+    my @hdata = @{$opt{format_parsed}};
+    shift @hdata;
+    # This is different from wanted_headers() because this includes literal
+    # pseudoheader names, but not the actual headers added in order to
+    # implement pseudoheaders.
+    $opt{literal_header} = { map { $_ => 1 } @hdata };
+  }
 
   $opt{interesting} = (@{$opt{interesting}}
                        ? [map { split (/[\s,]+/, $_) } @{$opt{interesting}}]
@@ -156,7 +169,9 @@ sub show_version
 
   if ($::debug)
     {
-      From::Socket::__init() unless $SOCKLIB;
+      net_init();
+      local $SOCKLIB     = $SOCKLIB     || "(none loaded)";
+      local $SOCKLIB_SSL = $SOCKLIB_SSL || "(none loaded)";
 
       printf "\nUsing %s v%vd\n", $^X, $^V;
       print "\nSocket library:       $SOCKLIB\n";
@@ -168,13 +183,23 @@ sub show_version
     }
 }
 
+sub net_init
+{
+  @_ = (@ARGV ? @ARGV : default_spool_file()) unless @_;
+  map { $opt{need_net} = 1 if m=^(?:imap|pop3)s?://=;
+        $opt{need_ssl} = 1 if m=^(?:imap|pop3)s://=
+      } @_;
+  From::Socket::__init() if $opt{need_net} || $opt{need_ssl};
+}
+
 sub main
 {
   parse_options (\@_);
+
   @_ = default_spool_file() unless @_;
+  net_init (@_);
 
   my $exitstat = 0;
-  my $bodylines = $opt{bodylines};
   my $want_headers = wanted_headers();
 
   my %meta = ('{tmsgno}' => 0);
@@ -200,46 +225,36 @@ sub main
           next;
         }
 
-      my @msgs = message_numbers ($mbox);
-      if (@msgs)
-        {
-          map { process_message ($mbox, \%meta, $_, $bodylines) } @msgs;
-        }
-      else
-        {
-          my $i = 0;
-          while (1)
-            {
-              last unless process_message ($mbox, \%meta, ++$i, $bodylines);
-            }
-        }
+      # If counting filtered ranges, this will just accumulate
+      # a match count.  Otherwise, it will print a summary.
+      $mbox->map_over_msgnos (sub { process_message ($mbox, \%meta, @_) });
       if ($opt{countp})
         {
-          my $n = $mbox->{message_count};
+          my $n = $mbox->{message_match_count};
           if (@_ > 1) { printf ("%-10d %s\n",  $n, $folder) }
           else        { print $n, "\n" }
-          next;
         }
     }
-
   exit ($exitstat);
 }
 
 sub process_message
 {
-  my ($mbox, $meta, $i, $bodylines) = @_;
+  my ($mbox, $meta, $fmsgno) = @_;
 
+  ::_debug (@_);
   if ($opt{unread_only})
     {
-      my %flags = $mbox->flags ($i);
+      my %flags = $mbox->flags ($fmsgno);
       return 1 if %flags && $flags{read};
     }
 
   my $msg;
   unless ($opt{envelopep} && ! $opt{match_regexp})
     {
-      $msg = $mbox->retrieve ($i, $bodylines);
+      $msg = $mbox->retrieve ($fmsgno);
       return unless defined $msg;
+      ::_debug (sub { {state=>1}, $msg});
     }
 
   if ($opt{match_regexp})
@@ -248,6 +263,7 @@ sub process_message
       my $re = $opt{match_regexp};
 
       my $header = From::Header->new ($msg->[0]);
+      return unless $header;
       my @names = $header->names;
       my $found;
 
@@ -265,29 +281,33 @@ sub process_message
 
   if ($opt{countp})
     {
-      $mbox->{message_count}++;
+      $mbox->{message_match_count}++;
       return 1;
     }
 
   $meta->{'{tmsgno}'}++;
-  $meta->{'{fmsgno}'} = $i;
+  $meta->{'{fmsgno}'} = $fmsgno;
 
   if ($opt{envelopep})
     {
-      my $envelope = $mbox->envelope ($meta->{'{fmsgno}'});
-      return 0 unless $envelope;
+      my $envelope = $mbox->envelope_string ($fmsgno);
+      return unless $envelope;
       print $envelope, "\n";
       return 1;
     }
-
-  if ($opt{extractp})
+  elsif ($opt{extractp})
     {
-      my $envelope = $mbox->envelope ($meta->{'{fmsgno}'});
+      my $envelope = $mbox->envelope_string ($fmsgno);
+      return unless $envelope;
       print_message ($msg, $meta, $envelope);
     }
   else
     {
-      print_message_summary ($msg, $meta);
+      $meta->{'{octets}'} = $mbox->message_size ($fmsgno)
+        if (exists $opt{literal_header}->{'{octets}'});
+
+      my $envelope = $mbox->envelope ($fmsgno);
+      return unless print_message_summary ($msg, $meta, $envelope);
     }
   return 1;
 }
@@ -334,8 +354,8 @@ sub print_message
 
 sub print_message_summary
 {
-  my ($msg, $meta) = @_;
-  my $header = From::Header->new ($msg->[0], $meta);
+  my ($msg, $meta, $envelope) = @_;
+  my $header = From::Header->new ($msg->[0], $meta, $envelope);
 
   my ($fmt, @name) = @{$opt{format_parsed}};
 
@@ -377,42 +397,6 @@ sub print_message_summary
   print $s;
 }
 
-sub message_numbers
-{
-  return unless $opt{message_numbers};
-
-  my $mbox = shift;
-  my %n;
-  my $max;
-
-  for my $n (split (/[\s,]+/, $opt{message_numbers}))
-    {
-      if ($n =~ /^(\d*)-(\d*)$/)
-        {
-          my ($beg, $end) = ($1, $2);
-          if ($beg && $end)
-            {
-              map { $n{$_} = $_ } $beg .. $end;
-            }
-          elsif ($end)
-            {
-              $max ||= $mbox->message_count;
-              map { $n{$_} = $_ } (($max - $end + 1) .. $max);
-            }
-          elsif ($beg)
-            {
-              $max ||= $mbox->message_count;
-              map { $n{$_} = $_ } ($beg .. $max);
-            }
-        }
-      else
-        {
-          $n{$n} = $n;
-        }
-    }
-  return (sort { $a <=> $b } values %n);
-}
-
 # This is an optimization for IMAP folders to reduce the amount of
 # bandwidth needed for header retrieval.  Other protocols either don't
 # support it (pop3) or would not be particularly efficient (mbox files) so
@@ -430,7 +414,7 @@ sub wanted_headers
         elsif ($_ !~ /^\{/)      { push @headers, $_ }
       } @x;
 
-  return \@headers;
+  return wantarray ? @headers : \@headers;
 }
 
 sub parse_format_string
@@ -444,17 +428,22 @@ sub parse_format_string
                        '{octets}' => 'd',
                      );
   my $start = 0;
-  while (/(?:(?:|[^%])(?:%%)*)%-?[\d.]*([^%\s]+)/gc)
+  my $hchars = '[\x21-\x24\x26-\x39\x3b-\x5b\x5d-\x7e]';
+  my $re = qr/(?:(?:|[^%]|(?:%%))*)%-?[\d.]*((?:(?:\\\\)+|(?:%%|$hchars))+)/;
+  while (/$re/gc)
     {
-      my $h = lc ($1);
+      my $h_orig = $1;
+      (my $h = lc $h_orig) =~ s=%%=%=g;
       push @header, $h;
+
       my $c = defined $format_token{$h} ? $format_token{$h} : 's';
-      $fmt .= substr ($_, $start, pos ($_) - $start - length ($1)) . $c;
+      $fmt .= substr ($_, $start, pos ($_) - $start - length ($h_orig)) . $c;
       $start = pos ($_);
     }
   $fmt .= substr ($_, pos ($_));
 
   unshift @header, $fmt;
+  map { s/\\(.)/$1/g } @header; # unescape \'d chars
   return wantarray ? @header : \@header;
 }
 
@@ -546,6 +535,19 @@ our $errors_fatal   =  0;
 our $debug          =  0;
 (my $progname = $0) =~ s=.*/==;
 
+# lightweight check for readability on non-blocking file handle
+# Usage: canread ($handle, $timeout)
+sub canread
+{
+  my $v = '';
+  vec ($v, fileno ($_[0]), 1) = 1;
+  my $n = select ($v, undef, undef, $_[1]);
+
+  return ::_error ("select", $!) if $n < 0;
+  return 0 if $n == 0;
+  return 1;
+}
+
 sub _verbose
 {
   return unless $^W;
@@ -575,6 +577,15 @@ sub _debug
 {
   return unless $debug;
 
+  if ($debug > 1)
+    {
+      local $Carp::CarpLevel = 2;
+      local ($@, $SIG{__DIE__});
+      eval { confess "DEBUG" };
+      $@ =~ s/^/** /gm;
+      print STDERR "**\n", $@;
+    }
+
   @_ = &{$_[0]} if @_ == 1 && ref $_[0] eq 'CODE';
   my @caller = caller (1);
   my $pkg = $caller[0];
@@ -603,7 +614,7 @@ sub printobj
   my $obj = shift;
   my @list;
 
-  return "undef" unless (defined $obj);
+  return "undef" unless defined $obj;
   my $ref = ref $obj;
 
   if ($ref eq 'ARRAY')
@@ -614,23 +625,21 @@ sub printobj
     {
       return ("{ "
               . join (", ", map { sprintf "%s => %s",
-                                          $_, printobj ($obj->{$_})
+                                    $_, ($_ eq "pass"
+                                         ? '"*"'
+                                         : printobj ($obj->{$_}))
                                 } sort keys %$obj)
               . " }");
     }
-  elsif ($ref eq 'CODE')
-    {
-      return $ref;
-    }
+  elsif ($ref eq 'CODE')   { return $ref  }
+  elsif ($ref eq 'SCALAR') { return $$obj }
   elsif ($ref ne "")
     {
       $ref =~ s/=.*//;
       return $ref;
     }
-  elsif ($obj =~ /^[+-]?[\d.]+/)
-    {
-      return $obj;
-    }
+  elsif ($obj =~ /^[+-]?[\d.]+/) { return $obj }
+
   $obj =~ s/"/\\"/go;
   return "\"$obj\"";
 }
@@ -653,26 +662,57 @@ use strict;
 use Symbol;
 
 my $stunnel_class = q(From::Socket::Stunnel);
+my $ssl_class     = q(IO::Socket::SSL);
 
 sub __init
 {
-  for my $try (qw(IO::Socket::IP
-                  IO::Socket::INET))
+  local $errors_fatal = 1;
+
+  if ($opt{need_net})
     {
-      $SOCKLIB = $try;
-      eval "use $try";
-      last unless $@;
+      my %socklib = ( inet6 => q(IO::Socket::INET6), # supports ipv4, ipv6
+                      inet4 => q(IO::Socket::INET),  # supports ipv4
+                      inet  => q(IO::Socket::INET),  # supports ipv4
+                      ip    => q(IO::Socket::IP),    # supports ipv4, ipv6
+                    );
+
+      $opt{prefer_socklib} ||= "inet6 ip inet"; # try ipv6-supporting first
+      unless (ref $opt{prefer_socklib})
+        {
+          my @slibs = map { $socklib{lc $_} || $_
+                          } split (/[,\s]+/, $opt{prefer_socklib});
+          $opt{prefer_socklib} = \@slibs;
+        }
+
+      for my $try (@{$opt{prefer_socklib}})
+        {
+          $SOCKLIB = $try;
+          eval "use $try";
+          last unless $@;
+        }
     }
 
-  if ($opt{force_stunnel})
+  if ($opt{need_ssl} || $opt{starttls})
     {
-      $SOCKLIB_SSL = $stunnel_class;
-    }
-  else
-    {
-      my $ssl_debug = $::debug ? "qw(debug3)" : "";
-      eval "use IO::Socket::SSL $ssl_debug";
-      $SOCKLIB_SSL = $@ ? $stunnel_class : q(IO::Socket::SSL);
+      if ($opt{prefer_stunnel} && $stunnel_class->have_stunnel)
+        {
+          $SOCKLIB_SSL = $stunnel_class;
+        }
+      else
+        {
+          my $ssl_debug = $::debug ? "qw(debug3)" : "";
+          eval "use $ssl_class $ssl_debug";
+          if ($@)
+            {
+              ::_error ("Cannot find native perl ssl library or $opt{stunnel_prog}")
+                unless $stunnel_class->have_stunnel;
+              $SOCKLIB_SSL = $stunnel_class;
+            }
+          else
+            {
+              $SOCKLIB_SSL = $ssl_class;
+            }
+        }
     }
 }
 
@@ -711,8 +751,6 @@ sub _connect_internal
 
 sub connect
 {
-  __init unless $SOCKLIB;
-
   my $self = shift;
   my $class = ($opt{starttls} && $SOCKLIB_SSL eq $stunnel_class
                ? $SOCKLIB_SSL
@@ -723,8 +761,6 @@ sub connect
 
 sub connect_ssl
 {
-  __init unless $SOCKLIB;
-
   my $self = shift;
   my $fh = $self->_connect_internal ($SOCKLIB_SSL, $self->_ssl_args, @_);
   ::_debug (sub { ({state=>1},
@@ -744,7 +780,7 @@ sub starttls
   if ($SOCKLIB_SSL->can ('start_SSL'))
     {
       my %sslargs = ($self->_ssl_args);
-      ::_debug ({state=>1}, 'STARTTLS', \%sslargs);
+      ::_debug (sub { {state=>1}, 'STARTTLS', \%sslargs });
       unless ($SOCKLIB_SSL->start_SSL ($self->{fh}, %sslargs))
         {
           ::_error ($self->{uri}, $SOCKLIB_SSL->errstr ());
@@ -757,8 +793,6 @@ sub starttls
 
 sub mkpipe
 {
-  __init unless $SOCKLIB;
-
   # use &fn so that these do not need to be defined at compile-time.
   my @pair = $SOCKLIB->socketpair (&AF_UNIX, &SOCK_STREAM, &PF_UNSPEC);
   map { $_->autoflush (1) } @pair;
@@ -840,11 +874,42 @@ sub _ssl_verifycb
   return &{*$vfn{CODE}} ($self->{host}, $cert_addr, $proto);
 }
 
+sub spawn
+{
+  my ($self, $fnchild, $fnparent) = (shift, shift, shift);
+  my %param = @_;
+
+  local $^F = 255;
+  my ($rc, $wc) = $self->mkpipe () if $fnparent;
+  my ($rh, $wh) = $self->mkpipe ();
+
+  $SIG{CHLD} = q(IGNORE); # automatically reap zombies
+  my $pid = fork;
+  unless (defined $pid)
+    {
+      ::_error ('fork', $!);
+      exit (1);
+    }
+  if ($pid) # parent
+    {
+      &$fnparent ($wc) if defined $fnparent;
+      map { close ($_) if $_ } ($rc, $wc, $wh);
+    }
+  else
+    {
+      delete $ENV{FROMPASS}; # don't expose if set
+      open (STDIN,  "<&=" . fileno ($wh));
+      open (STDOUT, ">&=" . fileno ($wh));
+      map { close ($_) if $_ } ($rh, $wh, $wc);
+      &$fnchild ($rc) if defined $fnchild;
+    }
+  return $rh;
+}
+
 
 package From::Socket::Stunnel;
 
 use strict;
-use POSIX qw(:sys_wait_h);
 
 our @ISA = qw(From::Socket);
 
@@ -857,58 +922,63 @@ sub connect
 
   my $self = $param{self};
 
-  local $^F = 255;
-  my ($rc, $wc) = $class->mkpipe ();
-  my ($rh, $wh) = $class->mkpipe ();
+  my $fnparent
+    = sub { my $wc = shift;
+            my @conf = ("foreground     = no",
+                        "syslog         = no",
 
-  $SIG{CHLD} = q(IGNORE);
-  my $pid = fork;
-  unless (defined $pid)
-    {
-      ::_error ('fork', $!);
-      exit (1);
-    }
-  if ($pid) # parent
-    {
-      close ($rc);
-      my @conf = ("foreground     = no",
-                  "syslog         = no",
+                        "client         = yes",
+                        "connect        = $param{PeerHost}:$param{PeerPort}",
+                        "TIMEOUTconnect = $param{Timeout}",
+                        "compression    = deflate",
 
-                  "client         = yes",
-                  "connect        = $param{PeerHost}:$param{PeerPort}",
-                  "TIMEOUTconnect = $param{Timeout}",
-                  "compression    = deflate",
+                        "ciphers        = HIGH",
+                        "sslVersion     = $param{SSL_version}",
+                       );
+            push @conf, "CApath         = $param{SSL_ca_path}" if $param{SSL_ca_path};
+            push @conf, "CAfile         = $param{SSL_ca_file}" if $param{SSL_ca_file};
+            push @conf, ("debug         = debug",
+                         "foreground    = yes", # override; diagnostics on stderr
+                        ) if $::debug;
+            if ($opt{starttls} && $self->{proto} !~ /s$/)
+              {
+                push @conf, "protocol = $self->{proto}";
+                # Not sure if this is the right choice.
+                push @conf, "TIMEOUTbusy = $param{Timeout}";
+              }
 
-                  "ciphers        = HIGH",
-                  "sslVersion     = $param{SSL_version}",
-                 );
-      push @conf, "CApath         = $param{SSL_ca_path}" if $param{SSL_ca_path};
-      push @conf, "CAfile         = $param{SSL_ca_file}" if $param{SSL_ca_file};
-      push @conf, ("debug         = debug",
-                   "foreground    = yes", # override; diagnostics on stderr
-                  ) if $::debug;
-      if ($opt{starttls} && $self->{proto} !~ /s$/)
-        {
-          push @conf, "protocol = $self->{proto}";
-          # Not sure if this is the right choice.
-          push @conf, "TIMEOUTbusy = $param{Timeout}";
-        }
+            map { ::_debug ({state=>1}, \$_);
+                  print $wc $_, "\n"
+                } @conf;
 
-      map { ::_debug ({state=>1}, $_);
-            print $wc $_, "\n"
-          } @conf;
-      map { close ($_) } ($rc, $wc, $wh);
-    }
-  else
-    {
-      open (STDIN,  "<&=" . fileno ($wh));
-      open (STDOUT, ">&=" . fileno ($wh));
-      map { close ($_) } ($rh, $wh, $wc);
-      exec ($opt{stunnel_prog}, "-fd", fileno ($rc))
-        || die "$progname: exec $opt{stunnel}: $!\n";
-    }
-  $self->{tls_started} = 1 if $opt{starttls};
-  return $rh;
+            $self->{tls_started} = 1 if $opt{starttls};
+          };
+
+  my $fnchild = sub { exec ($opt{stunnel_prog}, "-fd", fileno ($_[0]))
+                        || die "$progname: exec $opt{stunnel}: $!\n";
+                    };
+
+  $class->spawn ($fnchild, $fnparent);
+}
+
+my $have_stunnel_cacheresult;
+sub have_stunnel
+{
+  return $have_stunnel_cacheresult if defined $have_stunnel_cacheresult;
+
+  my $class = shift;
+
+  my $fnchild = sub { open (STDERR, ">&=" . fileno (STDOUT));
+                      exec ($opt{stunnel_prog}, "-version")
+                        || die "$progname: exec $opt{stunnel_prog}: $!\n";
+                    };
+
+  my $fh = $class->spawn ($fnchild);
+  local $/ = undef;
+  local $_ = <$fh>;
+  close ($fh);
+
+  $have_stunnel_cacheresult = /Global options:/ ? 1 : 0;
 }
 
 
@@ -983,7 +1053,7 @@ package From::Mailbox::Imap; # See rfc3501
 
 use strict;
 
-our @ISA = qw(From::NetCmd);
+our @ISA = qw(From::NetCmd From::Mailbox::_Range);
 
 sub new
 {
@@ -992,6 +1062,7 @@ sub new
   my $self = $class->SUPER::new (@_);
 
   $self->{folder} = "INBOX" unless $self->{folder};
+  $self->{folder_data} = {};
 
   $self->connect;
   return unless $self->{fh};
@@ -999,7 +1070,10 @@ sub new
   $self->response_ok_p ("*");
   return if ($opt{starttls} && !$self->starttls);
   return unless $self->login ($self->{user}, $self->{pass});
+
   $self->message_count;  # sets folder
+  $self->{message_range} = $self->normalize_ranges (@{$opt{message_numbers}});
+  $self->{batch_list}    = $self->batch_ranges     (@{$self->{message_range}});
   return $self;
 }
 
@@ -1011,67 +1085,189 @@ sub starttls
   $self->SUPER::starttls ();
 }
 
-# If called with no arguments, return last response.
-# A tag argument means a new response is expected matching that tag.
-sub response
+sub command_ok_p
 {
-  my $self = shift;
-  my $wantarray = wantarray;
-
-  unless (@_)
-    {
-      my $old = $self->{response};
-      return unless defined $old;
-      my @lines = @$old;
-      return $wantarray ? @lines : join ("", @lines);
-    }
-
-  my $tag = quotemeta (shift);
-  my $fh = $self->{fh};
-  my @lines;
-  while (1)
-    {
-      local $_ = <$fh>;
-      last unless defined $_;
-      push @lines, $_;
-      if (/^\* .*{(\d+)}\r?\n$/)
-        {
-          my $cont = $1;
-          my $pos = 0;
-          while ($pos < $cont)
-            {
-              my $read = $fh->read ($_, $cont - $pos, $pos);
-              last unless defined $read;
-              $pos += $read if defined $read;
-            }
-          push @lines, $wantarray ? split (/(\n)/, $_, -1) : $_ ;
-        }
-      last if /^$tag (OK|NO|BAD|PREAUTH)/;
-    }
-  $self->{response} = \@lines;
-  ::_debug (sub { $tag, @lines });
-
-  return unless defined $wantarray;
-  return $wantarray ? @lines : join ("", @lines);
+  my ($self, $tag) = (shift, shift);
+  $self->command ($tag, @_);
+  $self->response_ok_p ($tag);
 }
 
 sub response_ok_p
 {
   my ($self, $tag) = @_;
 
-  my @response = $self->response ($tag);
-  my $last = $response[$#response];
+  my $response = $self->response ($tag);
   $tag = quotemeta ($tag);
-  return unless $last =~ /^$tag (OK|NO|BAD|PREAUTH)/;
-  return 1 if ($1 eq "OK");
-  return 0;
+  return unless $response =~ /^$tag (OK|NO|BAD|PREAUTH)/m;
+  return ($1 eq "OK");
 }
 
-sub command_ok_p
+# If called with no arguments, return last response.
+# A tag argument means a new response is expected matching that tag.
+sub response
 {
-  my ($self, $tag) = (shift, shift);
-  $self->command ($tag, @_);
-  $self->response_ok_p ($tag);
+  my $self = shift;
+
+  return $self->{response} unless @_;
+
+  my $tag = quotemeta (shift);
+  my $fh = $self->{fh};
+
+  local $_;
+  my $offset = 0;
+  $fh->blocking (0);
+  while (1)
+    {
+      my $read = $fh->read ($_, 16384, $offset) if ::canread ($fh);
+      last if /^$tag (?:OK|NO|BAD|PREAUTH)(?: .*|)\n/m;
+      $offset += $read if defined $read;
+    }
+  $fh->blocking (1);
+
+  $self->{response} = $_;
+  return $_;
+}
+
+# Amazingly cheesy pseudo- recursive descent parser.
+# Takes a server response and converts it into a perl data structure.
+sub parse_response
+{
+  my $self = shift;
+  local $_ = @_ ? $_[0] : $self->response;
+  my $startpos = $_[1] || 0;
+
+  my (@all, @list);
+  pos $_ = $startpos;
+  while ($_ =~ /\s*([[("]|\]<[\d.]+>|[])]|[^[("\s]\S*?[[]\S+|[^])\s]+)/gc)
+    {
+      my $pos = pos $_;
+      my $beg = $pos - length ($1);
+      my $s = $1;
+
+      if ($s eq '"')
+        {
+          push @list, $1 if /(.*?)"/g;
+        }
+      elsif ($s eq '[')
+        {
+          my $text = $1 if /(.*?)]/g;
+          my ($data, $newpos) = $self->parse_response ($text, 0);
+          push @list, $data;
+        }
+      elsif ($s eq '(')
+        {
+          my ($data, $newpos) = $self->parse_response ($_, $pos);
+          pos $_ = $newpos;
+          push @list, $data;
+        }
+      elsif ($s eq ")" || $s eq "]")
+        {
+          last;
+        }
+      elsif ($s eq "NIL" || $s eq "nil")
+        {
+          push @list, undef;
+        }
+      elsif ($s =~ /^\{(\d+)\}$/)
+        {
+          my $n = $1;
+          /\r?\n/g; # skip proceeding newline
+          my $text = substr ($_, pos $_, $n);
+          pos $_ += $n;
+          push @list, $text;
+        }
+      elsif ($s =~ /\[.*[^]>]$/)
+        {
+          my ($data, $newpos) = $self->parse_response ($_, $pos);
+          pos $_ = $newpos;
+          $s .= substr ($_, $pos, $newpos - $pos);
+          push @list, $s;
+        }
+      elsif (@list && substr ($_, $beg - 1, 1) eq "\n")
+        {
+          push @all, [@list];
+          @list = $s;
+        }
+      else
+        {
+          push @list, $s;
+        }
+    }
+  return (\@list, pos $_) if @_ > 1;
+
+  push @all, \@list if @list;
+  map { if ($_->[1] eq 'OK')
+          {
+            my @new = splice (@$_, 0, 2);
+            push @new, shift @$_ if ref $_->[0];
+            push @new, join (" ", @$_) if @$_;
+            $_ = \@new;
+          }
+      } @all;
+
+  return \@all;
+}
+
+# Convert parsed response into more immediately useful data structure
+# for message processing.
+sub analyze_response
+{
+  my $self = shift;
+
+  my $response = @_ ? $_[0] : $self->parse_response;
+  $response = $self->parse_response ($response) unless ref $response;
+
+  my %data;
+  map { if ($_->[0] eq '*')
+          {
+            my $n = $_->[1];
+            my $list = $_->[3];
+            my %field;
+
+            while (@$list)
+              {
+                my ($key, $val) = splice (@$list, 0, 2);
+                $key = $1 if $key =~ /^BODY\[(HEADER|TEXT)/;
+                $field{$key} = $val;
+              }
+            $data{$n} = \%field;
+          }
+      } @$response;
+
+  ::_debug (sub { {state=>1}, \%data });
+  return \%data;
+}
+
+sub analyze_message
+{
+  my ($self, $msgno) = @_;
+
+  my $fdata = $self->{folder_data};
+  return $fdata->{$msgno} if exists $fdata->{$msgno};
+
+  my $batch = $self->in_batch ($msgno, $self->{batch_list});
+  my $range = $batch ? $self->batch_string ($batch) : $msgno;
+
+  my $headers = "BODY.PEEK[HEADER]";
+  my $wanted = $self->{wanted_headers};
+  if ($wanted)
+    {
+      my %h = map { uc ($_) => undef } (@$wanted, q(RETURN-PATH));
+      $headers = sprintf ("BODY.PEEK[HEADER.FIELDS (%s)]",
+                          join (" ", map { "\"$_\"" } keys %h));
+    }
+
+  my $cmd = sprintf ("FETCH %s (RFC822.SIZE INTERNALDATE FLAGS %s)",
+                     $range, $headers);
+  return unless $self->command_ok_p ("RETR", $cmd);
+
+  my $resp = $self->analyze_response;
+  while (my ($key, $val) = each %$resp)
+    {
+      $fdata->{$key} = $val;
+    }
+
+  return $fdata->{$msgno};
 }
 
 sub login
@@ -1081,8 +1277,8 @@ sub login
   return 1 if $self->command_ok_p ("AUTH", "login", $login, $pass);
 
   $self->disconnect;
-  my @response = $self->response;
-  ::_error ($self->{uri}, @response);
+  my $response = $self->response;
+  ::_error ($self->{uri}, $response);
   return;
 }
 
@@ -1098,12 +1294,18 @@ sub logout
 sub message_count
 {
   my $self = shift;
+
+  return $self->{folder_metadata}->{exists}
+    if exists $self->{folder_metadata};
+
   $self->{folder} = $_[0] if @_;
   my $folder = $self->{folder};
 
   return unless $self->command_ok_p ("EXAMINE", "examine", "$folder");
   my $result = $self->response;
 
+  # We don't use the parse/analyze methods because this response is
+  # relatively trivial.
   my %data;
   while ($result =~ /^\* (\S+) (.*?)\r?$/mg)
     {
@@ -1123,9 +1325,7 @@ sub message_count
           $data{$tok2} = $tok1
         }
     }
-  my $self->{folder_metadata} = \%data;
-  ::_debug (\%data);
-
+  $self->{folder_metadata} = \%data;
   return $data{exists} if defined $data{exists};
   return;
 }
@@ -1134,30 +1334,30 @@ sub message_size
 {
   my ($self, $msgno) = @_;
 
-  $self->command_ok_p ("SIZE", "fetch $msgno rfc822.size");
-  my $result = $self->response;
-
-  return $1 if $result =~ /^\* \d+ fetch \(rfc822.size (\d+)\)/mi;
-  return;
+  my $data = $self->analyze_message ($msgno);
+  return unless $data;
+  return $data->{'RFC822.SIZE'};
 }
 
 sub flags
 {
   my ($self, $msgno) = @_;
 
-  $self->command_ok_p ("FLAGS", "FETCH $msgno flags");
-  my $result = $self->response;
+  my $data = $self->analyze_message ($msgno);
+  return unless $data;
 
-  my $status = $1 if $result =~ /^\* \d+ fetch \(flags \((.*?)\)\)/mi;
-  return unless $status;
-
-  my %trans = ( seen => ['read', 1], );
+  my %trans = ( seen => ['read', 1],
+              );
   my %flag;
-  map { my $p = $trans{$_};
-        my $k = $p ? $p->[0] : $_;
+  map { (my $f = lc $_) =~ s=^\\==;
+        my $p = $trans{$f};
+        my $k = $p ? $p->[0] : $f;
         my $v = $p ? $p->[1] : 1 ;
         $flag{$k} = $v;
-      } split (m=[\s\\]+=, lc $status);
+      } @{$data->{FLAGS}};
+
+  return unless %flag;
+  ::_debug (sub { {state=>1}, $msgno, \%flag });
   return wantarray ? %flag : \%flag;
 }
 
@@ -1165,83 +1365,120 @@ sub envelope
 {
   my ($self, $msgno) = @_;
 
-  # Return-Path usually matches the original SMTP envelope address.
-  return unless $self->command_ok_p
-    ("RETR", "fetch $msgno (internaldate body[header.fields (return-path)])");
-  my $result = $self->response;
+  my $data = $self->analyze_message ($msgno);
+  return unless $data;
 
-  my $rawdate = $1 if $result =~ /internaldate "(.*?)"/i; # delivery date
-  my $addr    = $1 if $result =~ /^Return-Path:\s+<(.*?)>/m;
+  my $rawdate = $data->{INTERNALDATE} || return;
+  my $headers = $data->{HEADER}       || return;
+  # Return-Path usually matches the original SMTP envelope address.
+  my $addr = $1 if $headers =~ /^Return-Path:\s+<(.*?)>/m;
 
   local $opt{date_format} = "%a %b %e %H:%M:%S %Y";
-  local $opt{tzdate}      = 'sender';
+  local $opt{tzdate}      = 'local';
   my $date = From::Header::_parse_date ($rawdate);
 
+  my @data = ($addr, $date);
+  return wantarray ? @data : \@data;
+}
+
+sub envelope_string
+{
+  my $self = shift;
+  my ($addr, $date) = $self->envelope (@_);
+  return unless $addr && $date;
   return "From $addr  $date";
 }
 
-# TODO: If retrieving just part of a multipart/alternative message, try
-# returning just the text/plain portion if one exists.
-# (If --no-parse, do not select parts.)
-sub retrieve
+sub header
 {
-  my ($self, $msgno, $bodylines) = @_;
-  $bodylines += 0;  # force into numeric context
+  my ($self, $msgno) = @_;
+  my $data = $self->analyze_message ($msgno);
+  return unless $data;
+  return $data->{HEADER};
+}
 
-  my $cmd;
-  my $wanted = $self->{wanted_headers};
-  if ($wanted)
+sub body
+{
+  my ($self, $msgno) = @_;
+
+  my $data = $self->analyze_message ($msgno);
+  return unless $data;
+  return $data->{TEXT} if exists $data->{TEXT};
+
+  my $bodylines = $opt{bodylines} + 0;  # force into numeric context
+  return unless $opt{extractp} && $bodylines != 0;
+
+  my $batch = $self->in_batch ($msgno, $self->{batch_list});
+  my $range = $batch ? $self->batch_string ($batch) : $msgno;
+  my $fdata = $self->{folder_data};
+
+  if ($bodylines < 0)
     {
-      my $s = join (" ", map { "\"$_\"" } @$wanted);
-      $cmd = sprintf ("fetch %d (uid body[header.fields (%s)])", $msgno, $s);
+      $self->command_ok_p ("RETR", "FETCH $range BODY.PEEK[TEXT]");
+      my $resp = $self->analyze_response;
+
+      while (my ($n, $elt) = each %$resp)
+        {
+          $fdata->{$n}->{TEXT} = $elt->{TEXT};
+        }
     }
   else
     {
-      $cmd = sprintf ("fetch %d (uid body[header])", $msgno);
-    }
+      # Reasonably generous assumption?  The idea is to overshoot somewhat
+      # on average, to reduce round trips.
+      my $blocksize = 120 * $bodylines;
+      my $offset    = 0;
+      my $newlines  = 0;
 
-  return unless $self->command_ok_p ("RETR", $cmd);
-  local $_ = $self->response;
-  return unless /[\(|\s]body\[.*?\] \{(\d+)\}\r?\n/gmi;
-
-  my $header_octets = $1;
-  my $header = substr ($_, pos ($_), $header_octets);
-  substr ($header, -2) = "X-UID: $1\r\n\r\n" if (/[\(|\s]uid\s+(\d+)/mi);
-
-  my $body;
-  if ($bodylines < 0)
-    {
-      $self->command ("RETR", "fetch $msgno body[text]");
-      $_ = $self->response ("RETR");
-      $body = substr ($_, pos ($_), $1)
-        if (/^\* \d+ fetch \(body\[text\] {(\d+)}\r?\n/gmi);
-    }
-  elsif ($bodylines > 0)
-    {
-      my $text_octets = $self->message_size ($msgno) - $header_octets;
-      my $blocksize = 1024;
-      my $newlines = 0;
-      my $octets = 0;
-      while (1)
+      while ($range && $newlines < $bodylines)
         {
-          my $start = $octets;
           last unless $self->command_ok_p
-            ("RETR", "fetch $msgno body[text]<$start.$blocksize>");
-          $_ = $self->response;
+            ("RETR", "FETCH $range BODY.PEEK[TEXT]<$offset.$blocksize>");
+          my $resp = $self->analyze_response;
 
-          last unless (/^\* \d+ fetch \(body\[text\]<$start> {(\d+)}\r?\n/gmi);
-          $octets += $1;
-          my $newtext = substr ($_, pos ($_), $1);
-          my $end = 0;
-          $end = pos ($newtext) while ($newtext =~ /\n/g && $newlines++ < $bodylines);
-          $body .= substr ($newtext, 0, $end);
-          last if ($octets >= $text_octets || $newlines >= $bodylines);
+          # For each message, see if we've acquired enough lines.
+          # Any message which isn't complete and still short will be
+          # fetched again for more data.
+          my @newrange;
+          my ($tnl, $len);
+          while (my ($n, $elt) = each %$resp)
+            {
+              my $text = $elt->{TEXT};
+              $len  = length ($text);
+              next unless $len;  # no more data for this msg
+
+              $tnl = $newlines;
+              while ($text =~ /\n/gc && ++$tnl < $bodylines) {}
+              $fdata->{$n}->{TEXT} .= ($tnl < $bodylines
+                                       ? $text
+                                       : substr ($text, 0, pos $text));
+              next if $len != $blocksize || $tnl >= $bodylines;
+
+              push @newrange, $n;
+            }
+          $newlines = $tnl;
+          $offset += $len;
+          $range = $self->batch_string (scalar $self->normalize_ranges (@newrange));
         }
     }
+  return $data->{TEXT};
+}
 
-  $header =~ s/\r$//gm;
-  $body   =~ s/\r$//gm if defined $body;
-  return [$header, $body];
+sub retrieve
+{
+  my ($self, $msgno) = @_;
+
+  ::_debug ($msgno);
+  (my $header = $self->header ($msgno)) =~ s/\r$//gm;
+  (my $body   = $self->body   ($msgno)) =~ s/\r$//gm;
+  ::_debug (sub { {state=>1}, $header, $body });
+  return wantarray ? ($header, $body) : [$header, $body];
+}
+
+sub uncache_message
+{
+  my ($self, $msgno) = @_;
+  delete $self->{folder_data}->{$msgno};
 }
 
 
@@ -1269,7 +1506,7 @@ package From::Mailbox::Pop3;
 use strict;
 use POSIX qw(:errno_h strftime);
 
-our @ISA = qw(From::NetCmd);
+our @ISA = qw(From::NetCmd From::Mailbox::_Range);
 
 sub new
 {
@@ -1369,13 +1606,23 @@ sub envelope
   my ($self, $msgno) = @_;
 
   $pop3_envdate = strftime ("%a %b %e %H:%M:%S %Y", localtime) unless $pop3_envdate;
-  sprintf ("From m%03d\@pop3  %s", $msgno, $pop3_envdate);
+
+  my @data = sprintf ("m%03d\@pop3", $msgno);
+  push @data, $pop3_envdate;
+  return wantarray ? @data : \@data;
+}
+
+sub envelope_string
+{
+  my ($self, $msgno) = @_;
+  my ($addr, $date) = $self->envelope (@_);
+  return "From $addr  $date";
 }
 
 sub retrieve
 {
-  my ($self, $msgno, $bodylines) = @_;
-  $bodylines += 0;  # force into numeric context
+  my ($self, $msgno) = @_;
+  my $bodylines = $opt{bodylines} + 0;  # force into numeric context
 
   $self->command ($bodylines < 0
                   ? "RETR $msgno"
@@ -1405,6 +1652,8 @@ sub retrieve
   return [$header, $body];
 }
 
+sub uncache_message { return }  # no cache
+
 
 package From::Mailbox::Pop3s;
 
@@ -1430,7 +1679,7 @@ package From::Mailbox::MboxFile;
 use strict;
 use IO::Handle;
 
-our @ISA = qw(From::NetCmd);
+our @ISA = qw(From::NetCmd From::Mailbox::_Range);
 
 sub new
 {
@@ -1440,6 +1689,7 @@ sub new
 
   $self->{raw} = file_contents ($self->{folder});
   $self->analyze;
+  $self->{message_range} = $self->normalize_ranges (@{$opt{message_numbers}});
   return $self;
 }
 
@@ -1491,9 +1741,11 @@ sub analyze
       $this{bbeg} = pos ($_) + 1;
       $this{bend} = pos ($_) if /^(?=$re_message_delimiter)/mogc || /$/sgc;
       $msg{$msgno} = \%this;
+
+      ::_debug (\%this);
     }
 
-  $self->{msgdata} = \%msg;
+  $self->{folder_data} = \%msg;
   return;
 }
 
@@ -1501,14 +1753,14 @@ sub message_count
 {
   my $self = $_[0];
 
-  return scalar keys %{$self->{msgdata}};
+  return scalar keys %{$self->{folder_data}};
 }
 
 sub message_size
 {
   my ($self, $msgno) = @_;
 
-  my $data = $self->{msgdata}->{$msgno};
+  my $data = $self->{folder_data}->{$msgno};
 
   return $data->{bend} - $data->{hbeg};
 }
@@ -1540,32 +1792,316 @@ sub flags
 sub envelope
 {
   my ($self, $msgno) = @_;
-  my $msg = $self->{msgdata}->{$msgno};
+  my $text = $self->envelope_string ($msgno);
+  return unless $text;
+
+  my ($addr, $date) = ($1, $2)
+    if $text =~ /^From (.*?)  (.*)/;
+
+  return wantarray ? ($addr, $date) : [$addr, $date];
+}
+
+sub envelope_string
+{
+  my ($self, $msgno) = @_;
+  my $msg = $self->{folder_data}->{$msgno};
   return unless $msg;
   return $msg->{envelope};
 }
 
-sub retrieve
+sub header
 {
-  my ($self, $msgno, $bodylines) = @_;
+  my ($self, $msgno) = @_;
 
-  my $data = $self->{msgdata}->{$msgno};
+  my $data = $self->{folder_data}->{$msgno};
   return unless $data;
 
   my $header = substr ($self->{raw}, $data->{hbeg}, $data->{hend} - $data->{hbeg});
+  #::_debug (\$header);
+  return $header;
+}
 
-  my $body;
-  if (defined $bodylines && $bodylines != 0)
+sub body
+{
+  my ($self, $msgno) = @_;
+
+  my $bodylines = $opt{bodylines};
+  return unless (defined $bodylines && $bodylines != 0);
+
+  my $data = $self->{folder_data}->{$msgno};
+  return unless $data;
+
+  my $body = substr ($self->{raw}, $data->{bbeg}, $data->{bend} - $data->{bbeg} - 1);
+  if ($bodylines > 0)
     {
-      $body = substr ($self->{raw}, $data->{bbeg}, $data->{bend} - $data->{bbeg});
-      if ($bodylines > 0)
+      my $nl = 0;
+      while ($body =~ /\n/sgc && ++$nl < $bodylines) {}
+      substr ($body, pos ($body) -1, -1) = "";
+    }
+  return $body;
+}
+
+sub retrieve
+{
+  my ($self, $msgno) = @_;
+
+  ::_debug ($msgno);
+
+  my $header = $self->header ($msgno);
+  return unless $header;
+  my $body   = $self->body   ($msgno);
+
+  ::_debug (sub { {state=>1}, $header, $body });
+  return wantarray ? ($header, $body) : [$header, $body];
+}
+
+sub uncache_message
+{
+  my ($self, $msgno) = @_;
+  delete $self->{folder_data}->{$msgno};
+}
+
+
+package From::Mailbox::_Range;  # mixin for mailbox classes
+
+sub normalize_ranges
+{
+  my $self = shift;
+
+  ::_debug (@_);
+
+  my $min = 1;
+  my $max = $self->message_count;
+
+  unless (@_ && defined $_[0]) # ignore undef
+    {
+      return wantarray ? ([$min, $max]) : [[$min, $max]];
+    }
+
+  my $s = join (" ", @_);
+  if (defined $max)
+    {
+      while ($s =~ /(\d+)/g)
         {
-          my $nl = 0;
-          while ($body =~ /\n/sgc && ++$nl < $bodylines) {}
-          substr ($body, pos ($body) -1, -1) = "";
+          next unless $1 > $max;
+          my $len   = length ($1);
+          my $start = pos ($s) - $len;
+          substr ($s, $start, $len) = $max;
+          pos ($s) = $start;
         }
     }
-  return wantarray ? ($header, $body) : [$header, $body];
+  $s =~ s/\s*[:-]+\s*/-/g;
+  my @elt = split (/[\s,]+/, $s);
+
+  map { if (/^(\d*)-(\d*)$/)
+          {
+            if    ($1 && $2) { $_ = [$1,            $2]   }
+            elsif ($1)       { $_ = [$1,            $max] }
+            elsif ($2)       { $_ = [$max + 1 - $2, $max] }
+          }
+      } @elt;
+
+  my @single = sort { $a <=> $b } grep { /^\d+$/ } @elt;
+  my @range  =                    grep { ref $_  } @elt;
+
+  my @sunique;  # unique singletons
+  my $prev = -1;
+  my $dup = 0;
+  while (@single)   # Eliminate redundant singletons
+    {
+      my $n = shift @single;
+      next if $n == $prev; # duplicate
+      $prev = $n;
+
+      # check ranges
+      for my $r (@range)
+        {
+          next unless ($n >= $r->[0] && $n <= $r->[1]);
+          $dup = 1;
+          last;
+        }
+      push @sunique, $n unless $dup;
+    }
+  #::_debug (sub { ({state=>1}, "unique singletons", @sunique) });
+
+  # Convert remaining singletons into ranges if they are consecutive
+  while (@sunique)
+    {
+      my $beg  = shift @sunique;
+      my $step = $beg;
+      while (@sunique && $sunique[0] == $step + 1)
+        {
+          shift @sunique;
+          $step++;
+        }
+      if    ($step > $beg + 1) { push @range, [$beg, $step] }
+      elsif ($step > $beg)     { push @single, $beg, $step }
+      else                     { push @single, $beg }
+    }
+
+  my @range  = sort { $a->[0] <=> $b->[0] } @range; # now needs to be sorted
+  while (1 && @range) # Keep merging overlapping or adjacent ranges
+    {
+      my @k = ($range[0]);
+      for (my $ri = 1; $ri < @range; $ri++)
+        {
+          my $r = $range[$ri];
+          my ($rb, $re) = @$r;
+
+          my $found;
+          for (my $ki = 0; $ki < @k; $ki++)
+            {
+              my ($kb, $ke) = @{$k[$ki]};
+
+              $found = 1;
+              if ($re < $kb)                       # rb    re
+                {                                  #           kb    ke
+                  splice (@k, $ki, 0, $r);         # r before k
+                }
+              if ($rb >= $kb && $re <= $ke)        #  rb      re
+                {                                  # kb        ke
+                  # r is redundant; drop it.
+                }
+              elsif ($rb <= $kb && $re >= $ke)     # rb        re
+                {                                  #  kb      ke
+                  $k[$ki] = $r;                    # k is redundant
+                }
+              elsif ($rb <= $kb && $re + 1 >= $kb) # rb    re
+                {                                  #      kb    ke
+                  $k[$ki] = [$rb, $ke];
+                }
+              elsif ($rb >= $kb && $rb <= $ke + 1) #      rb    re
+                {                                  # kb    ke
+                  $k[$ki] = [$kb, $re];
+                }
+              else { $found = 0 } # else wait til the end to append r to k.
+              last if $found;
+            }
+          push @k, $r unless $found;
+        }
+      last if @k == @range;
+      @range = @k;
+    }
+  my @all = sort { if (ref $a && ref $b) { $a->[0] <=> $b->[0] }
+                   elsif (ref $a)        { $a->[0] <=> $b      }
+                   elsif (ref $b)        { $a      <=> $b->[0] }
+                   else                  { $a      <=> $b      }
+                 } (@single, @range);
+  #::_debug (sub { ({state=>1}, "final ranges", @all) });
+  return wantarray ? @all : \@all;
+}
+
+sub batch_ranges
+{
+  my $self = shift;
+
+  ::_debug (@_);
+  my @r = map { ref $_ ? [@$_] : $_ } @_; # copy
+  my (@ab, @tb);  # all batches, this batch
+
+  my $batch = $opt{batch_size};
+  return [\@r] unless $batch;
+
+  my $n = 1;
+
+  while (@r)
+    {
+      my $left = $batch - $n;
+      my $elt = $r[0];
+
+      if (ref $elt)
+        {
+          my ($beg, $end) = @$elt;
+          ::_debug (sub { {state=>1}, "elt", $elt });
+
+          if (($end - $beg) > $left)
+            {
+              $elt->[0] += $left + 1;
+
+              my $rend = $elt->[0] - 1;
+              push @tb, ($beg == $rend ? $beg : [$beg, $rend]);
+              $n += $left;
+            }
+          else
+            {
+              push @tb, $beg == $end ? $beg : $elt;
+              shift @r;
+              $n += ($end - $beg);
+            }
+        }
+      else
+        {
+          push @tb, shift @r;
+          $n++;
+        }
+
+      if ($n == $batch)
+        {
+          push @ab, [@tb]; # must copy, not reference var
+          undef @tb;
+          $n = 1;
+        }
+    }
+  push @ab, \@tb if @tb;
+  ::_debug (sub { {state=>1}, @ab });
+  return wantarray ? @ab : \@ab;
+}
+
+sub map_over_msgnos
+{
+  my ($self, $fn) = (shift, shift);
+
+  map { if (ref $_) { map { &$fn ($_) } ($_->[0] .. $_->[1]) }
+        else        { &$fn ($_) }
+      } $self->message_ranges (@_);
+}
+
+sub message_ranges
+{
+  my $self = shift;
+
+  return (@_
+          ? $self->normalize_ranges (@_)
+          : ($self->{message_range}
+             ? @{$self->{message_range}}
+             : $self->normalize_ranges (@{$opt{message_numbers}})));
+}
+
+sub format_message_range
+{
+  my $self = shift;
+  join (",", map { ref $_ ? sprintf("%d:%d", @$_) : $_ } @_);
+}
+
+sub in_batch # return batch into which n falls
+{
+  my ($self, $n, $all) = @_;
+
+  my $idx = 0;
+  map { my $batch = $_;
+        map { ::_debug (sub { {state=>1}, "in_batch : batch", $n, $_ });
+              return wantarray ? ($batch, $idx) : $batch
+                if ((ref $_
+                     && $n >= $_->[0]
+                     && $n <= $_->[1])
+                    || $n == $_);
+            } @$batch;
+        $idx++;
+      } @$all;
+  return;
+}
+
+sub batch_string
+{
+  my $self = shift;
+  ::_debug (@_);
+
+  return join (":", 1, $self->message_count)
+    unless @_ || $opt{message_numbers};
+
+  join (",", (map { ::_debug (sub { {state=>1}, $self->format_message_range ($_) });
+                    $self->format_message_range ($_)
+                  } @{$_[0]}));
 }
 
 
@@ -1590,7 +2126,6 @@ sub new
   my $class = shift;  # notused
   my $loc = shift;
 
-  $loc = default_spool_file() unless defined $loc;
   $loc = "file:///$loc" unless $loc =~ m|://|;
   my %spec = _parse_spec ($loc);
 
@@ -1606,7 +2141,10 @@ sub new
   ($spec{port} = lc $class) =~ s/^.*::// unless (defined $spec{port});
   $spec{pass} = input_noecho () unless defined $spec{pass} || $class =~ /file$/i;
   $spec{folder} = $spec{path} if defined $spec{path} && !defined $spec{folder};
-  return $class->new (%spec);
+
+  ::_debug (\%spec, @_);
+
+  return $class->new (%spec, @_);
 }
 
 sub _parse_spec
@@ -1644,9 +2182,7 @@ sub _parse_spec
              );
   map { delete $data{$_} unless defined $data{$_} && $data{$_} ne ""
       } keys %data;
-  ::_debug (sub { map { sprintf ("%s => %s", $_,
-                                 ($_ eq 'pass' ? "*" : $data{$_}))
-                      } sort keys %data });
+  ::_debug (\%data);
   return wantarray ? %data : \%data;
 }
 
@@ -1729,6 +2265,7 @@ sub new
 
   $self->{raw}        = shift;
   $self->{metadata}   = shift || {};
+  $self->{envelope}   = shift || [];
   $self->analyze;
   return $self;
 }
@@ -1744,10 +2281,9 @@ sub analyze
       my $printname = $1;
       my $name = lc $1;
       my $beg = pos $_;
-      my $end = pos $_ if /(?=\n[\S\n])/mgc;
+      my $end = pos $_ if /(?=\r?\n[\S\r\n])/mgc;
       push @{$header{$name}}, [$beg, $end, $printname];
     }
-
   ::_debug (\%header);
   $self->{headerdata} = \%header;
   return;
@@ -1788,7 +2324,13 @@ sub contents
 
   my $lname = lc $name;
 
-  return $self->fromto if $lname eq '{fromto}';
+  return $self->fromto          if $lname eq '{fromto}';
+  return $self->{envelope}->[0] if $lname eq '{envfrom}';
+  if ($lname eq '{envdate}')
+    {
+      my $date = $self->{envelope}->[1];
+      return $opt{parsep} ? _parse_date ($date) : $date;
+    }
   return $self->{metadata}->{$lname} if exists $self->{metadata}->{$lname};
   my $data = $self->{headerdata}->{$lname};
   return unless defined $data;
@@ -1852,7 +2394,7 @@ sub parsed
 
   ::_debug ($name);
 
-  my $fn = $header_parser{$name};
+  my $fn = $header_parser{$name} if $opt{parsep};
   return $self->contents ($name, $allp) unless $fn;
 
   my @contents = map { &$fn ($_) } $self->contents ($name, $allp);
@@ -1946,6 +2488,7 @@ sub _parse_rfc1522
 sub _parse_date
 {
   local $_ = shift;
+  return $_ unless defined $opt{date_format} && $opt{date_format} ne "";
 
   my ($tm, $offset) = From::Timestamp::_parse_timestamp ($_);
   return $_ unless $tm;
@@ -2369,6 +2912,13 @@ matching the regexp specified with B<--match-headers>.
 Only display specific message numbers.  This option can be specified
 multiple times and ranges are supported.  For example:
 
+=item B<--batch-size>=I<n>
+
+Fetch I<n> messages at a time from remote server, to reduce the number of
+round trips over the network.  A value of 0 means fetch the entire folder
+(or whatever messages were specified via the B<--message-numbers> option)
+at once.  The default is 64.
+
 =over 2
 
 =item * C<1,4,9>
@@ -2388,6 +2938,9 @@ Skip messages 1-9.
 Display the last 10 messages.
 
 =back
+
+Messages are always displayed in folder order even if message numbers
+specified with this option are listed out of order.
 
 =item B<-p>, B<--parse>
 
@@ -2496,7 +3049,7 @@ If server certificate is not signed by recognized authority, compare the
 subject CN (Common Name) and matching aliases against the server name or
 address, and accept the certificate if they match.
 
-This is less secure than verification via the certificate signature chain.
+This is less secure than verification via a certificate signature chain.
 Use of this option is not recommended.
 
 =item B<--ssl-no-verify>
@@ -2504,15 +3057,51 @@ Use of this option is not recommended.
 Do no certificate verification at all; just encrypt the connection.
 Use of this option is discouraged.
 
-=item B<--force-stunnel>
+=item B<--prefer-stunnel>
 
-Use the C<stunnel> program for an encrypted tunnel even if the native SSL
-interface is available to this program.
+Prefer using the stunnel program for encryption instead of the native
+perl SSL library, if it is available.  This is the default.
+
+=item B<--prefer-perl-ssl>
+
+Prefer using the native perl SSL interface (IO::Socket::SSL) instead of the
+C<stunnel> program, if it is available.
+
+B<Note>: The perl SSL interface has been observed to be significantly
+slower than stunnel, especially for large transfers in extraction mode.
 
 =item B<--stunnel-program>=I<program_name>    (default: C<stunnel>)
 
 Name of the stunnel program to call.  This can be a fully-qualified name or
 a relative name that will be searched for in the user's PATH.
+
+=item B<--prefer-socklib>=I<classes>
+
+Specify priority of perl classes to use for ordinary sockets.
+The first available class is used.
+This option can be specified multiple times and each argument can be a
+comma or space-separated list of classes to try loading.
+
+Class names should either be fully-qualified names or one of the following
+specially-recognized aliases:
+
+=over 2
+
+=item * B<inet6>
+
+This refers to C<IO::Socket::INET6>, which supports ipv4 and ipv6.
+
+=item * B<ip>
+
+This refers to C<IO::Socket::IP>, which supports ipv4 and ipv6.
+
+=item * B<inet4> or B<inet>
+
+This refers to C<IO::Socket::INET>, which supports ipv4 only.
+
+=back
+
+The default order is C<inet6, ip, inet>.
 
 =back
 
@@ -2543,10 +3132,11 @@ This is mainly for debugging.
 
 =item B<-D>, B<--debug>
 
-Show protocol messages and replies, and some parsing results.
+Show protocol messages and replies, and some parsing results.  This option
+may be repeated more than once for more verbose diagnostics.
 
-Warning: while passwords are elided from the output in every anticipated
-case, it is possible that one may be displayed.
+B<Warning>: while passwords are elided from the output at debug level 1,
+it is possible that one may be displayed at higher debug levels.
 
 =back
 
@@ -2734,7 +3324,8 @@ B<Header> is the name of the header, e.g. C<Subject>.
 Some special "header names" are defined for useful information that cannot
 generally be obtained directly from message headers.
 
-These special names, surrounded by curly braces, are:
+These special names, surrounded by curly braces (which, while technically
+legal in real header names, rarely ever occur), are:
 
 =over 4
 
@@ -2742,8 +3333,8 @@ These special names, surrounded by curly braces, are:
 
 =item * B<{TMSGNO}>
 
-The number of this message line irrespective of any folder it may have come
-from (if more than one folder was specified on the command line).
+The number of this message irrespective of any folder it may have come from
+(if more than one folder was specified on the command line).
 
 =item * B<{FMSGNO}>
 
@@ -2755,12 +3346,36 @@ specified on the command line.
 
 The name of this folder, as specified on the command line.
 
+=item * B<{OCTETS}>
+
+The size of this message, in 8-bit bytes.
+This includes the body and all headers.
+
 =item * B<{FROMTO}>
 
 The sender of the message if it isn't you, or C<To B<recipient>> otherwise.
 
 The option B<--me-match> sets the regexp which matches your email address.
 By default, this is just your current full name (as identified in the password database).
+
+=item * B<{ENVFROM}>
+
+The sender address in the "envelope" of the message.  This is normally the
+same address as in the C<Return-Path> header, but it is whatever the remote
+mail transfer agent specified as the C<MAIL FROM> address during the SMTP
+session which delivered the message.
+
+=item * B<{ENVDATE}>
+
+The local delivery time of the message.
+
+B<NOTICE>: If you are using this pseudoheader in the B<--date-format>
+argument (or setting the C<$opt{date_format}> variable from your
+C<.fromrc.pl> config file), this field will be formatted according to the
+value of the C<--time-zone> parameter, which defaults to C<sender>.  If you
+use this field, you may want to change the timezone of formatted dates to
+C<local> or else set an empty date format string, in which case no date
+parsing and reformatting according to timezone will occur.
 
 =back
 
@@ -2811,7 +3426,10 @@ you may wish to use the B<--no-parse> option to avoid any parsing
 =item I<FROMRCPL>
 
 Configuration file to load before parsing options.  This is expected to be
-a perl script which sets fields in the global C<%opt> variable.
+a perl script which sets fields in the global C<%opt> variable and/or
+C<%SSL_options> variable.  The easiest way to figure out which parameters
+to modify is to look at the C<parse_options> function in the source code of
+this program.
 
 For example, if you wanted the date field to ignore the year unless it was
 different from the current year, you could do this:
@@ -2828,6 +3446,11 @@ Or supposing you wanted to enable B<--utf8> mode automatically in the appropriat
         $opt{utf8} = 1
           if (   (defined $ENV{LANG}     && $ENV{LANG}     =~ /utf-?8/i)
               || (defined $ENV{LC_CTYPE} && $ENV{LC_CTYPE} =~ /utf-?8/i));
+
+To specify a location for SSL certificates, one might add something like the following;
+
+        $SSL_options{SSL_ca_file} = "/etc/pki/tls/certs/ca-bundle.crt";
+        $SSL_options{SSL_ca_path} = "/etc/pki/tls/certs/";
 
 =item I<FROMUSER>
 
@@ -2857,11 +3480,13 @@ In extraction mode, for example, it would be useful to have the option to
 display only the text/plain version of multipart/alternative messages,
 or to decode quoted-printable and base64 text.
 
-The C<IO::Socket::SSL> class does not implement connection timeouts as of
+The C<IO::Socket::IP> class does not implement connection timeouts as of
 perl v5.14.  I don't know why.
 
-The Pop3 support is relatively primitive.  This isn't likely to change,
-since this protocol is barely worth supporting at all.
+IMAP server-side search is not yet implemented.
+
+Pop3 support is relatively primitive.  This isn't likely to change, since
+this protocol is barely worth supporting at all.
 
 =head1 SEE ALSO
 
@@ -2880,6 +3505,7 @@ C implementation written by Brian Fox in 1990 for the GNU Project,
 which they never released.
 
 Support for the C<{FROMTO}> virtual header field was originally contributed
-by Jonathan Kamens <jik@kamens.us>.
+by Jonathan Kamens <jik@kamens.us>, who also provided suggestions which led
+to the creation of the C<{ENVFROM}> and C<{ENVDATE}> virtual header fields.
 
 =cut
