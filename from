@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.71 2014/01/26 19:49:00 friedman Exp $
+# $Id: from,v 1.72 2014/02/05 07:55:10 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -43,6 +43,8 @@ our @optional_modules
 our %opt;
 our %SSL_options;
 our ($SOCKLIB, $SOCKLIB_SSL);
+
+sub DEBUG (&;@); # prototype
 
 sub parse_options
 {
@@ -160,7 +162,7 @@ sub parse_options
                        ? [map { split (/[\s,]+/, $_) } @{$opt{interesting}}]
                        : \@interesting_default);
 
-  ::_debug ({state=>1}, \%opt, \%SSL_options);
+  ::DEBUG { {state=>1}, \%opt, \%SSL_options };
 }
 
 sub show_version
@@ -242,7 +244,7 @@ sub process_message
 {
   my ($mbox, $meta, $fmsgno) = @_;
 
-  ::_debug (@_);
+  ::DEBUG { @_ } @_;
   if ($opt{unread_only})
     {
       my %flags = $mbox->flags ($fmsgno);
@@ -254,7 +256,7 @@ sub process_message
     {
       $msg = $mbox->retrieve ($fmsgno);
       return unless defined $msg;
-      ::_debug (sub { {state=>1}, $msg});
+      ::DEBUG { {state=>1}, $msg };
     }
 
   if ($opt{match_regexp})
@@ -573,7 +575,7 @@ sub _error
   return;
 }
 
-sub _debug
+sub DEBUG (&;@)
 {
   return unless $debug;
 
@@ -586,7 +588,9 @@ sub _debug
       print STDERR "**\n", $@;
     }
 
-  @_ = &{$_[0]} if @_ == 1 && ref $_[0] eq 'CODE';
+  my $fn = shift;
+  @_ = eval { &$fn };
+
   my @caller = caller (1);
   my $pkg = $caller[0];
   my $fn  = $caller[3];
@@ -730,12 +734,12 @@ sub _connect_internal
   if ($class eq $stunnel_class)
     {
       my %s = $self->_ssl_args;
-      ::_debug (sub { $class, \%s, \%p });
+      ::DEBUG { $class, \%s, \%p };
       $fh = $class->new ( self => $self, %s, %p);
     }
   else
     {
-      ::_debug (sub { $class, \%p });
+      ::DEBUG { $class, \%p };
       $fh = $class->new (%p);
     }
   unless ($fh)
@@ -763,11 +767,11 @@ sub connect_ssl
 {
   my $self = shift;
   my $fh = $self->_connect_internal ($SOCKLIB_SSL, $self->_ssl_args, @_);
-  ::_debug (sub { ({state=>1},
+  ::DEBUG { ({state=>1},
                    $fh->get_cipher,
                    $fh->dump_peer_certificate,
-                  ) if $fh->can ('get_cipher')
-                }) if $fh;
+            ) if $fh->can ('get_cipher');
+          } if $fh;
   $self->{tls_started} = 1 if $fh;
   return $fh;
 }
@@ -780,7 +784,7 @@ sub starttls
   if ($SOCKLIB_SSL->can ('start_SSL'))
     {
       my %sslargs = ($self->_ssl_args);
-      ::_debug (sub { {state=>1}, 'STARTTLS', \%sslargs });
+      ::DEBUG { {state=>1}, 'STARTTLS', \%sslargs };
       unless ($SOCKLIB_SSL->start_SSL ($self->{fh}, %sslargs))
         {
           ::_error ($self->{uri}, $SOCKLIB_SSL->errstr ());
@@ -862,7 +866,7 @@ sub _ssl_verifycb
 {
   my $self = shift;
   my ($valid, $certstore_addr, $attrib_str, $liberrstr, $cert_addr) = @_;
-  ::_debug ({state=>1}, \@_);
+  ::DEBUG { {state=>1}, @_ } @_;
 
   return 1      if $opt{ssl_no_verify};
   return $valid if $valid || !$opt{ssl_verify_hostname};
@@ -947,7 +951,7 @@ sub connect
                 push @conf, "TIMEOUTbusy = $param{Timeout}";
               }
 
-            map { ::_debug ({state=>1}, \$_);
+            map { ::DEBUG { {state=>1}, $_ };
                   print $wc $_, "\n"
                 } @conf;
 
@@ -997,10 +1001,7 @@ sub new
   bless $self, $class;
 
   my %args = @_;
-  while (my ($key, $val) = each %args)
-    {
-      $self->{$key} = $val;
-    }
+  while (my ($key, $val) = each %args) { $self->{$key} = $val }
   $self->{host} ||= "localhost";
   return $self;
 }
@@ -1023,7 +1024,7 @@ sub disconnect
   my $fh = $self->{fh};
   return unless $fh;
 
-  ::_debug ($self->{uri});
+  ::DEBUG { $self->{uri} };
   $fh->shutdown (2); # 2 == SHUTDOWN_BOTH
   $fh->close;
   delete $self->{fh};
@@ -1033,14 +1034,14 @@ sub command
 {
   my $self = shift;
   { my $args = \@_;
-    ::_debug (sub { if (@$args == 4
-                        && lc $args->[0] eq 'auth'
-                        && lc $args->[1] eq 'login')
-                      { my @elide = @$args; $elide[3] = '*'; @elide }
-                    elsif (@$args == 2 && lc $args->[0] eq 'pass')
-                      { my @elide = @$args; $elide[1] = '*'; @elide }
-                    else { @$args }
-                  })
+    ::DEBUG { if (@$args == 4
+                  && lc $args->[0] eq 'auth'
+                  && lc $args->[1] eq 'login')
+                { my @elide = @$args; $elide[3] = '*'; @elide }
+              elsif (@$args == 2 && lc $args->[0] eq 'pass')
+                { my @elide = @$args; $elide[1] = '*'; @elide }
+              else { @$args }
+            };
   }
 
   my $fh = $self->{fh};
@@ -1234,7 +1235,7 @@ sub analyze_response
           }
       } @$response;
 
-  ::_debug (sub { {state=>1}, \%data });
+  ::DEBUG { {state=>1}, \%data };
   return \%data;
 }
 
@@ -1357,7 +1358,7 @@ sub flags
       } @{$data->{FLAGS}};
 
   return unless %flag;
-  ::_debug (sub { {state=>1}, $msgno, \%flag });
+  ::DEBUG { {state=>1}, $msgno, \%flag };
   return wantarray ? %flag : \%flag;
 }
 
@@ -1468,10 +1469,10 @@ sub retrieve
 {
   my ($self, $msgno) = @_;
 
-  ::_debug ($msgno);
+  ::DEBUG { $msgno };
   (my $header = $self->header ($msgno)) =~ s/\r$//gm;
   (my $body   = $self->body   ($msgno)) =~ s/\r$//gm;
-  ::_debug (sub { {state=>1}, $header, $body });
+  ::DEBUG { {state=>1}, $header, $body };
   return wantarray ? ($header, $body) : [$header, $body];
 }
 
@@ -1535,7 +1536,7 @@ sub response
   my $self = shift;
   my $fh = $self->{fh};
   my $line = <$fh>;
-  ::_debug ($line);
+  ::DEBUG { $line };
   return $line;
 }
 
@@ -1742,7 +1743,7 @@ sub analyze
       $this{bend} = pos ($_) if /^(?=$re_message_delimiter)/mogc || /$/sgc;
       $msg{$msgno} = \%this;
 
-      ::_debug (\%this);
+      ::DEBUG { \%this };
     }
 
   $self->{folder_data} = \%msg;
@@ -1817,7 +1818,7 @@ sub header
   return unless $data;
 
   my $header = substr ($self->{raw}, $data->{hbeg}, $data->{hend} - $data->{hbeg});
-  #::_debug (\$header);
+  #::DEBUG { $header };
   return $header;
 }
 
@@ -1845,13 +1846,13 @@ sub retrieve
 {
   my ($self, $msgno) = @_;
 
-  ::_debug ($msgno);
+  ::DEBUG { $msgno };
 
   my $header = $self->header ($msgno);
   return unless $header;
   my $body   = $self->body   ($msgno);
 
-  ::_debug (sub { {state=>1}, $header, $body });
+  ::DEBUG { {state=>1}, $header, $body };
   return wantarray ? ($header, $body) : [$header, $body];
 }
 
@@ -1868,7 +1869,7 @@ sub normalize_ranges
 {
   my $self = shift;
 
-  ::_debug (@_);
+  ::DEBUG { @_ } @_;
 
   my $min = 1;
   my $max = $self->message_count;
@@ -1922,7 +1923,7 @@ sub normalize_ranges
         }
       push @sunique, $n unless $dup;
     }
-  #::_debug (sub { ({state=>1}, "unique singletons", @sunique) });
+  #::DEBUG { ({state=>1}, "unique singletons", @sunique) };
 
   # Convert remaining singletons into ranges if they are consecutive
   while (@sunique)
@@ -1940,7 +1941,7 @@ sub normalize_ranges
     }
 
   my @range  = sort { $a->[0] <=> $b->[0] } @range; # now needs to be sorted
-  while (1 && @range) # Keep merging overlapping or adjacent ranges
+  while (@range) # Keep merging overlapping or adjacent ranges
     {
       my @k = ($range[0]);
       for (my $ri = 1; $ri < @range; $ri++)
@@ -1987,7 +1988,7 @@ sub normalize_ranges
                    elsif (ref $b)        { $a      <=> $b->[0] }
                    else                  { $a      <=> $b      }
                  } (@single, @range);
-  #::_debug (sub { ({state=>1}, "final ranges", @all) });
+  #::DEBUG { ({state=>1}, "final ranges", @all) };
   return wantarray ? @all : \@all;
 }
 
@@ -1995,7 +1996,7 @@ sub batch_ranges
 {
   my $self = shift;
 
-  ::_debug (@_);
+  ::DEBUG { @_ } @_;
   my @r = map { ref $_ ? [@$_] : $_ } @_; # copy
   my (@ab, @tb);  # all batches, this batch
 
@@ -2012,7 +2013,7 @@ sub batch_ranges
       if (ref $elt)
         {
           my ($beg, $end) = @$elt;
-          ::_debug (sub { {state=>1}, "elt", $elt });
+          ::DEBUG { {state=>1}, "elt", $elt };
 
           if (($end - $beg) > $left)
             {
@@ -2043,7 +2044,7 @@ sub batch_ranges
         }
     }
   push @ab, \@tb if @tb;
-  ::_debug (sub { {state=>1}, @ab });
+  ::DEBUG { {state=>1}, @ab };
   return wantarray ? @ab : \@ab;
 }
 
@@ -2079,7 +2080,7 @@ sub in_batch # return batch into which n falls
 
   my $idx = 0;
   map { my $batch = $_;
-        map { ::_debug (sub { {state=>1}, "in_batch : batch", $n, $_ });
+        map { ::DEBUG { {state=>1}, "in_batch : batch", $n, $_ };
               return wantarray ? ($batch, $idx) : $batch
                 if ((ref $_
                      && $n >= $_->[0]
@@ -2094,12 +2095,12 @@ sub in_batch # return batch into which n falls
 sub batch_string
 {
   my $self = shift;
-  ::_debug (@_);
+  ::DEBUG { @_ } @_;
 
   return join (":", 1, $self->message_count)
     unless @_ || $opt{message_numbers};
 
-  join (",", (map { ::_debug (sub { {state=>1}, $self->format_message_range ($_) });
+  join (",", (map { ::DEBUG { {state=>1}, $self->format_message_range ($_) };
                     $self->format_message_range ($_)
                   } @{$_[0]}));
 }
@@ -2142,7 +2143,7 @@ sub new
   $spec{pass} = input_noecho () unless defined $spec{pass} || $class =~ /file$/i;
   $spec{folder} = $spec{path} if defined $spec{path} && !defined $spec{folder};
 
-  ::_debug (\%spec, @_);
+  ::DEBUG { \%spec, @_ } @_;
 
   return $class->new (%spec, @_);
 }
@@ -2182,7 +2183,7 @@ sub _parse_spec
              );
   map { delete $data{$_} unless defined $data{$_} && $data{$_} ne ""
       } keys %data;
-  ::_debug (\%data);
+  ::DEBUG { \%data };
   return wantarray ? %data : \%data;
 }
 
@@ -2284,7 +2285,7 @@ sub analyze
       my $end = pos $_ if /(?=\r?\n[\S\r\n])/mgc;
       push @{$header{$name}}, [$beg, $end, $printname];
     }
-  ::_debug (\%header);
+  ::DEBUG { \%header };
   $self->{headerdata} = \%header;
   return;
 }
@@ -2299,7 +2300,7 @@ sub names
                : map { $header->{$_}->[0]->[2]
                      } sort { $header->{$a}->[0]->[0] <=> $header->{$b}->[0]->[0]
                             } keys %$header);
-  ::_debug (sub { $self, @names });
+  ::DEBUG { $self, @names };
   return wantarray ? @names : \@names;
 }
 
@@ -2342,7 +2343,7 @@ sub contents
       push @contents, substr ($self->{raw}, $beg, $end - $beg);
       last unless $allp;
     }
-  ::_debug (sub { $name, @contents });
+  ::DEBUG { $name, @contents };
   return wantarray ? @contents : \@contents;
 }
 
@@ -2392,7 +2393,7 @@ sub parsed
 {
   my ($self, $name, $allp) = @_;
 
-  ::_debug ($name);
+  ::DEBUG { $name };
 
   my $fn = $header_parser{$name} if $opt{parsep};
   return $self->contents ($name, $allp) unless $fn;
@@ -2424,7 +2425,7 @@ sub _parse_subject
 sub _parse_address
 {
   local $_ = $_[0];
-  ::_debug ($_);
+  ::DEBUG { $_ };
 
   $_ = $1
     if (   m/\((.*?)\)/       # From: foobar@host (real name)
@@ -2473,7 +2474,7 @@ sub _parse_rfc1522
             {
               # Just return original encoded text if there is a decoding problem.
               # e.g. perl 5.14.4 doesn't recognize the gb18030 charset.
-              ::_debug ($@);
+              ::DEBUG { $@ };
               return $_[0];
             }
         }
