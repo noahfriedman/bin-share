@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.72 2014/02/05 07:55:10 friedman Exp $
+# $Id: from,v 1.73 2014/02/09 01:47:05 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -2488,11 +2488,11 @@ sub _parse_rfc1522
 
 sub _parse_date
 {
-  local $_ = shift;
-  return $_ unless defined $opt{date_format} && $opt{date_format} ne "";
+  my $str = shift;
+  return $str unless defined $opt{date_format} && $opt{date_format} ne "";
 
-  my ($tm, $offset) = From::Timestamp::_parse_timestamp ($_);
-  return $_ unless $tm;
+  my ($tm, $offset) = From::Timestamp::_parse_timestamp ($str);
+  return $str unless $tm;
 
   my @tminfo;
   {
@@ -2511,13 +2511,15 @@ sub _parse_date
       }
     tzset (); # multithreaded perl 5.8.0 requires this
     @tminfo = localtime ($tm);
+
+    my $fmt = $opt{date_format};
+    local $_; # let formatter mangle
+    $fmt = &$fmt (@tminfo, $str) if ref $fmt eq 'CODE';
+    $str = strftime ($fmt, @tminfo) if defined $fmt;
   }
   tzset();    # restore timezone cache for perl 5.8.0
 
-  my $fmt = $opt{date_format};
-  $fmt = &$fmt (@tminfo) if ref $fmt eq 'CODE';
-  $_ = strftime ($fmt, @tminfo);
-  return $_;
+  return $str;
 }
 
 my @base64_decode_vector;
