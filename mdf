@@ -4,7 +4,7 @@
 # Created: 2001-01-11
 # Public domain.
 
-# $Id: mdf,v 1.14 2014/01/12 05:17:34 friedman Exp $
+# $Id: mdf,v 1.15 2014/01/25 01:14:51 friedman Exp $
 
 $^W = 1;  # enable warnings
 
@@ -160,7 +160,7 @@ sub get_df
   push @dfargs, "-i" if $opt{inodes};
 
   my $data = qx{ $df @dfargs @_ };
-  exit ($? >> 8) unless $? == 0 && $data;
+  exit ($? >> 8) unless $data;
 
   my $dnsdomain = dnsdomain ();
   $data =~ s=\.$dnsdomain:/=:/=gmo if defined $dnsdomain;
