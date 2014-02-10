@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.73 2014/02/09 01:47:05 friedman Exp $
+# $Id: from,v 1.72 2014/02/05 07:55:10 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "2.2.0";
+our $version = "3.0";
 
 # Optional perl modules that will improve the functionality of this program:
 our @optional_modules
@@ -60,6 +60,7 @@ sub parse_options
       header_regexp   => '^(?:Resent-)?(?:Sender|From|To|Cc|Subject)$',
       interesting     => [],
       message_numbers => [],
+      bodylines       => 0,
 
       user            => default_user(),
       columns         => output_columns(),
@@ -69,6 +70,7 @@ sub parse_options
       stunnel_prog    => $ENV{STUNNEL} || "stunnel",
 
       batch_size      => 64,  # set to 0 to retrieve all at once
+      block_size      => 1 * 1024 * 1024, # read mbox 1mb at a time
     );
 
   my @interesting_default =
@@ -97,7 +99,8 @@ sub parse_options
 
      'u|unread-only'            =>      \$opt{unread_only},
      'n|message-numbers=s@'     =>       $opt{message_numbers}, #arrayraf
-     'batch-size|batch=i'       =>      \$opt{batch_size},
+     'batch-size=i'             =>      \$opt{batch_size},
+     'block-size=i'             =>      \$opt{block_size},
 
      '1|one-line-headers'       =>      \$opt{onelinep},
      '2|multi-line-headers'     => sub { $opt{onelinep}      = 0 },
@@ -113,6 +116,7 @@ sub parse_options
      'd|date-format:s'          => sub { $opt{date_format} = interpolate ($_[1]) },
      'T|time-zone|tz=s'         =>      \$opt{tzdate},
      'utc|gmt'                  => sub { $opt{tzdate}      = 'UTC' },
+     'folder-time-zone=s'       =>      \$opt{folder_time_zone},
 
      'i|me-match=s'             =>      \$opt{me_match_regexp},
      'M|match-header=s'         =>      \$opt{header_regexp},
@@ -140,11 +144,7 @@ sub parse_options
   pod2usage (-exitstatus => 1, -verbose => 0)     unless $succ;
   pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
 
-  if ($opt{show_version})
-    {
-      show_version();
-      exit (0);
-    }
+  show_version() if $opt{show_version};
 
   $opt{pass}            = $ENV{FROMPASS}     unless defined $opt{pass};
   $opt{me_match_regexp} = default_me_match() unless defined $opt{me_match_regexp};
@@ -162,6 +162,28 @@ sub parse_options
                        ? [map { split (/[\s,]+/, $_) } @{$opt{interesting}}]
                        : \@interesting_default);
 
+  $opt{simple_count_p} = ($opt{countp} && ! (   $opt{unread_only}
+                                             || $opt{match_regexp}
+                                             || @{$opt{message_numbers}}));
+
+  # Convert strings like "US/Pacific" to "-0500".
+  my $z = $opt{folder_time_zone};
+  if (defined $z && $z !~ /^[+-]\d{4}$/)
+    {
+      use POSIX qw(strftime);
+      local $ENV{TZ} = $z;
+      if ($z =~ /^([+-]?)(\d+)$/)  # normalize numeric offsets
+        {
+          my ($sign, $off) = ($1, $2);
+          $off = "0$off" if length ($off) < 4;
+          $off .= "0" while length ($off) < 4;
+          $off =~ s/(\d\d)(\d\d)$/$1:$2/;
+          $sign =~ y/+-/-+/;  # Not sure why sign reversal needed
+          $ENV{TZ} = "UTC" . $sign . $off;
+        }
+      $opt{folder_time_zone} = strftime ("%z", localtime (time));
+    }
+
   ::DEBUG { {state=>1}, \%opt, \%SSL_options };
 }
 
@@ -171,9 +193,10 @@ sub show_version
 
   if ($::debug)
     {
+      $opt{need_net} = $opt{need_ssl} = 1;
       net_init();
-      local $SOCKLIB     = $SOCKLIB     || "(none loaded)";
-      local $SOCKLIB_SSL = $SOCKLIB_SSL || "(none loaded)";
+      $SOCKLIB     ||= "(none loaded)";
+      $SOCKLIB_SSL ||= "(none loaded)";
 
       printf "\nUsing %s v%vd\n", $^X, $^V;
       print "\nSocket library:       $SOCKLIB\n";
@@ -183,6 +206,7 @@ sub show_version
             printf("\t%-20s %s\n", $_, ($@ ? "no" : "yes"));
           } @optional_modules;
     }
+  exit (0);
 }
 
 sub net_init
@@ -217,11 +241,9 @@ sub main
           next;
         }
 
-      if ($opt{countp} && ! (   $opt{unread_only}
-                             || $opt{match_regexp}
-                             || $opt{message_numbers}))
+      if ($opt{simple_count_p})
         {
-          my $n = $mbox->message_count;
+          my $n = $mbox->message_count (1);
           if (@_ > 1) { printf ("%-10d %s\n",  $n, $folder) }
           else        { print $n, "\n" }
           next;
@@ -229,7 +251,11 @@ sub main
 
       # If counting filtered ranges, this will just accumulate
       # a match count.  Otherwise, it will print a summary.
-      $mbox->map_over_msgnos (sub { process_message ($mbox, \%meta, @_) });
+      $mbox->map_over_msgnos
+        (sub { my $result = process_message ($mbox, \%meta, $_[0]);
+               $mbox->uncache_message ($_[0]);
+               return $result;
+             });
       if ($opt{countp})
         {
           my $n = $mbox->{message_match_count};
@@ -346,12 +372,12 @@ sub print_message
             } $header->$contents ($_, 1);
       } @{$opt{interesting}};
 
-  if ($opt{utf8})
+  if ($opt{utf8} && defined $msg->[1])
     {
       utf8::decode ($msg->[1]);
       utf8::encode ($msg->[1]);
     }
-  print "\n", $msg->[1], "\n";
+  print "\n", $msg->[1] || "", "\n";
 }
 
 sub print_message_summary
@@ -556,6 +582,7 @@ sub _verbose
   my $msg = join (": ", $progname, @_);
   $msg .= "\n" unless substr ($msg, -1, 1) eq "\n";
   print STDERR $msg;
+  return;
 }
 
 sub _error
@@ -668,6 +695,8 @@ use Symbol;
 my $stunnel_class = q(From::Socket::Stunnel);
 my $ssl_class     = q(IO::Socket::SSL);
 
+our $SSL_ERROR    = ""; # Will be overridden by ssl_class if loaded.
+
 sub __init
 {
   local $errors_fatal = 1;
@@ -704,7 +733,7 @@ sub __init
         }
       else
         {
-          my $ssl_debug = $::debug ? "qw(debug3)" : "";
+          my $ssl_debug = $::debug ? "qw(:DEFAULT debug3)" : "";
           eval "use $ssl_class $ssl_debug";
           if ($@)
             {
@@ -744,7 +773,8 @@ sub _connect_internal
     }
   unless ($fh)
     {
-      ::_error ($self->{uri}, $@);
+      my $errstr = $@ || $SSL_ERROR;
+      ::_error ($self->{uri}, $errstr);
       return;
     }
 
@@ -815,22 +845,30 @@ sub _ssl_args
                %SSL_options,
               );
 
-  unless ($param{SSL_ca_file})
+  # Native SSL class in v5.18 does not permit both SSL_ca_file and
+  # SSL_ca_path to be specified.
+  # If neither is specified, prefer a ca path over a ca file.
+  unless ($SOCKLIB_SSL eq $ssl_class
+          && (defined $param{SSL_ca_file} || defined $param{SSL_ca_path}))
     {
-      my $cafile = $self->_ssl_cafile;
-      $param{SSL_ca_file} = $cafile if $cafile;
-    }
-
-  unless ($param{SSL_ca_path})
-    {
-      if ($param{SSL_ca_file})
+      unless (defined $param{SSL_ca_file})
         {
-          ($param{SSL_ca_path} = $param{SSL_ca_file}) =~ s=/+[^/]*$=/=;
+          my $cafile = $self->_ssl_cafile;
+          $param{SSL_ca_file} = $cafile if $cafile;
         }
-      else
+
+      unless (defined $param{SSL_ca_path})
         {
-          my @cadirs = $self->_ssl_certdirs;
-          $param{SSL_ca_path} = $cadirs[0] if @cadirs;
+          if (defined $param{SSL_ca_file})
+            {
+              ($param{SSL_ca_path} = $param{SSL_ca_file}) =~ s=/+[^/]*$=/=;
+              delete $param{SSL_ca_file} if $SOCKLIB_SSL eq $ssl_class;
+            }
+          else
+            {
+              my @cadirs = $self->_ssl_certdirs;
+              $param{SSL_ca_path} = $cadirs[0] if @cadirs;
+            }
         }
     }
   return %param;
@@ -917,6 +955,9 @@ use strict;
 
 our @ISA = qw(From::Socket);
 
+my $have_stunnel_cacheresult;
+my $stunnel_fips_enabled;
+
 *new = *connect; # symbol alias
 
 sub connect
@@ -939,16 +980,16 @@ sub connect
                         "ciphers        = HIGH",
                         "sslVersion     = $param{SSL_version}",
                        );
+            push @conf, "fips           = no"                  if $stunnel_fips_enabled;
             push @conf, "CApath         = $param{SSL_ca_path}" if $param{SSL_ca_path};
             push @conf, "CAfile         = $param{SSL_ca_file}" if $param{SSL_ca_file};
+            push @conf, "verify         = 2"               unless $opt{ssl_no_verify};
             push @conf, ("debug         = debug",
                          "foreground    = yes", # override; diagnostics on stderr
                         ) if $::debug;
             if ($opt{starttls} && $self->{proto} !~ /s$/)
               {
                 push @conf, "protocol = $self->{proto}";
-                # Not sure if this is the right choice.
-                push @conf, "TIMEOUTbusy = $param{Timeout}";
               }
 
             map { ::DEBUG { {state=>1}, $_ };
@@ -965,7 +1006,6 @@ sub connect
   $class->spawn ($fnchild, $fnparent);
 }
 
-my $have_stunnel_cacheresult;
 sub have_stunnel
 {
   return $have_stunnel_cacheresult if defined $have_stunnel_cacheresult;
@@ -982,7 +1022,8 @@ sub have_stunnel
   local $_ = <$fh>;
   close ($fh);
 
-  $have_stunnel_cacheresult = /Global options:/ ? 1 : 0;
+  $stunnel_fips_enabled     = $_ && /SSL:\S*FIPS[ ,]/;
+  $have_stunnel_cacheresult = $_ && /Global options:/;
 }
 
 
@@ -1109,6 +1150,8 @@ sub response
 {
   my $self = shift;
 
+  ::DEBUG { @_ } @_;
+
   return $self->{response} unless @_;
 
   my $tag = quotemeta (shift);
@@ -1120,6 +1163,7 @@ sub response
   while (1)
     {
       my $read = $fh->read ($_, 16384, $offset) if ::canread ($fh);
+      last unless $read;
       last if /^$tag (?:OK|NO|BAD|PREAUTH)(?: .*|)\n/m;
       $offset += $read if defined $read;
     }
@@ -1406,7 +1450,7 @@ sub body
   return unless $data;
   return $data->{TEXT} if exists $data->{TEXT};
 
-  my $bodylines = $opt{bodylines} + 0;  # force into numeric context
+  my $bodylines = $opt{bodylines};
   return unless $opt{extractp} && $bodylines != 0;
 
   my $batch = $self->in_batch ($msgno, $self->{batch_list});
@@ -1468,10 +1512,15 @@ sub body
 sub retrieve
 {
   my ($self, $msgno) = @_;
-
   ::DEBUG { $msgno };
-  (my $header = $self->header ($msgno)) =~ s/\r$//gm;
-  (my $body   = $self->body   ($msgno)) =~ s/\r$//gm;
+
+  my $header = $self->header ($msgno);
+  return unless $header;
+  $header =~ s/\r$//gm;
+
+  my $body = $self->body ($msgno);
+  $body =~ s/\r$//gm if defined $body;
+
   ::DEBUG { {state=>1}, $header, $body };
   return wantarray ? ($header, $body) : [$header, $body];
 }
@@ -1678,83 +1727,255 @@ sub connect
 package From::Mailbox::MboxFile;
 
 use strict;
-use IO::Handle;
+use IO::File;
+use Fcntl qw(:DEFAULT :seek);
 
 our @ISA = qw(From::NetCmd From::Mailbox::_Range);
+
+# This is perhaps a little too specific, but some MTAs do not
+# quote 'From ' at the beginning of a line in the body, especially
+# when writing to archive files.
+# The amount of whitespace between the address and the date seems to vary
+# on some systems.
+#
+# It is rare, but I have seen whitespace (quoted) in the address part of
+# the envelope, e.g.
+#   From "Speakeasy <support"@speakeasy.net  Thu Dec 19 22:46:37 2002
+my $re_message_delimiter = 'From\s+.*?\s+\S{3}\s+\S{3}\s+\d+\s+\d\d:\d\d';
+
+use constant { M_EBEG => 0,
+               M_HBEG => 1,
+               M_HEND => 2,
+               M_BEND => 3,
+
+               M_ENV  => 4,
+               M_HDR  => 5,
+               M_BDY  => 6,
+             };
 
 sub new
 {
   my $type = shift;
   my $class = ref ($type) || $type;
-  my $self = $class->SUPER::new (@_);
 
-  $self->{raw} = file_contents ($self->{folder});
-  $self->analyze;
+  my $self = {};
+  bless $self, $class;
+
+  my %args = @_;
+  while (my ($key, $val) = each %args) { $self->{$key} = $val }
+
+  $self->open || return;
+  $self->{folder_data} = {};
   $self->{message_range} = $self->normalize_ranges (@{$opt{message_numbers}});
   return $self;
 }
 
-sub xopen
-{
-  my $fh = IO::Handle->new;
-
-  unless (open ($fh, $_[0], @_[1 .. $#_])) # filename arg must be expicit
-    {
-      ::_error ("open", $_[0], $!);
-      return;
-    }
-  return $fh;
-}
-
-sub file_contents
-{
-  my $fh = xopen ($_[0]) || return;
-  local $/ = undef;
-  scalar <$fh>;
-}
-
-sub analyze
+sub open
 {
   my $self = shift;
+  my $fh = IO::File->new;
 
-  # This is perhaps a little too specific, but some MTAs do not
-  # quote 'From ' at the beginning of a line in the body, especially
-  # when writing to archive files.
-  # The amount of whitespace between the address and the date seems to vary
-  # on some systems.
-  #
-  # It is rare, but I have seen whitespace (quoted) in the address part of
-  # the envelope, e.g.
-  #   From "Speakeasy <support"@speakeasy.net  Thu Dec 19 22:46:37 2002
-  my $re_message_delimiter = 'From\s+.*?\s+\S{3}\s+\S{3}\s+\d+\s+\d\d:\d\d';
+  return ::_error ("open", $_[0], $!)
+      unless $fh->open ($self->{folder});
 
-  my %msg;
-  my $msgno = 0;
-  local *_ = \$self->{raw};
-  while (/^(${re_message_delimiter}.*)$/mogc)
+  $self->{stat} = [stat $fh];
+  $self->{fh}   = $fh;
+}
+
+# Create temp file and then immediately unlink it.  This will free the
+# space used automatically when the last reference to it is closed.
+sub copy_to_tmpfile
+{
+  my $self      = shift;
+  my $fh        = $self->{fh};
+  my $blocksize = $opt{block_size};
+
+  my $tmpdir = $ENV{TMPDIR} || $ENV{TEMPDIR} || "/tmp";
+  my $name   = "$tmpdir/from$<$$";  # uid + pid
+  ::DEBUG { $name };
+
+  my $tfh = IO::File->new;
+  return ::_error ("open", $name, "$!")
+      unless sysopen ($tfh, $name, O_RDWR | O_CREAT | O_EXCL, 0600);
+  unlink ($name);
+
+  local $_;
+  while ($fh->read ($_, $blocksize))
     {
-      $msgno++;
+      my $amt = $tfh->write ($_);
+      return ::_error ("write", $name, $!) unless defined $amt;
+    }
+  $self->{stat} = [stat $tfh];
+  $self->{fh} = $tfh;
+}
 
-      my %this;
-      $this{envelope} = $1;
-      $this{hbeg} = pos ($_) + 1;
-      $this{hend} = pos ($_) + 1 if /^$/mgc;
-      $this{bbeg} = pos ($_) + 1;
-      $this{bend} = pos ($_) if /^(?=$re_message_delimiter)/mogc || /$/sgc;
-      $msg{$msgno} = \%this;
+# Try to find the nearest offset earlier than msgno via bisection
+sub highest_scanned_before
+{
+  use integer;
+  my ($self, $msgno) = @_;
 
-      ::DEBUG { \%this };
+  my @seen = sort { $a <=> $b } keys %{$self->{folder_data}};
+  return 0 unless @seen;
+  my $last  = (scalar @seen) - 1;
+
+  return 0 if $msgno <= $seen[0];
+  return $seen[$last] if $msgno > $seen[$last]; # redundant check
+
+  my $len   = $last / 2;
+  my $start = $len;
+  while ($len > 1 || $seen[$start] >= $msgno)
+    {
+      return $seen[$start-1] if (       $seen[$start]   == $msgno
+                                 || (   $seen[$start-1] <  $msgno
+                                     && $seen[$start+1] >  $msgno));
+
+      $start -= $len while ($seen[$start] > $msgno);
+      $start += $len while ($seen[$start] < $msgno);
+      $len /= 2 if $len > 1;
+    }
+  return $seen[$start];
+}
+
+sub __grow_buffer
+{
+  $_[1] =~ /\n/gc unless defined pos $_[1]; # sometimes this gets lost
+  my $pos    = pos $_[1];  # Save and restore regexp pos on buffer
+  my $amt    = $_[0]->read ($_[1], $_[2], $_[3]);
+  pos $_[1]  = $pos;
+      $_[3] += $amt;
+
+  return $amt;
+}
+
+# Args: fh, buffer, size, offset into buffer
+# Creates a vector with the starting offset in the file of the envelope,
+# plus markers relative to that offset for the header block and body.
+# Includes the actual envelope, header, and body text if the corresponding
+# boolean params are true.
+sub scan_msgno
+{
+  my ($self, $target_msgno, $envp, $hdrp, $bdyp) = @_;
+
+  my $fdata        = $self->{folder_data};
+  my $msgno        = $self->highest_scanned_before ($target_msgno);
+  my $start_offset = (exists $fdata->{$msgno}
+                      ? $fdata->{$msgno}->[M_EBEG] + $fdata->{$msgno}->[M_BEND]
+                      : 0);
+  my $blocksize = $opt{block_size};
+  ::DEBUG { { target_msgno => $target_msgno,
+              start_msgno  => $msgno,
+              start_offset => $start_offset,
+              envp         => $envp,
+              hdrp         => $hdrp,
+              bdyp         => $bdyp, } };
+
+  my $fh = $self->{fh};
+  $fh->seek ($start_offset, SEEK_SET);
+
+  local $_;
+  my $amtread = $fh->read ($_, $blocksize);
+  return unless $amtread;
+  my $offset  = $amtread;
+
+  while (/^${re_message_delimiter}.*$/mogc)
+    {
+      last if (++$msgno == $target_msgno);
+
+      # Read in more data until we find the next envelope
+      $amtread = __grow_buffer ($fh, $_, $blocksize, $offset)
+        while (!/^(?=$re_message_delimiter)/mogc && $amtread == $blocksize);
+
+      my $len = pos ($_);
+      substr ($_, 0, $len) = "";  # discard skipped data
+      $start_offset += $len;
+      $offset = length $_;
+
+      ::DEBUG { "offset= $offset" };
     }
 
-  $self->{folder_data} = \%msg;
-  return;
+  $self->{last_scanned} = $msgno;
+  return unless $msgno == $target_msgno;
+
+  my $ebeg = $start_offset + 1; # skip preceding newline
+  my $eend = pos ($_);
+
+  my $hbeg = pos ($_) + 1; # does not include prior newline
+  # Read in more data until we find the end of the headers
+  $amtread = __grow_buffer ($fh, $_, $blocksize, $offset)
+    while (!/^$/mgc && $amtread == $blocksize);
+  my $hend = pos ($_) + 1;
+
+  # Read in more data until we find the next envelope or hit eof
+  $amtread = __grow_buffer ($fh, $_, $blocksize, $offset)
+    while (!/^(?=$re_message_delimiter)/mog && $amtread == $blocksize);
+  my $bend = (pos $_ ? pos ($_) : length ($_)) - 1; # don't include final newline
+
+  my @data = ($ebeg, $hbeg, $hend, $bend);
+  ::DEBUG { $msgno, @data };
+  $data[M_ENV] = substr ($_, 0,         $hbeg - 1    ) if $envp;
+  $data[M_HDR] = substr ($_, $hbeg,     $hend - $hbeg) if $hdrp;
+  if ($bdyp)
+    {
+      my $bodylines = $opt{bodylines};
+      if ($bodylines > 0)
+        {
+          my $nl = 1;
+          pos ($_) = $hend;
+          $nl++ while (/\n/sgc && $nl < $bodylines);
+          $data[M_BDY] = substr ($_, $hend, pos ($_) - $hend);
+        }
+      else
+        {
+          $data[M_BDY] = substr ($_, $hend, $bend - $hend);
+        }
+    }
+
+  #::DEBUG { \@data };
+  $fdata->{$msgno} = \@data;
+}
+
+sub analyze_message
+{
+  my ($self, $msgno) = @_;
+
+  my $fdata = $self->{folder_data};
+  return $fdata->{$msgno} if exists $fdata->{$msgno};
+
+  my ($envp, $hdrp, $bdyp);
+  if    ($opt{simple_count_p})                   {}
+  elsif ($opt{envelopep} && !$opt{match_regexp}) { $envp = 1 }
+  else
+    {
+      $envp = 1;
+      $hdrp = 1;
+      $bdyp = $opt{extractp};
+    }
+
+  $self->scan_msgno ($msgno, $envp, $hdrp, $bdyp);
 }
 
 sub message_count
 {
-  my $self = $_[0];
+  my $self = shift;
 
-  return scalar keys %{$self->{folder_data}};
+  ::DEBUG { @_ } @_;
+  my $n = scalar keys %{$self->{folder_data}};
+
+  if ($n == 0 && $_[0]) # force full scan
+    {
+      return unless ($opt{simple_count_p}
+                     || $self->{fh}->seek (0, SEEK_CUR) # seekable?
+                     || $self->copy_to_tmpfile);
+
+      # Try scanning as many messages as there are bytes in the file.
+      # scan will stop at last message, and because there are no
+      # intermediate method calls and marker recording, this will be faster
+      # than calling iteratively from 1 to n.
+      $self->scan_msgno ($self->{stat}->[7]); # st_size
+      $n = $self->{last_scanned};
+    }
+  return $n ? $n : undef;
 }
 
 sub message_size
@@ -1763,7 +1984,7 @@ sub message_size
 
   my $data = $self->{folder_data}->{$msgno};
 
-  return $data->{bend} - $data->{hbeg};
+  return $data->[M_BEND] - $data->[M_HBEG];
 }
 
 sub flags
@@ -1797,7 +2018,7 @@ sub envelope
   return unless $text;
 
   my ($addr, $date) = ($1, $2)
-    if $text =~ /^From (.*?)  (.*)/;
+    if $text =~ /^From (.*?)  ?(.*)/;
 
   return wantarray ? ($addr, $date) : [$addr, $date];
 }
@@ -1805,21 +2026,18 @@ sub envelope
 sub envelope_string
 {
   my ($self, $msgno) = @_;
-  my $msg = $self->{folder_data}->{$msgno};
+  my $msg = $self->analyze_message ($msgno);
   return unless $msg;
-  return $msg->{envelope};
+  return $msg->[M_ENV];
 }
 
 sub header
 {
   my ($self, $msgno) = @_;
 
-  my $data = $self->{folder_data}->{$msgno};
-  return unless $data;
-
-  my $header = substr ($self->{raw}, $data->{hbeg}, $data->{hend} - $data->{hbeg});
-  #::DEBUG { $header };
-  return $header;
+  my $msg = $self->analyze_message ($msgno);
+  return unless $msg;
+  return $msg->[M_HDR];
 }
 
 sub body
@@ -1829,28 +2047,21 @@ sub body
   my $bodylines = $opt{bodylines};
   return unless (defined $bodylines && $bodylines != 0);
 
-  my $data = $self->{folder_data}->{$msgno};
-  return unless $data;
+  my $msg = $self->analyze_message ($msgno);
+  return unless $msg;
 
-  my $body = substr ($self->{raw}, $data->{bbeg}, $data->{bend} - $data->{bbeg} - 1);
-  if ($bodylines > 0)
-    {
-      my $nl = 0;
-      while ($body =~ /\n/sgc && ++$nl < $bodylines) {}
-      substr ($body, pos ($body) -1, -1) = "";
-    }
-  return $body;
+  $msg->[M_BDY];
 }
 
 sub retrieve
 {
   my ($self, $msgno) = @_;
-
   ::DEBUG { $msgno };
 
   my $header = $self->header ($msgno);
   return unless $header;
-  my $body   = $self->body   ($msgno);
+
+  my $body   = $self->body ($msgno);
 
   ::DEBUG { {state=>1}, $header, $body };
   return wantarray ? ($header, $body) : [$header, $body];
@@ -1859,7 +2070,21 @@ sub retrieve
 sub uncache_message
 {
   my ($self, $msgno) = @_;
-  delete $self->{folder_data}->{$msgno};
+
+  my $fdata = $self->{folder_data};
+  my $msg   = $fdata->{$msgno};
+  return unless $msg;
+
+  # For the current msgno, just delete the header and body text.
+  # Save the markers because we'll need them for quickly locating
+  # the following message.
+  my $len = scalar @$msg;
+  splice (@$msg, 4, ($len - 4));
+
+  # The message prior to the current one can be purged completely.
+  delete $fdata->{$msgno - 1};
+
+  ::DEBUG { $msgno, @$msg };
 }
 
 
@@ -1876,6 +2101,7 @@ sub normalize_ranges
 
   unless (@_ && defined $_[0]) # ignore undef
     {
+      #::DEBUG { "default:", [$min, $max] };
       return wantarray ? ([$min, $max]) : [[$min, $max]];
     }
 
@@ -1896,9 +2122,12 @@ sub normalize_ranges
 
   map { if (/^(\d*)-(\d*)$/)
           {
-            if    ($1 && $2) { $_ = [$1,            $2]   }
-            elsif ($1)       { $_ = [$1,            $max] }
-            elsif ($2)       { $_ = [$max + 1 - $2, $max] }
+            if    ($1 && $2) { $_ = [$1, $2]   }
+            elsif ($1)       { $_ = [$1, $max] }
+            elsif ($2)       { # mbox: force full scan
+                               $max = $self->message_count (1) unless $max;
+                               $_ = [$max + 1 - $2, $max]
+                             }
           }
       } @elt;
 
@@ -2052,9 +2281,17 @@ sub map_over_msgnos
 {
   my ($self, $fn) = (shift, shift);
 
-  map { if (ref $_) { map { &$fn ($_) } ($_->[0] .. $_->[1]) }
+  map { if (ref $_) { my ($i, $end) = @$_;
+                      while (&$fn ($i))
+                        {
+                          last if defined $end && $i == $end;
+                          $i++;
+                        }
+                    }
         else        { &$fn ($_) }
-      } $self->message_ranges (@_);
+      } (@_ && ref $_[0]
+         ? @_
+         : $self->message_ranges (@_));
 }
 
 sub message_ranges
@@ -2330,6 +2567,10 @@ sub contents
   if ($lname eq '{envdate}')
     {
       my $date = $self->{envelope}->[1];
+      $date =~ s/ (\d{4})$/ $opt{folder_time_zone} $1/
+        if ($opt{parsep}
+            && defined $opt{folder_time_zone}
+            && $date !~ /[+-]\d{4}/);
       return $opt{parsep} ? _parse_date ($date) : $date;
     }
   return $self->{metadata}->{$lname} if exists $self->{metadata}->{$lname};
@@ -2496,7 +2737,7 @@ sub _parse_date
 
   my @tminfo;
   {
-    local $ENV{TZ};
+    local $ENV{TZ} = $ENV{TZ} if defined $ENV{TZ};
     if (! $opt{tzdate}) {}
     elsif (lc $opt{tzdate} eq 'local' || lc $opt{tzdate} eq 'tz') {}
     elsif (lc $opt{tzdate} eq 'sender' && $offset)
@@ -2505,7 +2746,7 @@ sub _parse_date
         $offset =~ y/+-/-+/;
         $ENV{TZ} = "UTC" . $offset;
       }
-    elsif ($opt{tzdate})
+    elsif ($opt{tzdate} ne 'sender')
       {
         $ENV{TZ} = $opt{tzdate};
       }
@@ -2608,7 +2849,7 @@ sub _parse_timestamp
       for my $elt (@time_parser_list)
         {
           my ($module, $fn) = @$elt;
-          eval "use $module";
+          eval "require $module";
           next if ($@ ne "");
           *time_parser = $fn;
           last;
@@ -2646,7 +2887,7 @@ sub cheesy_timestamp_parser
   #    Fri, 19 Apr 91 01:07:33 PDT
   #    Fri, 12 May 95 17:26 MET DST
   #    23 Dec 92 02:17:25
-  elsif (/^(?:\D+,?\s+)?(\d+)\s+(\S+)\s+(\d+)\s+(\d+):(\d+)(?::(\d\d))?(?:\s+([A-Za-z ]+))?/)
+  elsif (/^(?:\D+,?\s+)?(\d+)\s+(\S+)\s+(\d+)\s+(\d+):(\d+)(?::(\d\d))?(?:\s+([a-z ]+))?/i)
     {
       ($y, $m, $d, $H, $M, $S, $offset) = ($3, $month_conv{$2}, $1, $4, $5, $6, $7);
       $offset = tzconv ($offset) if $offset;
@@ -2656,7 +2897,8 @@ sub cheesy_timestamp_parser
   #    Sun Feb 17 23:41:23 1991
   #    Sat Jan  1 21:24:52 IST 2000
   #    Tue Jun 18 17:51:38 MET DST 1996
-  elsif (/^[a-z]{3}\s+([a-z]{3})\s+(\d+)\s+(\d+):(\d+):(\d\d)\s*?([a-z]{3,4}(?: DST|))?\s+(\d{4})/i)
+  #    Fri Nov 29 11:14:58 -0500 2013
+  elsif (/^[a-z]{3}\s+([a-z]{3})\s+(\d+)\s+(\d+):(\d+):(\d\d)\s*?([+-]\d{4}|[a-z]{3,4}(?: DST|))?\s+(\d{4})/i)
     {
       ($y, $m, $d, $H, $M, $S, $offset) = ($7, $month_conv{$1}, $2, $3, $4, $5, $6);
       $offset = tzconv ($offset) if $offset;
@@ -2732,7 +2974,7 @@ sub tzconv
   # Break out bigger guns.
   unless (*tz2zone{CODE})
     {
-       eval "use Time::Timezone ()";
+       eval "require Time::Timezone";
        if ($@ eq "")
          {
            *tz2zone   = \&Time::Timezone::tz2zone;
@@ -2760,7 +3002,7 @@ sub strftime_iso8601
 {
   my $fmt = shift;
 
-  local $_ = strftime ($fmt, @_);
+  local $_ = strftime ($fmt, @_[0 .. 8]);
 
   # We pad the end if shortened and not using zulu time consistently,
   # to keep widths consistent.
@@ -2784,16 +3026,17 @@ from - summarize mailbox folder
 
 =head1 SYNOPSIS
 
-     {-h|--help|--usage}                   {-C|--columns      COLS}
-     {-D|--debug}                          {-f|--format       FMT}
-     {-W|--warnings}                       {-d|--date-format  FMT}
-                                           {-T|--time-zone    TZ}
+     {-h|--help|--usage}                   {-C|--columns       COLS}
+     {-D|--debug}                          {-f|--format        FMT}
+     {-W|--warnings}                       {-d|--date-format   FMT}
+                                           {-T|--time-zone     TZ}
      {-c|--count-only}                     {--utc|--gmt}
-     {-e|--envelope}
-                                           {-i|--me-match     REGEX}
-     {-p|--parse}                          {-M|--match-header REGEX}
-     {-P|--no-parse}                       {-m|--match        REGEX}
-                                           {-s|--sender       REGEX}
+     {-e|--envelope}                       {--folder-time-zone TZ}
+
+                                           {-i|--me-match      REGEX}
+     {-p|--parse}                          {-M|--match-header  REGEX}
+     {-P|--no-parse}                       {-m|--match         REGEX}
+                                           {-s|--sender        REGEX}
      {-u|--unread-only}
      {-n|--message-numbers N1,...}         {-U|--utf8|--utf-8}
                                            {--no-utf8|--no-utf-8}
@@ -2803,12 +3046,12 @@ from - summarize mailbox folder
      {-I|--interesting-headers HDRS,...}
      {-E|--extract [LINES]}
 
-     {-S|--starttls}
-     {--ssl-verify-hostname}               {--ssl-ca-file     FILE}
-     {--ssl-no-verify}                     {--ssl-ca-path     DIR}
-     {--force-stunnel}                     {--stunnel-program PROGRAM}
-
-     {--connect-timeout SECONDS}
+     {-S|--starttls}                       {--ssl-ca-file     FILE}
+     {--ssl-verify-hostname}               {--ssl-ca-path     DIR}
+     {--ssl-no-verify}                     {--stunnel-program PROGRAM}
+     {--force-stunnel}
+                                           {--batch-size      COUNT}
+     {--connect-timeout SECONDS}           {--block-size      BYTES}
 
      [folder ...]
 
@@ -2824,7 +3067,7 @@ Long-format options may be abbreviated as long as the result is not ambiguous.
 
 =over 4
 
-=item B<-1>, B<--first-header-line>
+=item B<-1>, B<--one-line-headers>
 
 Un-fold wrapped header lines so they display as a single line.
 This is the default.
@@ -2861,6 +3104,23 @@ Format of the %Date field in summary output format (see B<--format>).
 This string can be any format understood by the C<strftime> library function.
 The default conforms to iso8601:2004.
 
+If you use a configuration file (see L</"ENVIRONMENT">) you can assign a
+string or a function to the C<$opt{date_format}> variable.  In the latter
+case, the function will be called with a 9-element array of the parsed
+timestamp plus a 10th element, the unparsed text string of the timestamp.
+The values will be those parsed by C<localtime> with the time zone
+specified by B<--time-zone> taken into consideration.  They are:
+
+     0     1     2      3      4     5      6      7      8      9
+   $sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst, $raw
+
+=item B<-e>, B<--envelope>
+
+Show message envelope instead of headers.
+This causes any formatting options (e.g. B<--columns>) to be ignored.
+
+This option only makes sense for local folders and, to a lesser degree, imap folders.
+
 =item B<-E>, B<--extract>, B<--extract=>I<LINES>
 
 Print the body of each matched message.
@@ -2872,12 +3132,10 @@ headers deemed "interesting" presented.  These headers can be specified via
 the B<--interesting-headers> option (which see) or if the B<-all-headers>
 option is specified, the entire original set of headers is displayed.
 
-=item B<-e>, B<--envelope>
+=item B<--folder-time-zone=>I<TZ>
 
-Show message envelope instead of headers.
-This causes any formatting options (e.g. B<--columns>) to be ignored.
-
-This option only makes sense for local folders and, to a lesser degree, imap folders.
+This option only meaningfully affects envelope timestamps.
+See C<{ENVDATE}> for details.
 
 =item B<-f>, B<--format=>I<FMT>
 
@@ -2914,13 +3172,6 @@ matching the regexp specified with B<--match-headers>.
 
 Only display specific message numbers.  This option can be specified
 multiple times and ranges are supported.  For example:
-
-=item B<--batch-size>=I<n>
-
-Fetch I<n> messages at a time from remote server, to reduce the number of
-round trips over the network.  A value of 0 means fetch the entire folder
-(or whatever messages were specified via the B<--message-numbers> option)
-at once.  The default is 64.
 
 =over 2
 
@@ -3110,7 +3361,7 @@ The default order is C<inet6, ip, inet>.
 
 =back
 
-=head2 DEBUGGING AND DIAGNOSTIC OPTIONS
+=head2 DEBUGGING, DIAGNOSTIC, AND PERFORMANCE OPTIONS
 
 =over 2
 
@@ -3140,6 +3391,20 @@ may be repeated more than once for more verbose diagnostics.
 
 B<Warning>: while passwords are elided from the output at debug level 1,
 it is possible that one may be displayed at higher debug levels.
+
+=item B<--batch-size>=I<n>
+
+Fetch I<n> messages at a time from remote server, to reduce the number of
+round trips over the network.  A value of 0 means fetch the entire folder
+(or whatever messages were specified via the B<--message-numbers> option)
+at once.  The default is 64.
+
+=item B<--block-size>=I<n>
+
+Read only I<n> bytes of data at a time from local folders while parsing.
+The default is 1MiB (1048576 bytes).  Setting this value much higher is not
+likely to improve performance since excess scans are discarded between
+processing of individual messages and just have to be read back in again.
 
 =back
 
@@ -3356,7 +3621,7 @@ This includes the body and all headers.
 
 =item * B<{FROMTO}>
 
-The sender of the message if it isn't you, or C<To B<recipient>> otherwise.
+The sender of the message if it isn't you, or C<< To I<recipient> >> otherwise.
 
 The option B<--me-match> sets the regexp which matches your email address.
 By default, this is just your current full name (as identified in the password database).
@@ -3372,13 +3637,11 @@ session which delivered the message.
 
 The local delivery time of the message.
 
-B<NOTICE>: If you are using this pseudoheader in the B<--date-format>
-argument (or setting the C<$opt{date_format}> variable from your
-C<.fromrc.pl> config file), this field will be formatted according to the
-value of the C<--time-zone> parameter, which defaults to C<sender>.  If you
-use this field, you may want to change the timezone of formatted dates to
-C<local> or else set an empty date format string, in which case no date
-parsing and reformatting according to timezone will occur.
+B<NOTICE>: Since envelope timestamps usually have no timezone offset
+indicator, these timestamps will be treated as "local" time by default.
+If you are retrieving messages from a remote mailbox located in a different
+timezone from your current one, use the B<--folder-time-zone> option to
+change the timezone in which envelope timestamps are considered.
 
 =back
 
@@ -3428,23 +3691,32 @@ you may wish to use the B<--no-parse> option to avoid any parsing
 
 =item I<FROMRCPL>
 
-Configuration file to load before parsing options.  This is expected to be
-a perl script which sets fields in the global C<%opt> variable and/or
-C<%SSL_options> variable.  The easiest way to figure out which parameters
-to modify is to look at the C<parse_options> function in the source code of
-this program.
+Configuration file to load before parsing options.
+The default is C<~/.fromrc.pl>.
+
+This should be a perl script which sets fields in the global C<%opt>
+variable and/or C<%SSL_options> variable.  The easiest way to figure out
+which parameters to modify is to look at the C<parse_options> function in
+the source code of this program.
 
 For example, if you wanted the date field to ignore the year unless it was
-different from the current year, you could do this:
+different from the current year, and you also wanted to show the offset of
+the date from UTC only when showing timestamps in the sender's timezone,
+you could do this:
 
 	use POSIX qw(strftime);
 	my $thisyear = strftime ("%Y", localtime (time)) - 1900;
-	$opt{date_format} = sub { return $_[5] != $thisyear
-                                         ? "%b %d %H:%M %Y"
-                                         : "%b %d %H:%M"
-                                };
+        $opt{date_format}
+          = sub { join ("",
+                        ($_[5] != $thisyear
+                         ? "%b %d %H:%M %Y"
+                         : "%b %d %H:%M"),
 
-Or supposing you wanted to enable B<--utf8> mode automatically in the appropriate locale:
+                        ($opt{tzdate} eq 'sender'
+                         ? " %z" : ""));
+                };
+
+Suppose you wanted to enable B<--utf8> mode automatically in the appropriate locale:
 
         $opt{utf8} = 1
           if (   (defined $ENV{LANG}     && $ENV{LANG}     =~ /utf-?8/i)
@@ -3454,6 +3726,17 @@ To specify a location for SSL certificates, one might add something like the fol
 
         $SSL_options{SSL_ca_file} = "/etc/pki/tls/certs/ca-bundle.crt";
         $SSL_options{SSL_ca_path} = "/etc/pki/tls/certs/";
+
+=item I<FROMMAIL>, I<MAIL>
+
+Mail folder to open if none is specified on the command line.
+May be a local or remote folder.
+
+C<MAIL> is only used if C<FROMMAIL> is not defined.
+
+You can set a default folder in your ~/.fromrc.pl file as follows:
+
+        $ENV{FROMMAIL} = 'imap://localhost/INBOX';
 
 =item I<FROMUSER>
 
@@ -3465,12 +3748,14 @@ C<LOGNAME> or C<USER> environment variables are used instead.
 Password for remote mailboxen, if not included in folder URL.
 If no password is specified, one is prompted for interactively.
 
-=item I<FROMMAIL>, I<MAIL>
+You can set a default password in your C<~/.fromrc.pl> file like so:
 
-Mail folder to open if none is specified on the command line.
-May be a local or remote folder.
+        $ENV{FROMPASS} = 'squeamish ossifrage';
 
-C<MAIL> is only used if C<FROMMAIL> is not defined.
+or
+
+        # chomp() will remove any trailing newline
+        chomp ($ENV{FROMPASS} = `cat .secret`);
 
 =back
 
@@ -3504,7 +3789,7 @@ Noah Friedman <friedman@splode.com>
 The C<from> command originally appeared in 3.0BSD.
 
 This Perl-based implementation drew much inspiration from a
-C implementation written by Brian Fox in 1990 for the GNU Project,
+version written in C by Brian Fox in 1990 for the GNU Project,
 which they never released.
 
 Support for the C<{FROMTO}> virtual header field was originally contributed
