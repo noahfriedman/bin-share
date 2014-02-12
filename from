@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.76 2014/02/10 10:54:59 friedman Exp $
+# $Id: from,v 1.77 2014/02/12 07:46:39 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "3.0.1";
+our $version = "3.0.2";
 
 # Optional perl modules that will improve the functionality of this program:
 our @optional_modules
@@ -1783,7 +1783,11 @@ sub open
   return ::_error ("open", $_[0], $!)
       unless $fh->open ($self->{folder});
 
-  $self->{stat} = [stat $fh];
+  my @st = stat $fh;
+  # If regular file < 16mb, read whole thing in at once
+  $self->{block_size} = $st[7] && $st[7] < 2**24 ? $st[7] : $opt{block_size};
+
+  $self->{stat} = \@st;
   $self->{fh}   = $fh;
 }
 
@@ -1849,6 +1853,7 @@ sub __grow_buffer
   pos $_[1]  = $pos;
       $_[3] += $amt;
       $_[4]  = $amt;
+  ::DEBUG { { marker => $pos, amtread => $amt, offset => $_[3], } } @_;
   return $amt;
 }
 
@@ -1866,7 +1871,7 @@ sub scan_msgno
   my $start_offset = (exists $fdata->{$msgno}
                       ? $fdata->{$msgno}->[M_EBEG] + $fdata->{$msgno}->[M_BEND]
                       : 0);
-  my $blocksize = $opt{block_size};
+  my $blocksize = $self->{block_size};
   ::DEBUG { { target_msgno => $target_msgno,
               start_msgno  => $msgno,
               start_offset => $start_offset,
@@ -3406,10 +3411,13 @@ at once.  The default is 64.
 
 =item B<--block-size>=I<n>
 
-Read only I<n> bytes of data at a time from local folders while parsing.
-The default is 524288 (512KiB).  Setting this value higher has not been
-observed to improve performance significantly, but it will increase memory
-footprint.
+Read only I<n> bytes of data at a time from local mbox folders while
+parsing.  The default is 524288 (512KiB).  Setting this value higher will
+have diminishing performance improvement for larger files when not I/O
+bound, and increase memory footprint significantly.
+
+Regardless of this setting, for local mbox folders less than 16MiB the
+entire file is read into memory at once to improve speed.
 
 =back
 
