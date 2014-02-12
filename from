@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.75 2014/02/10 10:34:12 friedman Exp $
+# $Id: from,v 1.76 2014/02/10 10:54:59 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "3.0";
+our $version = "3.0.1";
 
 # Optional perl modules that will improve the functionality of this program:
 our @optional_modules
@@ -69,8 +69,8 @@ sub parse_options
       prefer_stunnel  => 1,
       stunnel_prog    => $ENV{STUNNEL} || "stunnel",
 
-      batch_size      => 64,  # set to 0 to retrieve all at once
-      block_size      => 1 * 1024 * 1024, # read mbox 1mb at a time
+      batch_size      => 64,      # set to 0 to retrieve all at once
+      block_size      => 2**19,   # read mbox 512k at a time
     );
 
   my @interesting_default =
@@ -183,6 +183,9 @@ sub parse_options
         }
       $opt{folder_time_zone} = strftime ("%z", localtime (time));
     }
+
+  my $min = 4096; # Don't allow a blocksize less than this.
+  $opt{block_size} = $min if $opt{block_size} < $min;
 
   ::DEBUG { {state=>1}, \%opt, \%SSL_options };
 }
@@ -1765,7 +1768,9 @@ sub new
   while (my ($key, $val) = each %args) { $self->{$key} = $val }
 
   $self->open || return;
-  $self->{folder_data} = {};
+  $self->{buffer}        = "";
+  $self->{last_scanned}  = 0;
+  $self->{folder_data}   = {};
   $self->{message_range} = $self->normalize_ranges (@{$opt{message_numbers}});
   return $self;
 }
@@ -1839,12 +1844,11 @@ sub highest_scanned_before
 
 sub __grow_buffer
 {
-  $_[1] =~ /\n/gc unless defined pos $_[1]; # sometimes this gets lost
   my $pos    = pos $_[1];  # Save and restore regexp pos on buffer
   my $amt    = $_[0]->read ($_[1], $_[2], $_[3]);
   pos $_[1]  = $pos;
       $_[3] += $amt;
-
+      $_[4]  = $amt;
   return $amt;
 }
 
@@ -1870,28 +1874,30 @@ sub scan_msgno
               hdrp         => $hdrp,
               bdyp         => $bdyp, } };
 
+  my ($amtread, $offset) = ($blocksize, 0);
+  local *_ = \$self->{buffer}; # alias $_ to our buffer string
+  # If continuing from last search, pick up where we left off.
+  if ($msgno == $self->{last_scanned}) { $offset = length $_ }
+  else                                 { $_ = "" }
+
   my $fh = $self->{fh};
-  $fh->seek ($start_offset, SEEK_SET);
+  $fh->seek ($start_offset + $offset, SEEK_SET);
+  # Make sure buffer is long enough to find any reasonable envelope
+  __grow_buffer ($fh, $_, $blocksize, $offset, $amtread) unless $offset > 4096;
 
-  local $_;
-  my $amtread = $fh->read ($_, $blocksize);
-  return unless $amtread;
-  my $offset  = $amtread;
-
+  pos $_ = 0;
   while (/^${re_message_delimiter}.*$/mogc)
     {
       last if (++$msgno == $target_msgno);
 
       # Read in more data until we find the next envelope
-      $amtread = __grow_buffer ($fh, $_, $blocksize, $offset)
+      __grow_buffer ($fh, $_, $blocksize, $offset, $amtread)
         while (!/^(?=$re_message_delimiter)/mogc && $amtread == $blocksize);
 
       my $len = pos ($_);
       substr ($_, 0, $len) = "";  # discard skipped data
       $start_offset += $len;
       $offset = length $_;
-
-      ::DEBUG { "offset= $offset" };
     }
 
   $self->{last_scanned} = $msgno;
@@ -1902,19 +1908,19 @@ sub scan_msgno
 
   my $hbeg = pos ($_) + 1; # does not include prior newline
   # Read in more data until we find the end of the headers
-  $amtread = __grow_buffer ($fh, $_, $blocksize, $offset)
+  __grow_buffer ($fh, $_, $blocksize, $offset, $amtread)
     while (!/^$/mgc && $amtread == $blocksize);
   my $hend = pos ($_) + 1;
 
   # Read in more data until we find the next envelope or hit eof
-  $amtread = __grow_buffer ($fh, $_, $blocksize, $offset)
-    while (!/^(?=$re_message_delimiter)/mog && $amtread == $blocksize);
+  __grow_buffer ($fh, $_, $blocksize, $offset, $amtread)
+    while (!/^(?=$re_message_delimiter)/mogc && $amtread == $blocksize);
   my $bend = (pos $_ ? pos ($_) : length ($_)) - 1; # don't include final newline
 
   my @data = ($ebeg, $hbeg, $hend, $bend);
   ::DEBUG { $msgno, @data };
-  $data[M_ENV] = substr ($_, 0,         $hbeg - 1    ) if $envp;
-  $data[M_HDR] = substr ($_, $hbeg,     $hend - $hbeg) if $hdrp;
+  $data[M_ENV] = substr ($_, 0,     $hbeg - 1    ) if $envp;
+  $data[M_HDR] = substr ($_, $hbeg, $hend - $hbeg) if $hdrp;
   if ($bdyp)
     {
       my $bodylines = $opt{bodylines};
@@ -1930,8 +1936,7 @@ sub scan_msgno
           $data[M_BDY] = substr ($_, $hend, $bend - $hend);
         }
     }
-
-  #::DEBUG { \@data };
+  substr ($_, 0, $bend + 1) = "";  # trim buffer up to start of next msg.
   $fdata->{$msgno} = \@data;
 }
 
@@ -3402,9 +3407,9 @@ at once.  The default is 64.
 =item B<--block-size>=I<n>
 
 Read only I<n> bytes of data at a time from local folders while parsing.
-The default is 1MiB (1048576 bytes).  Setting this value much higher is not
-likely to improve performance since excess scans are discarded between
-processing of individual messages and just have to be read back in again.
+The default is 524288 (512KiB).  Setting this value higher has not been
+observed to improve performance significantly, but it will increase memory
+footprint.
 
 =back
 
