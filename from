@@ -1,12 +1,12 @@
 #!/usr/bin/env perl
 # from --- show you who your mail is from
 
-# Copyright (C) 1992, 1995-2000, 2002, 2003, 2011, 2014 Noah S. Friedman
+# Copyright (C) 1992, 1995-2000, 2002-2003, 2011, 2014 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.77 2014/02/12 07:46:39 friedman Exp $
+# $Id: from,v 1.78 2014/02/12 08:34:25 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "3.0.2";
+our $version = "3.0.3";
 
 # Optional perl modules that will improve the functionality of this program:
 our @optional_modules
@@ -45,6 +45,8 @@ our %SSL_options;
 our ($SOCKLIB, $SOCKLIB_SSL);
 
 sub DEBUG (&;@); # prototype
+
+use constant MIN_BLOCKSIZE => 4096;
 
 sub parse_options
 {
@@ -70,7 +72,7 @@ sub parse_options
       stunnel_prog    => $ENV{STUNNEL} || "stunnel",
 
       batch_size      => 64,      # set to 0 to retrieve all at once
-      block_size      => 2**19,   # read mbox 512k at a time
+      block_size      => 2**19,   # read 512k at a time
     );
 
   my @interesting_default =
@@ -118,10 +120,11 @@ sub parse_options
      'utc|gmt'                  => sub { $opt{tzdate}      = 'UTC' },
      'folder-time-zone=s'       =>      \$opt{folder_time_zone},
 
-     'i|me-match=s'             =>      \$opt{me_match_regexp},
+     'i|ignore-case!'           =>      \$opt{ignore_case},
+     'me-match=s'               =>      \$opt{me_match_regexp},
      'M|match-header=s'         =>      \$opt{header_regexp},
      'm|match=s'                =>      \$opt{match_regexp},
-     's|sender=s'               => sub { $opt{header_regexp} = '^From|Sender$';
+     's|sender=s'               => sub { $opt{header_regexp} = '^(?:From|Sender)$';
                                          $opt{match_regexp}  = $_[1] },
 
      'S|starttls'               =>      \$opt{starttls},
@@ -148,6 +151,12 @@ sub parse_options
 
   $opt{pass}            = $ENV{FROMPASS}     unless defined $opt{pass};
   $opt{me_match_regexp} = default_me_match() unless defined $opt{me_match_regexp};
+  # Pre-compile any defined regexps
+  map { ($opt{$_} = $opt{ignore_case} ? qr/$opt{$_}/i : qr/$opt{$_}/)
+          if defined $opt{$_}
+      } qw(header_regexp match_regexp me_match_regexp);
+
+
   $opt{format_parsed}   = parse_format_string ($opt{format});
   {
     my @hdata = @{$opt{format_parsed}};
@@ -184,8 +193,8 @@ sub parse_options
       $opt{folder_time_zone} = strftime ("%z", localtime (time));
     }
 
-  my $min = 4096; # Don't allow a blocksize less than this.
-  $opt{block_size} = $min if $opt{block_size} < $min;
+  # Don't allow a blocksize less than this.
+  $opt{block_size} = MIN_BLOCKSIZE if $opt{block_size} < MIN_BLOCKSIZE;
 
   ::DEBUG { {state=>1}, \%opt, \%SSL_options };
 }
@@ -290,22 +299,19 @@ sub process_message
 
   if ($opt{match_regexp})
     {
-      my $header_regexp = $opt{header_regexp};
-      my $re = $opt{match_regexp};
-
       my $header = From::Header->new ($msg->[0]);
       return unless $header;
-      my @names = $header->names;
+      my @names = grep { /$opt{header_regexp}/i } $header->names;
       my $found;
 
       for my $h (@names)
         {
-          next unless $h =~ /$header_regexp/io;
           for my $c ($header->contents ($h, 1), $header->parsed ($h, 1))
             {
-              $found = 1 if $c =~ /$re/mo;
+              $found = 1 if $c =~ /$opt{match_regexp}/m;
               last if $found;
             }
+          last if $found;
         }
       return 1 unless $found;
     }
@@ -681,8 +687,7 @@ sub printobj
 # For rc file convenience.
 sub command_output
 {
-  local $_ = `@_`;
-  chomp; # delete any trailing newline
+  chomp (local $_ = `@_`);
   return $_;
 }
 
@@ -1090,7 +1095,7 @@ sub command
 
   my $fh = $self->{fh};
   return unless $fh;
-  $fh->write (join (" ", @_) . "\r\n");
+  $fh->syswrite (join (" ", @_) . "\r\n");
 }
 
 
@@ -1161,14 +1166,13 @@ sub response
   my $fh = $self->{fh};
 
   local $_;
-  my $offset = 0;
+  my ($offset, $read) = (0, 0);
   $fh->blocking (0);
-  while (1)
+  while (::canread ($fh))  # Don't use timeout
     {
-      my $read = $fh->read ($_, 16384, $offset) if ::canread ($fh);
-      last unless $read;
+      # Must use sysread; don't mix buffered io with select.
+      $offset += $read while $read = $fh->sysread ($_, $opt{block_size}, $offset);
       last if /^$tag (?:OK|NO|BAD|PREAUTH)(?: .*|)\n/m;
-      $offset += $read if defined $read;
     }
   $fh->blocking (1);
 
@@ -1176,7 +1180,7 @@ sub response
   return $_;
 }
 
-# Amazingly cheesy pseudo- recursive descent parser.
+# Amazingly cheesy recursive descent parser.
 # Takes a server response and converts it into a perl data structure.
 sub parse_response
 {
@@ -1322,11 +1326,10 @@ sub login
 {
   my ($self, $login, $pass) = @_;
 
-  return 1 if $self->command_ok_p ("AUTH", "login", $login, $pass);
+  return 1 if $self->command_ok_p ("AUTH", "LOGIN", $login, $pass);
 
+  ::_error ($self->{uri}, scalar $self->response);
   $self->disconnect;
-  my $response = $self->response;
-  ::_error ($self->{uri}, $response);
   return;
 }
 
@@ -1334,7 +1337,7 @@ sub logout
 {
   my $self = shift;
 
-  $self->command_ok_p ("AUTH", "logout");
+  $self->command_ok_p ("AUTH", "LOGOUT");
   $self->disconnect;
   return;
 }
@@ -1349,7 +1352,7 @@ sub message_count
   $self->{folder} = $_[0] if @_;
   my $folder = $self->{folder};
 
-  return unless $self->command_ok_p ("EXAMINE", "examine", "$folder");
+  return unless $self->command_ok_p ("EXAMINE", "EXAMINE", "$folder");
   my $result = $self->response;
 
   # We don't use the parse/analyze methods because this response is
@@ -1689,7 +1692,7 @@ sub retrieve
   my $pos = 0;
   while (1)
     {
-      my $rsz = $fh->read ($_, 1024, $pos);
+      my $rsz = $fh->read ($_, $opt{block_size}, $pos);
       last if (!defined $rsz
                && length $_ > 4
                && substr ($_, -4) =~ /^\.[\r\n]/m);
@@ -1735,11 +1738,9 @@ use Fcntl qw(:DEFAULT :seek);
 
 our @ISA = qw(From::NetCmd From::Mailbox::_Range);
 
-# This is perhaps a little too specific, but some MTAs do not
-# quote 'From ' at the beginning of a line in the body, especially
-# when writing to archive files.
-# The amount of whitespace between the address and the date seems to vary
-# on some systems.
+# Some MTAs do not quote 'From ' at the beginning of a line in the body,
+# especially when writing to archive files.  The amount of whitespace
+# between the address and the date seems to vary on some systems.
 #
 # It is rare, but I have seen whitespace (quoted) in the address part of
 # the envelope, e.g.
@@ -1797,7 +1798,7 @@ sub copy_to_tmpfile
 {
   my $self      = shift;
   my $fh        = $self->{fh};
-  my $blocksize = $opt{block_size};
+  my $blocksize = $self->{block_size};
 
   my $tmpdir = $ENV{TMPDIR} || $ENV{TEMPDIR} || "/tmp";
   my $name   = "$tmpdir/from$<$$";  # uid + pid
@@ -1828,8 +1829,8 @@ sub highest_scanned_before
   return 0 unless @seen;
   my $last  = (scalar @seen) - 1;
 
-  return 0 if $msgno <= $seen[0];
-  return $seen[$last] if $msgno > $seen[$last]; # redundant check
+  return 0            if $msgno <= $seen[0];
+  return $seen[$last] if $msgno >  $seen[$last]; # most common case
 
   my $len   = $last / 2;
   my $start = $len;
@@ -1846,6 +1847,8 @@ sub highest_scanned_before
   return $seen[$start];
 }
 
+# Args: fh, buffer, size, offset into buffer, var for amtread
+# Side-effects: modifies buffer, offset, and amtread in-place.
 sub __grow_buffer
 {
   my $pos    = pos $_[1];  # Save and restore regexp pos on buffer
@@ -1857,7 +1860,6 @@ sub __grow_buffer
   return $amt;
 }
 
-# Args: fh, buffer, size, offset into buffer
 # Creates a vector with the starting offset in the file of the envelope,
 # plus markers relative to that offset for the header block and body.
 # Includes the actual envelope, header, and body text if the corresponding
@@ -1888,7 +1890,8 @@ sub scan_msgno
   my $fh = $self->{fh};
   $fh->seek ($start_offset + $offset, SEEK_SET);
   # Make sure buffer is long enough to find any reasonable envelope
-  __grow_buffer ($fh, $_, $blocksize, $offset, $amtread) unless $offset > 4096;
+  __grow_buffer ($fh, $_, $blocksize, $offset, $amtread)
+    unless $offset > ::MIN_BLOCKSIZE;
 
   pos $_ = 0;
   while (/^${re_message_delimiter}.*$/mogc)
@@ -1899,7 +1902,7 @@ sub scan_msgno
       __grow_buffer ($fh, $_, $blocksize, $offset, $amtread)
         while (!/^(?=$re_message_delimiter)/mogc && $amtread == $blocksize);
 
-      my $len = pos ($_);
+      my $len = pos $_;
       substr ($_, 0, $len) = "";  # discard skipped data
       $start_offset += $len;
       $offset = length $_;
@@ -1909,7 +1912,7 @@ sub scan_msgno
   return unless $msgno == $target_msgno;
 
   my $ebeg = $start_offset + 1; # skip preceding newline
-  my $eend = pos ($_);
+  my $eend = pos $_;
 
   my $hbeg = pos ($_) + 1; # does not include prior newline
   # Read in more data until we find the end of the headers
@@ -1920,7 +1923,7 @@ sub scan_msgno
   # Read in more data until we find the next envelope or hit eof
   __grow_buffer ($fh, $_, $blocksize, $offset, $amtread)
     while (!/^(?=$re_message_delimiter)/mogc && $amtread == $blocksize);
-  my $bend = (pos $_ ? pos ($_) : length ($_)) - 1; # don't include final newline
+  my $bend = (pos $_ ? pos $_ : length $_) - 1; # don't include final newline
 
   my @data = ($ebeg, $hbeg, $hend, $bend);
   ::DEBUG { $msgno, @data };
@@ -1932,8 +1935,8 @@ sub scan_msgno
       if ($bodylines > 0)
         {
           my $nl = 1;
-          pos ($_) = $hend;
-          $nl++ while (/\n/sgc && $nl < $bodylines);
+          pos $_ = $hend;
+          $nl++ while (/$/mgc && $nl < $bodylines && pos $_ < $bend);
           $data[M_BDY] = substr ($_, $hend, pos ($_) - $hend);
         }
       else
@@ -1994,7 +1997,8 @@ sub message_size
 
   my $data = $self->{folder_data}->{$msgno};
 
-  return $data->[M_BEND] - $data->[M_HBEG];
+  # Size should include both body and headers for consistency with imap
+  return $data->[M_BEND];
 }
 
 sub flags
@@ -2198,7 +2202,7 @@ sub normalize_ranges
                 {                                  #           kb    ke
                   splice (@k, $ki, 0, $r);         # r before k
                 }
-              if ($rb >= $kb && $re <= $ke)        #  rb      re
+              elsif ($rb >= $kb && $re <= $ke)     #  rb      re
                 {                                  # kb        ke
                   # r is redundant; drop it.
                 }
@@ -3043,18 +3047,18 @@ from - summarize mailbox folder
      {-c|--count-only}                     {--utc|--gmt}
      {-e|--envelope}                       {--folder-time-zone TZ}
 
-                                           {-i|--me-match      REGEX}
+                                           {--me-match         REGEX}
      {-p|--parse}                          {-M|--match-header  REGEX}
      {-P|--no-parse}                       {-m|--match         REGEX}
                                            {-s|--sender        REGEX}
-     {-u|--unread-only}
-     {-n|--message-numbers N1,...}         {-U|--utf8|--utf-8}
-                                           {--no-utf8|--no-utf-8}
-     {-1|--one-line-headers}
-     {-2|--multi-line-headers}             {--user USER}
-     {-a|--all-headers}                    {--pass PASS} (don't use this)
-     {-I|--interesting-headers HDRS,...}
-     {-E|--extract [LINES]}
+     {-u|--unread-only}                    {-i|--ignore-case}
+     {-n|--message-numbers N1,...}         {--no-ignore-case}
+
+     {-1|--one-line-headers}               {-U|--utf8|--utf-8}
+     {-2|--multi-line-headers}             {--no-utf8|--no-utf-8}
+     {-a|--all-headers}
+     {-I|--interesting-headers HDRS,...}   {--user USER}
+     {-E|--extract [LINES]}                {--pass PASS} (don't use this)
 
      {-S|--starttls}                       {--ssl-ca-file     FILE}
      {--ssl-verify-hostname}               {--ssl-ca-path     DIR}
@@ -3155,14 +3159,25 @@ The default is S<"%-3{FMSGNO} %-20.20{FROMTO}  %-0.32Date  %Subject\n">
 
 =item B<-I>, B<--interesting-headers=>I<H1,H2,...>
 
-When extracting parts or all of message bodies (see B<--extract>),
+When extracting parts or all of message bodies (see C<--extract>),
 display only the enumerated headers of those messages if they exist.
 
 This option can be specified multiple times, and header names can be space
 or comma separated.  The default set of headers are C<From>, C<To>,
 C<Apparently-To>, C<Cc>, C<Newsgroups>, C<Subject>, C<Date>, C<Reply-To>.
 
-=item B<-i>, B<--me-match=>I<REGEXP>
+=item B<-i>, B<--ignore-case>
+
+Make B<--match> and B<--me-match> regular expressions case-insensitive.
+
+=item B<--no-ignore-case>
+
+Make regular expressions case-sensitive.  This is the default.
+
+Header names are always case-insensitive per RFC822, so this does not
+affect B<--match-header>.
+
+=item B<--me-match=>I<REGEXP>
 
 Pattern to match against the C<From> field to determine whether you are the
 sender (affects the C<{FROMTO}> format specifier).
@@ -3177,6 +3192,8 @@ By default, the headers searched are C<From>, C<To>, C<Cc>, and C<Subject>.
 
 Only print messages in which I<REGEXP> could be found in the header(s)
 matching the regexp specified with B<--match-headers>.
+
+Matching is case-insensitive.
 
 =item B<-n>, B<--message-numbers=>I<N1,N2,...|FIRST-LAST|-LAST|FIRST->
 
@@ -3238,11 +3255,11 @@ Standard/Daylight time.
 
 The options B<--utc> and B<--gmt> are shorthand for S<--time-zone=UTC>.
 
-=item B<-s>, B<--sender=>I<ADDR>
+=item B<-s>, B<--sender=>I<REGEXP>
 
 Show only messages sent from I<ADDR>.
 This is equivalent to specifying the options
-S<--match-headers='^From|Sender$' --match=ADDR>.
+S<--match-headers='^From|Sender$' --match=REGEXP>.
 
 =item B<-U>, B<--user=>I<USER>
 
@@ -3411,10 +3428,10 @@ at once.  The default is 64.
 
 =item B<--block-size>=I<n>
 
-Read only I<n> bytes of data at a time from local mbox folders while
-parsing.  The default is 524288 (512KiB).  Setting this value higher will
-have diminishing performance improvement for larger files when not I/O
-bound, and increase memory footprint significantly.
+Read only I<n> bytes of data at a time from local folders or the network
+while parsing.  The default is 524288 (512KiB).  Setting this value higher
+will have diminishing performance improvement when not I/O bound, and
+increase memory footprint significantly.
 
 Regardless of this setting, for local mbox folders less than 16MiB the
 entire file is read into memory at once to improve speed.
@@ -3436,9 +3453,10 @@ There are essentially two modes of operation: summary and extraction.
 In summary mode, each message is summarized by a single line displaying the
 message number in the folder, the sender (or recipient, if you sent the
 message), the date, and subject.  This summary may be changed via the
-B<--format> option and modified by numerous switches documented above.
-By default, some semantic parsing and decoding of the C<From>, C<Date>, and
-C<Subject> headers is performed to display real names and normalized dates.
+B<--format> option and modified by numerous switches documented above.  By
+default, some semantic parsing and decoding of the C<From> (and other known
+address headers), C<Date>, and C<Subject> headers is performed to display
+real names and normalized dates.
 
 In B<--extract> mode, a portion or entirety of each message is displayed.
 No semantic parsing of headers or MIME format bodies is currently done,
@@ -3786,7 +3804,7 @@ perl v5.14.  I don't know why.
 
 IMAP server-side search is not yet implemented.
 
-Pop3 support is relatively primitive.  This isn't likely to change, since
+POP3 support is relatively primitive.  This isn't likely to change, since
 this protocol is barely worth supporting at all.
 
 =head1 SEE ALSO
