@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.78 2014/02/12 08:34:25 friedman Exp $
+# $Id: from,v 1.79 2014/02/13 02:13:55 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "3.0.3";
+our $version = "3.0.4";
 
 # Optional perl modules that will improve the functionality of this program:
 our @optional_modules
@@ -2507,52 +2507,46 @@ use strict;
 use POSIX qw(strftime tzset);
 use Encode qw(:all);
 
+use constant { H_HDR => 0,
+               H_MET => 1,
+               H_ENV => 2,
+             };
+
 sub new
 {
   my $type = shift;
   my $class = ref ($type) || $type;
 
-  my $self = {};
+  my $self = [];
   bless $self, $class;
 
-  $self->{raw}        = shift;
-  $self->{metadata}   = shift || {};
-  $self->{envelope}   = shift || [];
-  $self->analyze;
+  $self->[H_HDR] = $self->analyze ($_[0]);
+  $self->[H_MET] = $_[1] || {};
+  $self->[H_ENV] = $_[2] || [];
   return $self;
 }
 
 sub analyze
 {
-  my $self = shift;
-  local *_ = \$self->{raw};
-
   my %header;
-  while (/^([^\s:]+):[ \t]*/mgc)
-    {
-      my $printname = $1;
-      my $name = lc $1;
-      my $beg = pos $_;
-      my $end = pos $_ if /(?=\r?\n[\S\r\n])/mgc;
-      push @{$header{$name}}, [$beg, $end, $printname];
-    }
+  push @{$header{lc $1}}, [$1, $2]
+    while ($_[1] =~ /^([^\s:]+):[ \t]*([\S\s\n]*?)(?=\r?\n[\S\r\n])/mgc);
+
   ::DEBUG { \%header };
-  $self->{headerdata} = \%header;
-  return;
+  return \%header;
 }
 
 sub names
 {
   my $self = shift;
 
-  my $header = $self->{headerdata};
-  my @names = (@_
-               ? map { $header->{$_} && $header->{$_}->[0]->[2] } @_
-               : map { $header->{$_}->[0]->[2]
-                     } sort { $header->{$a}->[0]->[0] <=> $header->{$b}->[0]->[0]
-                            } keys %$header);
-  ::DEBUG { $self, @names };
-  return wantarray ? @names : \@names;
+  my $h = $self->[H_HDR];
+  my @n = (@_
+           ? map { exists $h->{lc $_} ? $h->{lc $_}->[0]->[0] : () } @_
+           : map { $h->{$_}->[0]->[0] } sort { $a cmp $b } keys %$h);
+
+  ::DEBUG { $self, @n };
+  return wantarray ? @n : \@n;
 }
 
 sub fromto
@@ -2575,31 +2569,32 @@ sub contents
   my ($self, $name, $allp) = @_;
 
   my $lname = lc $name;
+  my @c;
 
-  return $self->fromto          if $lname eq '{fromto}';
-  return $self->{envelope}->[0] if $lname eq '{envfrom}';
-  if ($lname eq '{envdate}')
+  my ($h, $m, $e) = ($self->[H_HDR], $self->[H_MET], $self->[H_ENV]);
+
+  if    ($lname eq '{fromto}')  { push @c, $self->fromto }
+  elsif ($lname eq '{envfrom}') { push @c, $e->[0] }
+  elsif ($lname eq '{envdate}')
     {
-      my $date = $self->{envelope}->[1];
+      my $date = $e->[1];
       $date =~ s/ (\d{4})$/ $opt{folder_time_zone} $1/
         if ($opt{parsep}
             && defined $opt{folder_time_zone}
             && $date !~ /[+-]\d{4}/);
-      return $opt{parsep} ? _parse_date ($date) : $date;
-    }
-  return $self->{metadata}->{$lname} if exists $self->{metadata}->{$lname};
-  my $data = $self->{headerdata}->{$lname};
-  return unless defined $data;
 
-  my @contents;
-  for my $pair (@$data)
-    {
-      my ($beg, $end) = @$pair;
-      push @contents, substr ($self->{raw}, $beg, $end - $beg);
-      last unless $allp;
+      push @c, ($opt{parsep} ? _parse_date ($date) : $date);
     }
-  ::DEBUG { $name, @contents };
-  return wantarray ? @contents : \@contents;
+  elsif (exists $m->{$lname}) { push @c, $m->{$lname} }
+  else
+    {
+      my $d = $h->{$lname};
+      return unless $d;
+
+      push @c, $allp ? map { $_->[1] } @$d : $d->[0]->[1];
+    }
+  ::DEBUG { $name, @c };
+  return wantarray ? @c : \@c;
 }
 
 # Fold wrapped header contents into a single line
