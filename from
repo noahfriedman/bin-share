@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.80 2014/02/14 05:17:35 friedman Exp $
+# $Id: from,v 1.81 2014/02/17 06:51:21 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "3.0.5";
+our $version = "3.0.6";
 
 # Optional perl modules that will improve the functionality of this program:
 our @optional_modules
@@ -152,10 +152,9 @@ sub parse_options
   $opt{pass}            = $ENV{FROMPASS}     unless defined $opt{pass};
   $opt{me_match_regexp} = default_me_match() unless defined $opt{me_match_regexp};
   # Pre-compile any defined regexps
-  map { ($opt{$_} = $opt{ignore_case} ? qr/$opt{$_}/i : qr/$opt{$_}/)
-          if defined $opt{$_}
-      } qw(header_regexp match_regexp me_match_regexp);
-
+  $opt{header_regexp} &&= qr/$opt{header_regexp}/i; # always case-insensitive
+  map { ($opt{$_} &&= $opt{ignore_case} ? qr/$opt{$_}/i : qr/$opt{$_}/)
+      } qw(match_regexp me_match_regexp);
 
   $opt{format_parsed}   = parse_format_string ($opt{format});
   {
@@ -282,7 +281,7 @@ sub process_message
 {
   my ($mbox, $meta, $fmsgno) = @_;
 
-  ::DEBUG { @_ } @_;
+  #::DEBUG { @_ } @_;
   if ($opt{unread_only})
     {
       my %flags = $mbox->flags ($fmsgno);
@@ -297,23 +296,13 @@ sub process_message
       ::DEBUG { {state=>1}, $msg };
     }
 
+  my ($header, $envelope);
   if ($opt{match_regexp})
     {
-      my $header = From::Header->new ($msg->[0]);
-      return unless $header;
-      my @names = grep { /$opt{header_regexp}/i } $header->names;
-      my $found;
-
-      for my $h (@names)
-        {
-          for my $c ($header->contents ($h, 1), $header->parsed ($h, 1))
-            {
-              $found = 1 if $c =~ /$opt{match_regexp}/m;
-              last if $found;
-            }
-          last if $found;
-        }
-      return 1 unless $found;
+      $envelope = $mbox->envelope ($fmsgno);
+      $header   = From::Header->new ($msg->[0], $meta, $envelope);
+      # Return 1 so that processing of future messages will continue.
+      return 1 unless $header->filter_matches_p;
     }
 
   if ($opt{countp})
@@ -327,79 +316,76 @@ sub process_message
 
   if ($opt{envelopep})
     {
-      my $envelope = $mbox->envelope_string ($fmsgno);
-      return unless $envelope;
-      print $envelope, "\n";
+      print $mbox->envelope_string ($fmsgno), "\n";
       return 1;
     }
-  elsif ($opt{extractp})
+  elsif ($opt{extractp} || $opt{all_headers})
     {
-      my $envelope = $mbox->envelope_string ($fmsgno);
-      return unless $envelope;
-      print_message ($msg, $meta, $envelope);
+      my $env_str = $mbox->envelope_string ($fmsgno);
+      print_message ($msg, $meta, $header, $env_str);
     }
   else
     {
       $meta->{'{octets}'} = $mbox->message_size ($fmsgno)
         if (exists $opt{literal_header}->{'{octets}'});
 
-      my $envelope = $mbox->envelope ($fmsgno);
-      return unless print_message_summary ($msg, $meta, $envelope);
+      $envelope ||= $mbox->envelope ($fmsgno);
+      $header   ||= From::Header->new ($msg->[0], $meta, $envelope);
+      print_message_summary ($msg, $header);
     }
   return 1;
 }
 
 sub print_message
 {
-  my ($msg, $meta, $envelope) = @_;
+  my ($msgref, $meta, $header, $envelope_string) = @_;
+
+  local *_ = $msgref; # bind @_ to ref
 
   if ($opt{all_headers})
     {
       map { utf8::decode ($_);
             utf8::encode ($_);
-          } @$msg if $opt{utf8};
+          } @_ if $opt{utf8};
 
-      print $envelope, "\n", @$msg;
-      print "\n" if @$msg > 1;
+      print $envelope_string, "\n", @_;
+      print "\n" if @_ > 1;
       return 1;
     }
 
-  print $envelope, "\n";
-  my $header = From::Header->new ($msg->[0], $meta);
+  print $envelope_string, "\n";
+  $header ||= From::Header->new ($_[0], $meta);
   my $contents = $opt{onelinep} ? 'contents1' : 'contents';
-  map { my ($name) = $header->names (lc $_);
-        map { if ($name)
+  map { my $name = $_;
+        map { my $s = sprintf ("%s: %s\n", $name, $_);
+              if ($opt{utf8})
                 {
-                  my $s = sprintf ("%s: %s\n", $name, $_);
-                  if ($opt{utf8})
-                    {
-                      utf8::decode ($s);
-                      utf8::encode ($s);
-                    }
-                  print $s;
+                  utf8::decode ($s);
+                  utf8::encode ($s);
                 }
+              print $s;
             } $header->$contents ($_, 1);
-      } @{$opt{interesting}};
+      } $header->names (@{$opt{interesting}});
   print "\n";
 
-  if (@$msg > 1)
+  if (@_ > 1)
     {
       if ($opt{utf8})
         {
-          utf8::decode ($msg->[1]);
-          utf8::encode ($msg->[1]);
+          utf8::decode ($_[1]);
+          utf8::encode ($_[1]);
         }
-      print $msg->[1], "\n";
+      print $_[1], "\n";
     }
 }
 
 sub print_message_summary
 {
-  my ($msg, $meta, $envelope) = @_;
-  my $header = From::Header->new ($msg->[0], $meta, $envelope);
+  my ($msg, $header) = @_;
+
+  ::DEBUG { $msg, $header };
 
   my ($fmt, @name) = @{$opt{format_parsed}};
-
   my $fn = $opt{parsep} ? 'allparsed1' : 'allcontents1';
   map { $_ = $header->$fn ($_) } @name;
 
@@ -444,17 +430,22 @@ sub print_message_summary
 # those classes just ignore this data.
 sub wanted_headers
 {
-  return                   if $opt{all_headers};
-  return                   if $opt{match_regexp};
-  return $opt{interesting} if $opt{extractp};
+  return if $opt{all_headers};
+  return if $opt{match_regexp};
 
-  my @x = @{$opt{format_parsed}};
-  shift @x; # discard fmt
   my @headers;
-  map { if    ($_ eq '{fromto}') { push @headers, 'from', 'to' }
-        elsif ($_ !~ /^\{/)      { push @headers, $_ }
-      } @x;
-
+  if ($opt{extractp})
+    {
+      push @headers, @{$opt{interesting}};
+    }
+  else
+    {
+      my @x = @{$opt{format_parsed}};
+      shift @x; # discard fmt
+      map { if    ($_ eq '{fromto}') { push @headers, 'from', 'to' }
+            elsif ($_ !~ /^\{/)      { push @headers, $_ }
+          } @x;
+    }
   return wantarray ? @headers : \@headers;
 }
 
@@ -576,7 +567,7 @@ our $errors_fatal   =  0;
 our $debug          =  0;
 (my $progname = $0) =~ s=.*/==;
 
-# lightweight check for readability on non-blocking file handle
+# check for readability on non-blocking file handle
 # Usage: canread ($handle, $timeout)
 sub canread
 {
@@ -676,7 +667,8 @@ sub printobj
               . " }");
     }
   elsif ($ref eq 'CODE')   { return $ref  }
-  elsif ($ref eq 'SCALAR') { return $$obj }
+  elsif ($ref eq 'SCALAR') { return "\\" . $$obj }
+  elsif ($ref eq 'Regexp') { return "$$obj" }
   elsif ($ref ne "")
     {
       $ref =~ s/=.*//;
@@ -684,8 +676,18 @@ sub printobj
     }
   elsif ($obj =~ /^[+-]?[\d.]+/) { return $obj }
 
-  $obj =~ s/"/\\"/go;
-  return "\"$obj\"";
+  my $len = length $obj;
+  if ($::debug < 2 && $len > 64)
+    {
+      substr ($obj, 32, -32) = "...";
+      $obj =~ s/"/\\"/g;
+      return "\"$obj\" {$len}";
+    }
+  else
+    {
+      $obj =~ s/"/\\"/g;
+      return "\"$obj\"";
+    }
 }
 
 # For rc file convenience.
@@ -1216,11 +1218,11 @@ sub parse_response
           pos $_ = $newpos;
           push @list, $data;
         }
-      elsif ($s eq ")" || $s eq "]")
+      elsif ($s eq ')' || $s eq ']')
         {
           last;
         }
-      elsif ($s eq "NIL" || $s eq "nil")
+      elsif ($s eq 'NIL')
         {
           push @list, undef;
         }
@@ -1511,6 +1513,7 @@ sub body
 
               push @newrange, $n;
             }
+          last unless @newrange;
           $newlines = $tnl;
           $offset += $len;
           $range = $self->batch_string (scalar $self->normalize_ranges (@newrange));
@@ -1527,12 +1530,17 @@ sub retrieve
   my $header = $self->header ($msgno);
   return unless $header;
   $header =~ s/\r$//gm;
+  my @msg = ($header);
 
   my $body = $self->body ($msgno);
-  $body =~ s/\r$//gm if defined $body;
+  if (defined $body)
+    {
+      $body =~ s/\r$//gm;
+      push @msg, $body;
+    }
 
-  ::DEBUG { {state=>1}, $header, $body };
-  return wantarray ? ($header, $body) : [$header, $body];
+  ::DEBUG { {state=>1}, @msg };
+  return wantarray ? @msg : \@msg;
 }
 
 sub uncache_message
@@ -1682,7 +1690,7 @@ sub envelope_string
 sub retrieve
 {
   my ($self, $msgno) = @_;
-  my $bodylines = $opt{bodylines} + 0;  # force into numeric context
+  my $bodylines = $opt{bodylines};
 
   $self->command ($bodylines < 0
                   ? "RETR $msgno"
@@ -2079,7 +2087,7 @@ sub body
   my $msg = $self->analyze_message ($msgno);
   return unless $msg;
 
-  $msg->[M_BDY];
+  return $msg->[M_BDY];
 }
 
 sub retrieve
@@ -2536,33 +2544,104 @@ sub new
   my $self = [];
   bless $self, $class;
 
-  $self->[H_HDR] = $self->analyze ($_[0]);
+  $self->[H_HDR] = \$_[0];
   $self->[H_MET] = $_[1] || {};
   $self->[H_ENV] = $_[2] || [];
   return $self;
-}
-
-sub analyze
-{
-  my %header;
-  push @{$header{lc $1}}, [$1, $2]
-    while ($_[1] =~ /^([^\s:]+):[ \t]*([\S\s\n]*?)(?=\r?\n[\S\r\n])/mg);
-
-  ::DEBUG { \%header };
-  return \%header;
 }
 
 sub names
 {
   my $self = shift;
 
-  my $h = $self->[H_HDR];
-  my @n = (@_
-           ? map { exists $h->{lc $_} ? $h->{lc $_}->[0]->[0] : () } @_
-           : map { $h->{$_}->[0]->[0] } sort { $a cmp $b } keys %$h);
+  # Pre-compiling this regexp only seems to slow it down (marginally) in
+  # most cases.
+  my $re = (@_
+            ? sprintf ("^(%s):", join ('|', map { quotemeta $_ } @_))
+            : '^([^\s:]+):');
 
-  ::DEBUG { $self, @n };
-  return wantarray ? @n : \@n;
+  my (@n, %seen);
+  local *_ = $self->[H_HDR];
+  pos $_ = 0;
+  while (/$re/gim)
+    {
+      my $lh = lc $1;
+      push @n, $1 unless exists $seen{$lh}; # return original case
+      $seen{$lh} = undef;
+    }
+
+  ::DEBUG { @n };
+  return wantarray ? @n : @n ? \@n : undef;
+}
+
+sub contents
+{
+  my ($self, $name, $allp) = @_;
+
+  my $ln = lc $name;
+  my @c;
+
+  if    ($ln eq '{fromto}')  { push @c, $self->fromto }
+  elsif ($ln eq '{envfrom}') { push @c, $self->[H_ENV]->[0] }
+  elsif ($ln eq '{envdate}')
+    {
+      my $date = $self->[H_ENV]->[1];
+      $date =~ s/ (\d{4})$/ $opt{folder_time_zone} $1/
+        if ($opt{parsep}
+            && defined $opt{folder_time_zone}
+            && $date !~ /[+-]\d{4}/);
+
+      push @c, ($opt{parsep} ? _parse_date ($date) : $date);
+    }
+  elsif (exists $self->[H_MET]->{$ln}) { push @c, $self->[H_MET]->{$ln} }
+  else
+    {
+      # This seems to be marginally faster if not precompiled!
+      # Perhaps because there are no alternate names?
+      my $re = sprintf ('^%s:[ \t]*([\S\s\r\n]*?)(?=\r?\n)',
+                        quotemeta ($name));
+      local *_ = $self->[H_HDR];  # alias reference
+      pos $_ = 0;
+      while (/$re/gim)
+        {
+          push @c, $1;
+          last unless $allp;
+        }
+    }
+  ::DEBUG { $name, @c };
+  return wantarray ? @c : @c ? \@c : undef;
+}
+
+# Fold wrapped header contents into a single line
+sub contents1
+{
+  my ($self, $name, $allp) = @_;
+
+  my @contents = $self->contents ($name, $allp);
+  map { s/\r?\n\s+/ /mg; $_ } @contents;
+
+  return wantarray ? @contents : @contents ? \@contents : undef;
+}
+
+# join all header contents into a single line
+sub allcontents1
+{
+  my ($self, $name) = @_;
+  join (", ", $self->contents1 ($name, 1));
+}
+
+sub filter_matches_p
+{
+  my $self = shift;
+  local $_;
+
+  my $re = $opt{header_regexp};
+  for my $h (grep { $_ =~ $re } $self->names)
+    {
+      for $_ ($self->contents ($h, 1)) { return 1 if /$opt{match_regexp}/m }
+      for $_ ($self->parsed   ($h, 1)) { return 1 if /$opt{match_regexp}/m }
+    }
+  return 0;
 }
 
 sub fromto
@@ -2580,57 +2659,7 @@ sub fromto
   return $from;
 }
 
-sub contents
-{
-  my ($self, $name, $allp) = @_;
-
-  my $lname = lc $name;
-  my @c;
-
-  my ($h, $m, $e) = ($self->[H_HDR], $self->[H_MET], $self->[H_ENV]);
-
-  if    ($lname eq '{fromto}')  { push @c, $self->fromto }
-  elsif ($lname eq '{envfrom}') { push @c, $e->[0] }
-  elsif ($lname eq '{envdate}')
-    {
-      my $date = $e->[1];
-      $date =~ s/ (\d{4})$/ $opt{folder_time_zone} $1/
-        if ($opt{parsep}
-            && defined $opt{folder_time_zone}
-            && $date !~ /[+-]\d{4}/);
-
-      push @c, ($opt{parsep} ? _parse_date ($date) : $date);
-    }
-  elsif (exists $m->{$lname}) { push @c, $m->{$lname} }
-  else
-    {
-      my $d = $h->{$lname};
-      return unless $d;
-
-      push @c, $allp ? map { $_->[1] } @$d : $d->[0]->[1];
-    }
-  ::DEBUG { $name, @c };
-  return wantarray ? @c : \@c;
-}
-
-# Fold wrapped header contents into a single line
-sub contents1
-{
-  my ($self, $name, $allp) = @_;
-
-  my @contents = $self->contents ($name, $allp);
-  map { s/\r?\n\s+/ /mg; $_ } @contents;
-
-  return wantarray ? @contents : \@contents;
-}
-
-# join all header contents into a single line
-sub allcontents1
-{
-  my ($self, $name) = @_;
-  join (", ", $self->contents1 ($name, 1));
-}
-
+
 my %header_parser =
   ( '{fromto}'      => \&_parse_address,
 
@@ -2665,7 +2694,7 @@ sub parsed
   return $self->contents ($name, $allp) unless $fn;
 
   my @contents = map { &$fn ($_) } $self->contents ($name, $allp);
-  return wantarray ? @contents : \@contents
+  return wantarray ? @contents : \@contents;
 }
 
 sub allparsed
