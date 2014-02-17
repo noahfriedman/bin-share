@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.79 2014/02/13 02:13:55 friedman Exp $
+# $Id: from,v 1.80 2014/02/14 05:17:35 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "3.0.4";
+our $version = "3.0.5";
 
 # Optional perl modules that will improve the functionality of this program:
 our @optional_modules
@@ -359,12 +359,12 @@ sub print_message
             utf8::encode ($_);
           } @$msg if $opt{utf8};
 
-      print $envelope, "\n" if defined $envelope;
-      print @$msg, "\n";
+      print $envelope, "\n", @$msg;
+      print "\n" if @$msg > 1;
       return 1;
     }
 
-  print $envelope, "\n" if defined $envelope;
+  print $envelope, "\n";
   my $header = From::Header->new ($msg->[0], $meta);
   my $contents = $opt{onelinep} ? 'contents1' : 'contents';
   map { my ($name) = $header->names (lc $_);
@@ -380,13 +380,17 @@ sub print_message
                 }
             } $header->$contents ($_, 1);
       } @{$opt{interesting}};
+  print "\n";
 
-  if ($opt{utf8} && defined $msg->[1])
+  if (@$msg > 1)
     {
-      utf8::decode ($msg->[1]);
-      utf8::encode ($msg->[1]);
+      if ($opt{utf8})
+        {
+          utf8::decode ($msg->[1]);
+          utf8::encode ($msg->[1]);
+        }
+      print $msg->[1], "\n";
     }
-  print "\n", $msg->[1] || "", "\n";
 }
 
 sub print_message_summary
@@ -1893,7 +1897,6 @@ sub scan_msgno
   __grow_buffer ($fh, $_, $blocksize, $offset, $amtread)
     unless $offset > ::MIN_BLOCKSIZE;
 
-  pos $_ = 0;
   while (/^${re_message_delimiter}.*$/mogc)
     {
       last if (++$msgno == $target_msgno);
@@ -1911,33 +1914,45 @@ sub scan_msgno
   $self->{last_scanned} = $msgno;
   return unless $msgno == $target_msgno;
 
-  my $ebeg = $start_offset + 1; # skip preceding newline
-  my $eend = pos $_;
-
   my $hbeg = pos ($_) + 1; # does not include prior newline
   # Read in more data until we find the end of the headers
   __grow_buffer ($fh, $_, $blocksize, $offset, $amtread)
-    while (!/^$/mgc && $amtread == $blocksize);
-  my $hend = pos ($_) + 1;
+    while (!/\n\r?\n/gc && $amtread == $blocksize);
+  my $hend = pos ($_);
 
   # Read in more data until we find the next envelope or hit eof
   __grow_buffer ($fh, $_, $blocksize, $offset, $amtread)
     while (!/^(?=$re_message_delimiter)/mogc && $amtread == $blocksize);
-  my $bend = (pos $_ ? pos $_ : length $_) - 1; # don't include final newline
 
-  my @data = ($ebeg, $hbeg, $hend, $bend);
+  # don't include final newline except at eof
+  # if pos is still at hend, empty message or 1 blank line.
+  my $bend = (pos $_ == $hend
+              ? ($amtread == $blocksize
+                 # Sometimes a message will not even have a blank line
+                 # between the end of the headers (which is 2 newlines)
+                 # and the next envelope.  If that happens, back up.
+                 ? (substr ($_, $hend, 1) ne "\n"
+                    ? $hend - 1
+                    : $hend)
+                 : length ($_) - 1)
+              : pos ($_) - 1);
+
+  # skip preceding newline for start
+  my @data = ($start_offset + 1, $hbeg, $hend, $bend);
   ::DEBUG { $msgno, @data };
   $data[M_ENV] = substr ($_, 0,     $hbeg - 1    ) if $envp;
   $data[M_HDR] = substr ($_, $hbeg, $hend - $hbeg) if $hdrp;
-  if ($bdyp)
+  if ($bdyp && $bend >= $hend)
     {
-      my $bodylines = $opt{bodylines};
-      if ($bodylines > 0)
+      if ($opt{bodylines} > 0)
         {
-          my $nl = 1;
+          # For large m, loop is actually *much* faster than using a single
+          # /((?:.*\n){1,$m})/g regexp.  Also, pcre limits m to 32766.
+          my ($n, $m) = (1, $opt{bodylines});
           pos $_ = $hend;
-          $nl++ while (/$/mgc && $nl < $bodylines && pos $_ < $bend);
+          $n++ while (/$/mgc && $n < $m && pos $_ < $bend);
           $data[M_BDY] = substr ($_, $hend, pos ($_) - $hend);
+          $data[M_BDY] .= "\n" if $n == $m; # need fake eom newline
         }
       else
         {
@@ -2072,13 +2087,14 @@ sub retrieve
   my ($self, $msgno) = @_;
   ::DEBUG { $msgno };
 
-  my $header = $self->header ($msgno);
-  return unless $header;
+  my @msg = ($self->header ($msgno));
+  return unless @msg;
 
-  my $body   = $self->body ($msgno);
+  my $body = $self->body ($msgno);
+  push @msg, $body if defined $body;
 
-  ::DEBUG { {state=>1}, $header, $body };
-  return wantarray ? ($header, $body) : [$header, $body];
+  ::DEBUG { {state=>1}, @msg };
+  return wantarray ? @msg : \@msg;
 }
 
 sub uncache_message
@@ -2530,7 +2546,7 @@ sub analyze
 {
   my %header;
   push @{$header{lc $1}}, [$1, $2]
-    while ($_[1] =~ /^([^\s:]+):[ \t]*([\S\s\n]*?)(?=\r?\n[\S\r\n])/mgc);
+    while ($_[1] =~ /^([^\s:]+):[ \t]*([\S\s\n]*?)(?=\r?\n[\S\r\n])/mg);
 
   ::DEBUG { \%header };
   return \%header;
