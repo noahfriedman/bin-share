@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.82 2014/02/17 18:09:18 friedman Exp $
+# $Id: from,v 1.83 2014/02/18 01:42:18 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "3.0.6";
+our $version = "3.0.7";
 
 # Optional perl modules that will improve the functionality of this program:
 our @optional_modules
@@ -80,7 +80,7 @@ sub parse_options
 
   # Precedence for defs (highest->lowest): options, ~/.fromrc.pl, default
   my $fromrc = $ENV{FROMRCPL} || "$ENV{HOME}/.fromrc.pl";
-  do "$fromrc" if -f $fromrc;
+  do $fromrc if -f $fromrc;
   _error ($fromrc, $@) if ($@ ne "" && $@ !~ /not return a true value/);
 
   local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
@@ -339,7 +339,6 @@ sub process_message
 sub print_message
 {
   my ($msgref, $meta, $header, $envelope_string) = @_;
-
   local *_ = $msgref; # bind @_ to ref
 
   if ($opt{all_headers})
@@ -1001,10 +1000,8 @@ sub connect
             push @conf, ("debug         = debug",
                          "foreground    = yes", # override; diagnostics on stderr
                         ) if $::debug;
-            if ($opt{starttls} && $self->{proto} !~ /s$/)
-              {
-                push @conf, "protocol = $self->{proto}";
-              }
+            push @conf, "protocol       = $self->{proto}"
+              if ($opt{starttls} && $self->{proto} !~ /s$/);
 
             map { ::DEBUG { {state=>1}, $_ };
                   print $wc $_, "\n"
@@ -1089,9 +1086,7 @@ sub command
 {
   my $self = shift;
   { my $args = \@_;
-    ::DEBUG { if (@$args == 4
-                  && lc $args->[0] eq 'auth'
-                  && lc $args->[1] eq 'login')
+    ::DEBUG { if (   @$args == 4 && lc $args->[1] eq 'login')
                 { my @elide = @$args; $elide[3] = '*'; @elide }
               elsif (@$args == 2 && lc $args->[0] eq 'pass')
                 { my @elide = @$args; $elide[1] = '*'; @elide }
@@ -1123,13 +1118,14 @@ sub new
   $self->connect;
   return unless $self->{fh};
 
+  $self->{imap_tagno} = 1;
   $self->response_ok_p ("*");
   return if ($opt{starttls} && !$self->starttls);
   return unless $self->login ($self->{user}, $self->{pass});
 
   $self->message_count;  # sets folder
   $self->{message_range} = $self->normalize_ranges (@{$opt{message_numbers}});
-  $self->{batch_list}    = $self->batch_ranges     (@{$self->{message_range}});
+  $self->{batch_list}    = $self->batch_ranges (@{$self->{message_range}});
   return $self;
 }
 
@@ -1137,13 +1133,15 @@ sub starttls
 {
   my $self = shift;
   return 1 if $self->{tls_started};
-  return unless $self->command_ok_p ("STARTTLS", "STARTTLS");
+  return unless $self->command_ok_p ("STARTTLS");
   $self->SUPER::starttls ();
 }
 
 sub command_ok_p
 {
-  my ($self, $tag) = (shift, shift);
+  my $self = shift;
+  my $tag  = $self->{imap_tag} = sprintf ("A%03d", $self->{imap_tagno}++);
+
   $self->command ($tag, @_);
   $self->response_ok_p ($tag);
 }
@@ -1151,6 +1149,7 @@ sub command_ok_p
 sub response_ok_p
 {
   my ($self, $tag) = @_;
+  $tag ||= $self->{imap_tag};
 
   my $response = $self->response ($tag);
   $tag = quotemeta ($tag);
@@ -1168,7 +1167,7 @@ sub response
 
   return $self->{response} unless @_;
 
-  my $tag = quotemeta (shift);
+  my $tag = quotemeta (shift || $self->{imap_tag});
   my $fh = $self->{fh};
 
   local $_;
@@ -1177,7 +1176,8 @@ sub response
   while (::canread ($fh))  # Don't use timeout
     {
       # Must use sysread; don't mix buffered io with select.
-      $offset += $read while $read = $fh->sysread ($_, $opt{block_size}, $offset);
+      $offset += $read
+        while $read = $fh->sysread ($_, $opt{block_size}, $offset);
       last if /^$tag (?:OK|NO|BAD|PREAUTH)(?: .*|)\n/m;
     }
   $fh->blocking (1);
@@ -1317,7 +1317,7 @@ sub analyze_message
 
   my $cmd = sprintf ("FETCH %s (RFC822.SIZE INTERNALDATE FLAGS %s)",
                      $range, $headers);
-  return unless $self->command_ok_p ("RETR", $cmd);
+  return unless $self->command_ok_p ($cmd);
 
   my $resp = $self->analyze_response;
   while (my ($key, $val) = each %$resp)
@@ -1332,7 +1332,7 @@ sub login
 {
   my ($self, $login, $pass) = @_;
 
-  return 1 if $self->command_ok_p ("AUTH", "LOGIN", $login, $pass);
+  return 1 if $self->command_ok_p ("LOGIN", $login, $pass);
 
   ::_error ($self->{uri}, scalar $self->response);
   $self->disconnect;
@@ -1343,7 +1343,7 @@ sub logout
 {
   my $self = shift;
 
-  $self->command_ok_p ("AUTH", "LOGOUT");
+  $self->command_ok_p ("LOGOUT");
   $self->disconnect;
   return;
 }
@@ -1358,7 +1358,7 @@ sub message_count
   $self->{folder} = $_[0] if @_;
   my $folder = $self->{folder};
 
-  return unless $self->command_ok_p ("EXAMINE", "EXAMINE", "$folder");
+  return unless $self->command_ok_p ("EXAMINE", "$folder");
   my $result = $self->response;
 
   # We don't use the parse/analyze methods because this response is
@@ -1471,7 +1471,7 @@ sub body
 
   if ($bodylines < 0)
     {
-      $self->command_ok_p ("RETR", "FETCH $range BODY.PEEK[TEXT]");
+      $self->command_ok_p ("FETCH $range BODY.PEEK[TEXT]");
       my $resp = $self->analyze_response;
 
       while (my ($n, $elt) = each %$resp)
@@ -1490,7 +1490,7 @@ sub body
       while ($range && $newlines < $bodylines)
         {
           last unless $self->command_ok_p
-            ("RETR", "FETCH $range BODY.PEEK[TEXT]<$offset.$blocksize>");
+            ("FETCH $range BODY.PEEK[TEXT]<$offset.$blocksize>");
           my $resp = $self->analyze_response;
 
           # For each message, see if we've acquired enough lines.
