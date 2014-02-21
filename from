@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.83 2014/02/18 01:42:18 friedman Exp $
+# $Id: from,v 1.84 2014/02/18 23:44:43 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "3.0.7";
+our $version = "3.1.0";
 
 # Optional perl modules that will improve the functionality of this program:
 our @optional_modules
@@ -59,10 +59,10 @@ sub parse_options
       parsep          => 1,
       onelinep        => 1,
 
-      header_regexp   => '^(?:Resent-)?(?:Sender|From|To|Cc|Subject)$',
+      match_header    => [],
       interesting     => [],
       message_numbers => [],
-      bodylines       => 0,
+      bodylines       => -1,
 
       user            => default_user(),
       columns         => output_columns(),
@@ -75,8 +75,11 @@ sub parse_options
       block_size      => 2**19,   # read 512k at a time
     );
 
-  my @interesting_default =
-    (qw(From To Apparently-To Cc Newsgroups Subject Date Reply-To));
+  my @match_header_default
+    = map { $_, "Resent-$_" } qw(Sender From To Cc Date Subject);
+
+  my @interesting_default
+    = (qw(From To Apparently-To Cc Newsgroups Subject Date Reply-To));
 
   # Precedence for defs (highest->lowest): options, ~/.fromrc.pl, default
   my $fromrc = $ENV{FROMRCPL} || "$ENV{HOME}/.fromrc.pl";
@@ -89,59 +92,62 @@ sub parse_options
   $parser->configure (qw(bundling autoabbrev no_require_order no_ignore_case));
 
   my $succ = $parser->getoptions
-    ('h|help|usage+'            =>      \$help,
-     'D|debug+'                 =>      \$::debug,
-     'W|warnings!'              =>      \$^W,
+    ('h|help|usage+'             =>      \$help,
+     'D|debug+'                  =>      \$::debug,
+     'W|warnings!'               =>      \$^W,
 
-     'c|count-only'             =>      \$opt{countp},
-     'e|envelope'               =>      \$opt{envelopep},
+     'c|count-only'              =>      \$opt{countp},
+     'e|envelope'                =>      \$opt{envelopep},
 
-     'p|parse!'                 =>      \$opt{parsep},
-     'P'                        => sub { $opt{parsep} = 0 },
+     'p|parse!'                  =>      \$opt{parsep},
+     'P'                         => sub { $opt{parsep} = 0 },
 
-     'u|unread-only'            =>      \$opt{unread_only},
-     'n|message-numbers=s@'     =>       $opt{message_numbers}, #arrayraf
-     'batch-size=i'             =>      \$opt{batch_size},
-     'block-size=i'             =>      \$opt{block_size},
+     'u|unread'                  =>      \$opt{search_unread},
+     'n|message-numbers=s@'      =>       $opt{message_numbers}, #arrayraf
+     'batch-size=i'              =>      \$opt{batch_size},
+     'block-size=i'              =>      \$opt{block_size},
 
-     '1|one-line-headers'       =>      \$opt{onelinep},
-     '2|multi-line-headers'     => sub { $opt{onelinep}      = 0 },
-     'a|all-headers'            => sub { $opt{all_headers}   = 1;
-                                         $opt{onelinep}      = 0 },
-     'I|interesting-headers=s@' =>       $opt{interesting}, # arrayref
+     '1|one-line-headers'        =>      \$opt{onelinep},
+     '2|multi-line-headers'      => sub { $opt{onelinep}      = 0 },
+     'a|all-headers'             => sub { $opt{all_headers}   = 1;
+                                          $opt{onelinep}      = 0 },
+     'I|interesting-headers=s@'  =>       $opt{interesting}, # arrayref
 
      'E|extract:-1'              => sub { $opt{extractp}  = 1;
                                           $opt{bodylines} = $_[1] },
 
-     'C|columns=i'              =>      \$opt{columns},
-     'f|format=s'               => sub { $opt{format}      = interpolate ($_[1]) },
-     'd|date-format:s'          => sub { $opt{date_format} = interpolate ($_[1]) },
-     'T|time-zone|tz=s'         =>      \$opt{tzdate},
-     'utc|gmt'                  => sub { $opt{tzdate}      = 'UTC' },
-     'folder-time-zone=s'       =>      \$opt{folder_time_zone},
+     'C|columns=i'               =>      \$opt{columns},
+     'f|format=s'                => sub { $opt{format}      = interpolate ($_[1]) },
+     'd|date-format:s'           => sub { $opt{date_format} = interpolate ($_[1]) },
+     'T|time-zone|tz=s'          =>      \$opt{tzdate},
+     'utc|gmt'                   => sub { $opt{tzdate}      = 'UTC' },
+     'folder-time-zone=s'        =>      \$opt{folder_time_zone},
 
-     'i|ignore-case!'           =>      \$opt{ignore_case},
-     'me-match=s'               =>      \$opt{me_match_regexp},
-     'M|match-header=s'         =>      \$opt{header_regexp},
-     'm|match=s'                =>      \$opt{match_regexp},
-     's|sender=s'               => sub { $opt{header_regexp} = '^(?:From|Sender)$';
-                                         $opt{match_regexp}  = $_[1] },
+     'i|ignore-case!'            =>      \$opt{ignore_case},
+     'mmr|match-me-regexp=s'     =>      \$opt{match_me_regexp},
+     'mhr|match-header-regexp=s' =>      \$opt{match_hdr_regexp},
+     'mtr|match-text-regexp=s'   =>      \$opt{match_txt_regexp},
 
-     'S|starttls'               =>      \$opt{starttls},
-     'ssl-ca-file=s'            =>      \$SSL_options{SSL_ca_file},
-     'ssl-ca-path=s'            =>      \$SSL_options{SSL_ca_path},
-     'ssl-verify-hostname'      =>      \$opt{ssl_verify_hostname},
-     'ssl-no-verify'            =>      \$opt{ssl_no_verify},
-     'prefer-perl-ssl!'         => sub { $opt{prefer_stunnel} = ! $_[1] },
-     'prefer-stunnel!'          => sub { $opt{prefer_stunnel} = $_[1] },
-     'stunnel-program=s'        =>      \$opt{stunnel_prog},
-     'connect-timeout|timeout'  =>      \$opt{c_timeout},
-     'prefer-socklib=s'         => sub { $opt{prefer_socklib} .= $_[1] . ' '},
-     'U|user=s'                 =>      \$opt{user},
-     'password=s'               =>      \$opt{pass}, # don't use!
+     'M|match-header=s@'         =>      \$opt{match_header},
+     'm|match-text=s'            =>      \$opt{match_text},
+     's|sender=s'                => sub { $opt{match_header} = [qw(From Sender)];
+                                          $opt{match_text}    = $_[1] },
 
-     'utf8|utf-8!'              =>      \$opt{utf8},
-     'V|version',               =>      \$opt{show_version},
+     'S|starttls'                =>      \$opt{starttls},
+     'ssl-ca-file=s'             =>      \$SSL_options{SSL_ca_file},
+     'ssl-ca-path=s'             =>      \$SSL_options{SSL_ca_path},
+     'ssl-verify-hostname'       =>      \$opt{ssl_verify_hostname},
+     'ssl-no-verify'             =>      \$opt{ssl_no_verify},
+     'prefer-perl-ssl!'          => sub { $opt{prefer_stunnel} = ! $_[1] },
+     'prefer-stunnel!'           => sub { $opt{prefer_stunnel} = $_[1] },
+     'stunnel-program=s'         =>      \$opt{stunnel_prog},
+     'connect-timeout|timeout'   =>      \$opt{c_timeout},
+     'prefer-socklib=s'          => sub { $opt{prefer_socklib} .= $_[1] . ' '},
+     'U|user=s'                  =>      \$opt{user},
+     'password=s'                =>      \$opt{pass}, # don't use!
+
+     'utf8|utf-8!'               =>      \$opt{utf8},
+     'V|version',                =>      \$opt{show_version},
     );
 
   pod2usage (-exitstatus => 1, -verbose => 0)     unless $succ;
@@ -150,13 +156,45 @@ sub parse_options
   show_version() if $opt{show_version};
 
   $opt{pass}            = $ENV{FROMPASS}     unless defined $opt{pass};
-  $opt{me_match_regexp} = default_me_match() unless defined $opt{me_match_regexp};
-  # Pre-compile any defined regexps
-  $opt{header_regexp} &&= qr/$opt{header_regexp}/i; # always case-insensitive
-  map { ($opt{$_} &&= $opt{ignore_case} ? qr/$opt{$_}/i : qr/$opt{$_}/)
-      } qw(match_regexp me_match_regexp);
+  $opt{match_me_regexp} = default_me_match() unless defined $opt{match_me_regexp};
 
-  $opt{format_parsed}   = parse_format_string ($opt{format});
+  if ($opt{match_hdr_regexp})
+    {
+      if ($opt{match_hdr_regexp} =~ /(?:^\{BODY\}$|\|\{BODY\}|\{BODY\}\|)/)
+        {
+          $opt{match_hdr_regexp} =~ s///g;
+          $opt{search_body_p} = 1;
+        }
+      $opt{match_hdr_regexp} = qr/$opt{match_hdr_regexp}/i;
+    }
+  else
+    {
+      $opt{match_header} = (@{$opt{match_header}}
+                            ? [map { split (/[\s,]+/, $_) } @{$opt{match_header}}]
+                            : \@match_header_default);
+
+      for (my $i = 0; $i < @{$opt{match_header}}; $i++)
+        {
+          next unless $opt{match_header}->[$i] eq '{BODY}';
+          splice (@{$opt{match_header}}, $i--, 1);
+          $opt{search_body_p} = 1;
+        }
+
+      my $hre = sprintf ('^(?:%s)$', join ("|", @{$opt{match_header}}));
+      $opt{filter_hdr_regexp} = qr/$hre/i;
+    }
+
+  if ($opt{match_text})
+    {
+      my $tre = quotemeta ($opt{match_text});
+      $opt{filter_txt_regexp} = $opt{ignore_case} ? qr/$tre/i : qr/$tre/;
+    }
+
+  # Pre-compile any remaining defined regexps
+  map { ($opt{$_} &&= $opt{ignore_case} ? qr/$opt{$_}/i : qr/$opt{$_}/)
+      } qw(match_txt_regexp match_me_regexp);
+
+  $opt{format_parsed} = parse_format_string ($opt{format});
   {
     my @hdata = @{$opt{format_parsed}};
     shift @hdata;
@@ -170,8 +208,9 @@ sub parse_options
                        ? [map { split (/[\s,]+/, $_) } @{$opt{interesting}}]
                        : \@interesting_default);
 
-  $opt{simple_count_p} = ($opt{countp} && ! (   $opt{unread_only}
-                                             || $opt{match_regexp}
+  $opt{simple_count_p} = ($opt{countp} && ! (   $opt{search_unread}
+                                             || $opt{match_txt_regexp}
+                                             || $opt{match_text}
                                              || @{$opt{message_numbers}}));
 
   # Convert strings like "US/Pacific" to "-0500".
@@ -269,7 +308,7 @@ sub main
              });
       if ($opt{countp})
         {
-          my $n = $mbox->{message_match_count};
+          my $n = $mbox->{message_match_count} || 0;
           if (@_ > 1) { printf ("%-10d %s\n",  $n, $folder) }
           else        { print $n, "\n" }
         }
@@ -282,25 +321,29 @@ sub process_message
   my ($mbox, $meta, $fmsgno) = @_;
 
   #::DEBUG { @_ } @_;
-  if ($opt{unread_only})
+  if ($opt{search_unread})
     {
       my %flags = $mbox->flags ($fmsgno);
       return 1 if %flags && $flags{read};
     }
 
-  my $msg;
-  unless ($opt{envelopep} && ! $opt{match_regexp})
+  my ($msg, $header, $envelope);
+  if (($opt{match_text} || $opt{match_txt_regexp})
+        && !$mbox->{server_side_filtered})
     {
-      $msg = $mbox->retrieve ($fmsgno);
-      return unless defined $msg;
-      ::DEBUG { {state=>1}, $msg };
-    }
+      if ($opt{search_body_p})
+        {
+          local $opt{extractp} = 1;
+          $msg = $mbox->retrieve ($fmsgno) || return;
+        }
+      else
+        {
+          $msg = $mbox->retrieve ($fmsgno) || return;
+        }
+      ::DEBUG { $msg };
 
-  my ($header, $envelope);
-  if ($opt{match_regexp})
-    {
       $envelope = $mbox->envelope ($fmsgno);
-      $header   = From::Header->new ($msg->[0], $meta, $envelope);
+      $header   = From::Header->new ($msg, $meta, $envelope);
       # Return 1 so that processing of future messages will continue.
       return 1 unless $header->filter_matches_p;
     }
@@ -319,7 +362,9 @@ sub process_message
       print $mbox->envelope_string ($fmsgno), "\n";
       return 1;
     }
-  elsif ($opt{extractp} || $opt{all_headers})
+
+  $msg ||= $mbox->retrieve ($fmsgno);
+  if ($opt{extractp} || $opt{all_headers})
     {
       my $env_str = $mbox->envelope_string ($fmsgno);
       print_message ($msg, $meta, $header, $env_str);
@@ -330,7 +375,7 @@ sub process_message
         if (exists $opt{literal_header}->{'{octets}'});
 
       $envelope ||= $mbox->envelope ($fmsgno);
-      $header   ||= From::Header->new ($msg->[0], $meta, $envelope);
+      $header   ||= From::Header->new ($msg, $meta, $envelope);
       print_message_summary ($msg, $header);
     }
   return 1;
@@ -353,7 +398,7 @@ sub print_message
     }
 
   print $envelope_string, "\n";
-  $header ||= From::Header->new ($_[0], $meta);
+  $header ||= From::Header->new ($msgref, $meta);
   my $contents = $opt{onelinep} ? 'contents1' : 'contents';
   map { my $name = $_;
         map { my $s = sprintf ("%s: %s\n", $name, $_);
@@ -430,7 +475,7 @@ sub print_message_summary
 sub wanted_headers
 {
   return if $opt{all_headers};
-  return if $opt{match_regexp};
+  return if $opt{match_txt_regexp};
 
   my @headers;
   if ($opt{extractp})
@@ -666,7 +711,7 @@ sub printobj
               . " }");
     }
   elsif ($ref eq 'CODE')   { return $ref  }
-  elsif ($ref eq 'SCALAR') { return "\\" . $$obj }
+  elsif ($ref eq 'SCALAR') { return "\\" . printobj ($$obj) }
   elsif ($ref eq 'Regexp') { return "$$obj" }
   elsif ($ref ne "")
     {
@@ -1120,12 +1165,15 @@ sub new
 
   $self->{imap_tagno} = 1;
   $self->response_ok_p ("*");
+
   return if ($opt{starttls} && !$self->starttls);
   return unless $self->login ($self->{user}, $self->{pass});
 
   $self->message_count;  # sets folder
   $self->{message_range} = $self->normalize_ranges (@{$opt{message_numbers}});
   $self->{batch_list}    = $self->batch_ranges (@{$self->{message_range}});
+
+  $self->search if $opt{match_text};
   return $self;
 }
 
@@ -1202,10 +1250,7 @@ sub parse_response
       my $beg = $pos - length ($1);
       my $s = $1;
 
-      if ($s eq '"')
-        {
-          push @list, $1 if /(.*?)"/g;
-        }
+      if ($s eq '"') { push @list, $1 if /(.*?)"/g }
       elsif ($s eq '[')
         {
           my $text = $1 if /(.*?)]/g;
@@ -1218,14 +1263,8 @@ sub parse_response
           pos $_ = $newpos;
           push @list, $data;
         }
-      elsif ($s eq ')' || $s eq ']')
-        {
-          last;
-        }
-      elsif ($s eq 'NIL')
-        {
-          push @list, undef;
-        }
+      elsif ($s eq ')' || $s eq ']') { last }
+      elsif ($s eq 'NIL') { push @list, undef }
       elsif ($s =~ /^\{(\d+)\}$/)
         {
           my $n = $1;
@@ -1243,13 +1282,10 @@ sub parse_response
         }
       elsif (@list && substr ($_, $beg - 1, 1) eq "\n")
         {
-          push @all, [@list];
+          push @all, [@list]; # make copy, since array is reused
           @list = $s;
         }
-      else
-        {
-          push @list, $s;
-        }
+      else { push @list, $s }
     }
   return (\@list, pos $_) if @_ > 1;
 
@@ -1263,6 +1299,7 @@ sub parse_response
           }
       } @all;
 
+  ::DEBUG { {state=>1}, \@all };
   return \@all;
 }
 
@@ -1276,24 +1313,86 @@ sub analyze_response
   $response = $self->parse_response ($response) unless ref $response;
 
   my %data;
-  map { if ($_->[0] eq '*')
+  map { local *_ = $_; # dereference @$_ into @_
+        if ($_[0] eq '*')
           {
-            my $n = $_->[1];
-            my $list = $_->[3];
-            my %field;
-
-            while (@$list)
+            if ($_[1] eq 'OK')
               {
-                my ($key, $val) = splice (@$list, 0, 2);
-                $key = $1 if $key =~ /^BODY\[(HEADER|TEXT)/;
-                $field{$key} = $val;
+                my $list = $_[2];
+                my $label = $list->[0];
+                if (@$list > 2)
+                  {
+                    splice (@$list, 0, 1);
+                    $data{$label} = $list;
+                  }
+                else
+                  {
+                    $data{$label} = $list->[1];
+                  }
               }
-            $data{$n} = \%field;
+            elsif ($_[1] eq 'SEARCH')
+              {
+                splice (@_, 0, 2);
+                $data{SEARCH} = \@_;
+              }
+            elsif ($_[1] eq 'FLAGS')            { $data{$_[1]} = $_[2] }
+            elsif (@_ == 3 && $_[1] =~ /^\d+$/) { $data{$_[2]} = $_[1] }
+            else
+              {
+                my $n = $_[1];
+                my $list = $_[3];
+                my %field;
+
+                while (@$list)
+                  {
+                    my ($key, $val) = splice (@$list, 0, 2);
+                    $key = $1 if $key =~ /^BODY\[(HEADER|TEXT)/;
+                    $field{$key} = $val;
+                  }
+                $data{$n} = \%field;
+              }
           }
       } @$response;
 
   ::DEBUG { {state=>1}, \%data };
   return \%data;
+}
+
+sub search
+{
+  my $self = shift;
+
+  my   @cmd = (q(SEARCH));
+  push @cmd,  qw(CHARSET UTF-8) if $opt{utf8};
+  push @cmd,  $self->format_message_range (@{$self->{message_range}});
+
+  my @q = 'UNSEEN' if $opt{search_unread};
+
+  {
+    my $text = $opt{match_text};
+    $text =~ s/"/\\"/g;
+
+    my @s = map { sprintf ('HEADER "%s" "%s"', $_, $text) } @{$opt{match_header}};
+    push @s, sprintf ('BODY "%s"', $text) if $opt{search_body_p};
+    if (@s)
+      {
+        my $s = shift @s;
+        map { $s = sprintf ('OR %s %s', $_, $s) } @q;
+        push @q, $s;
+      }
+  }
+  return unless @q;
+  return unless $self->command_ok_p (@cmd, @q);
+  $self->{server_side_filtered} = 1;
+
+  my $resp = $self->analyze_response;
+  my @found = @{$resp->{SEARCH}};
+
+  $self->{message_range} = @found ? $self->normalize_ranges (@found) : [];
+  $self->{batch_list}    = $self->batch_ranges (@{$self->{message_range}});
+
+  ::DEBUG { { message_range => $self->{message_range},
+              batch_list    => $self->{batch_list}, } };
 }
 
 sub analyze_message
@@ -1352,38 +1451,17 @@ sub message_count
 {
   my $self = shift;
 
-  return $self->{folder_metadata}->{exists}
+  return $self->{folder_metadata}->{EXISTS}
     if exists $self->{folder_metadata};
 
   $self->{folder} = $_[0] if @_;
   my $folder = $self->{folder};
 
   return unless $self->command_ok_p ("EXAMINE", "$folder");
-  my $result = $self->response;
+  my $data = $self->analyze_response;
+  $self->{folder_metadata} = $data;
 
-  # We don't use the parse/analyze methods because this response is
-  # relatively trivial.
-  my %data;
-  while ($result =~ /^\* (\S+) (.*?)\r?$/mg)
-    {
-      my $tok1 = lc $1;
-      my $tok2 = lc $2;
-
-      if ($tok1 eq 'ok')
-        {
-          $data{$1} = $2 if $tok2 =~ /\[(\S+)\s+(\S+)\]/;
-        }
-      elsif ($tok1 eq 'flags')
-        {
-          $data{$tok1} = [split (/\s+/, $1)] if $tok2 =~ /\((.*)\)/;
-        }
-      else
-        {
-          $data{$tok2} = $tok1
-        }
-    }
-  $self->{folder_metadata} = \%data;
-  return $data{exists} if defined $data{exists};
+  return $data->{EXISTS} if defined $data->{EXISTS};
   return;
 }
 
@@ -1550,7 +1628,7 @@ sub uncache_message
 }
 
 
-package From::Mailbox::Imaps; # See rfc3501
+package From::Mailbox::Imaps;
 
 use strict;
 
@@ -1979,8 +2057,8 @@ sub analyze_message
   return $fdata->{$msgno} if exists $fdata->{$msgno};
 
   my ($envp, $hdrp, $bdyp);
-  if    ($opt{simple_count_p})                   {}
-  elsif ($opt{envelopep} && !$opt{match_regexp}) { $envp = 1 }
+  if    ($opt{simple_count_p}) {}
+  elsif ($opt{envelopep} && !$opt{match_txt_regexp}) { $envp = 1 }
   else
     {
       $envp = 1;
@@ -2019,6 +2097,7 @@ sub message_size
   my ($self, $msgno) = @_;
 
   my $data = $self->{folder_data}->{$msgno};
+  return unless $data;
 
   # Size should include both body and headers for consistency with imap
   return $data->[M_BEND];
@@ -2388,7 +2467,6 @@ use POSIX;
 
 my %protoclass =
   ( imap4s => 'From::Mailbox::Imaps',     imap4 => 'From::Mailbox::Imap',
-    imap3s => 'From::Mailbox::Imaps',     imap3 => 'From::Mailbox::Imap',
     imaps  => 'From::Mailbox::Imaps',     imap  => 'From::Mailbox::Imap',
 
     pop3s  => 'From::Mailbox::Pop3s',     pop3  => 'From::Mailbox::Pop3',
@@ -2534,6 +2612,7 @@ use Encode qw(:all);
 use constant { H_HDR => 0,
                H_MET => 1,
                H_ENV => 2,
+               H_BDY => 3,
              };
 
 sub new
@@ -2544,7 +2623,8 @@ sub new
   my $self = [];
   bless $self, $class;
 
-  $self->[H_HDR] = \$_[0];
+  $self->[H_HDR] = \$_[0]->[0];
+  $self->[H_BDY] = \$_[0]->[1] if @{$_[0]} > 1;
   $self->[H_MET] = $_[1] || {};
   $self->[H_ENV] = $_[2] || [];
   return $self;
@@ -2635,12 +2715,19 @@ sub filter_matches_p
   my $self = shift;
   local $_;
 
-  my $re = $opt{header_regexp};
-  for my $h (grep { $_ =~ $re } $self->names)
+  my $hre = $opt{match_hdr_regexp} || $opt{filter_hdr_regexp};
+  my $tre = $opt{match_txt_regexp} || $opt{filter_txt_regexp};
+  if ($hre)
     {
-      for $_ ($self->contents ($h, 1)) { return 1 if /$opt{match_regexp}/m }
-      for $_ ($self->parsed   ($h, 1)) { return 1 if /$opt{match_regexp}/m }
+      for my $h (grep { /$hre/ } $self->names)
+        {
+          for $_ ($self->contents ($h, 1)) { return 1 if /$tre/m }
+          for $_ ($self->parsed   ($h, 1)) { return 1 if /$tre/m }
+        }
     }
+  return 1 if ($opt{search_body_p}
+               && defined $self->[H_BDY]
+               && ${$self->[H_BDY]} =~ /$tre/m);
   return 0;
 }
 
@@ -2649,7 +2736,7 @@ sub fromto
   my ($self, $allp) = @_;
   my $from = join (", ", $self->contents ('from', $allp));
 
-  my $me_re = $opt{me_match_regexp};
+  my $me_re = $opt{match_me_regexp};
   if ($me_re && $from =~ /$me_re/o)
     {
       my @to = map { $self->contents ($_, 1) } (qw(to cc newsgroups));
@@ -2687,7 +2774,6 @@ my %header_parser =
 sub parsed
 {
   my ($self, $name, $allp) = @_;
-
   ::DEBUG { $name };
 
   my $fn = $header_parser{$name} if $opt{parsep};
@@ -3074,6 +3160,12 @@ sub strftime_iso8601
 
 __END__
 
+=begin text
+
+=encoding utf8
+
+=end text
+
 =head1 NAME
 
 from - summarize mailbox folder
@@ -3121,52 +3213,11 @@ Long-format options may be abbreviated as long as the result is not ambiguous.
 
 =over 4
 
-=item B<-1>, B<--one-line-headers>
-
-Un-fold wrapped header lines so they display as a single line.
-This is the default.
-
-=item B<-2>, B<--multi-line-headers>
-
-Do not un-fold wrapper header lines.
-Display them as delivered.
-
-=item B<-a>, B<--all-headers>
-
-Show all headers.  Ignores B<--format>.
-
-=item B<-C>, B<--columns=>I<COLS>
-
-Truncate lines exceeding I<COLS> length on output.
-If COLS is 0 or no option is specified and output is not to a terminal,
-no truncation is done.
-
-The default is the current width of the terminal.
-
-This option has no effect when displaying message bodies;
-only the normal summary mode is affected.
-
 =item B<-c>, B<--count-only>
 
 Only count the number of messages that would be displayed,
 without displaying any other information about them.
 E.g. B<-cu> would print the number of unread messages you have.
-
-=item B<-d>, B<--date-format>=I<FMT>
-
-Format of the %Date field in summary output format (see B<--format>).
-This string can be any format understood by the C<strftime> library function.
-The default conforms to iso8601:2004.
-
-If you use a configuration file (see L</"ENVIRONMENT">) you can assign a
-string or a function to the C<$opt{date_format}> variable.  In the latter
-case, the function will be called with a 9-element array of the parsed
-timestamp plus a 10th element, the unparsed text string of the timestamp.
-The values will be those parsed by C<localtime> with the time zone
-specified by B<--time-zone> taken into consideration.  They are:
-
-     0     1     2      3      4     5      6      7      8      9
-   $sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst, $raw
 
 =item B<-e>, B<--envelope>
 
@@ -3186,16 +3237,16 @@ headers deemed "interesting" presented.  These headers can be specified via
 the B<--interesting-headers> option (which see) or if the B<-all-headers>
 option is specified, the entire original set of headers is displayed.
 
-=item B<--folder-time-zone=>I<TZ>
+=item B<-C>, B<--columns=>I<COLS>
 
-This option only meaningfully affects envelope timestamps.
-See C<{ENVDATE}> for details.
+Truncate lines exceeding I<COLS> length on output.
+If COLS is 0 or no option is specified and output is not to a terminal,
+no truncation is done.
 
-=item B<-f>, B<--format=>I<FMT>
+The default is the current width of the terminal.
 
-Use I<FMT> as the output format.
-See the section L</"OUTPUT FORMAT"> for details.
-The default is S<"%-3{FMSGNO} %-20.20{FROMTO}  %-0.32Date  %Subject\n">
+This option has no effect when displaying message bodies;
+only the normal summary mode is affected.
 
 =item B<-I>, B<--interesting-headers=>I<H1,H2,...>
 
@@ -3206,62 +3257,41 @@ This option can be specified multiple times, and header names can be space
 or comma separated.  The default set of headers are C<From>, C<To>,
 C<Apparently-To>, C<Cc>, C<Newsgroups>, C<Subject>, C<Date>, C<Reply-To>.
 
-=item B<-i>, B<--ignore-case>
+=item B<-a>, B<--all-headers>
 
-Make B<--match> and B<--me-match> regular expressions case-insensitive.
+Show all headers.  Ignores B<--format>.
 
-=item B<--no-ignore-case>
+=item B<-1>, B<--one-line-headers>
 
-Make regular expressions case-sensitive.  This is the default.
+Un-fold wrapped header lines so they display as a single line.
+This is the default.
 
-Header names are always case-insensitive per RFC822, so this does not
-affect B<--match-header>.
+=item B<-2>, B<--multi-line-headers>
 
-=item B<--me-match=>I<REGEXP>
+Do not un-fold wrapper header lines.
+Display them as delivered.
 
-Pattern to match against the C<From> field to determine whether you are the
-sender (affects the C<{FROMTO}> format specifier).
-Defaults to everything up until the first comma in your GECOS information.
+=item B<-f>, B<--format=>I<FMT>
 
-=item B<-M>, B<--match-header=>I<REGEXP>
+Use I<FMT> as the output format.
+See the section L</"OUTPUT FORMAT"> for details.
+The default is S<"%-3{FMSGNO} %-20.20{FROMTO}  %-0.32Date  %Subject\n">
 
-Seach only headers matching REGEXP for patterns specified with B<--match>.
-By default, the headers searched are C<From>, C<To>, C<Cc>, and C<Subject>.
+=item B<-d>, B<--date-format>=I<FMT>
 
-=item B<-m>, B<--match=>I<REGEXP>
+Format of the %Date field in summary output format (see B<--format>).
+This string can be any format understood by the C<strftime> library function.
+The default conforms to iso8601:2004.
 
-Only print messages in which I<REGEXP> could be found in the header(s)
-matching the regexp specified with B<--match-headers>.
+If you use a configuration file (see L</"ENVIRONMENT">) you can assign a
+string or a function to the C<$opt{date_format}> variable.  In the latter
+case, the function will be called with a 9-element array of the parsed
+timestamp plus a 10th element, the unparsed text string of the timestamp.
+The values will be those parsed by C<localtime> with the time zone
+specified by B<--time-zone> taken into consideration.  They are:
 
-Matching is case-insensitive.
-
-=item B<-n>, B<--message-numbers=>I<N1,N2,...|FIRST-LAST|-LAST|FIRST->
-
-Only display specific message numbers.  This option can be specified
-multiple times and ranges are supported.  For example:
-
-=over 2
-
-=item * C<1,4,9>
-
-Display messages 1, 4, and 9.
-
-=item * C<3-5>
-
-Display messages 3, 4, and 5.
-
-=item * C<10->
-
-Skip messages 1-9.
-
-=item * C<-10>
-
-Display the last 10 messages.
-
-=back
-
-Messages are always displayed in folder order even if message numbers
-specified with this option are listed out of order.
+     0     1     2      3      4     5      6      7      8      9
+   $sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst, $raw
 
 =item B<-p>, B<--parse>
 
@@ -3295,25 +3325,10 @@ Standard/Daylight time.
 
 The options B<--utc> and B<--gmt> are shorthand for S<--time-zone=UTC>.
 
-=item B<-s>, B<--sender=>I<REGEXP>
+=item B<--folder-time-zone=>I<TZ>
 
-Show only messages sent from I<ADDR>.
-This is equivalent to specifying the options
-S<--match-headers='^From|Sender$' --match=REGEXP>.
-
-=item B<-U>, B<--user=>I<USER>
-
-Show headers of I<USER>'s messages.  This either selects that user's local
-mbox file or provides the username for network mailboxen whose IMAP or POP3
-urls don't specify one.
-
-=item B<-u>, B<--unread-only>
-
-Only show information about unread messages.
-
-Some protocols (e.g. POP3) do not store this information, so all messages
-will be treated as unread.
-But this is generally supported for IMAP and local mbox folders.
+This option only meaningfully affects envelope timestamps.
+See C<{ENVDATE}> for details.
 
 =item B<--utf8>, B<--utf-8>
 
@@ -3337,11 +3352,121 @@ Do not do any charset conversion or decoding of rfc1522-format headers.
 
 =back
 
+=head2 SEARCH OPTIONS
+
+=over 2
+
+=over 4
+
+=item B<-n>, B<--message-numbers=>I<N1,N2,...|FIRST-LAST|-LAST|FIRST->
+
+Only display specific message numbers.  This option can be specified
+multiple times and ranges are supported.  For example:
+
+=over 2
+
+=item * C<1,4,9>
+
+Display messages 1, 4, and 9.
+
+=item * C<3-5>
+
+Display messages 3, 4, and 5.
+
+=item * C<10->
+
+Skip messages 1-9.
+
+=item * C<-10>
+
+Display the last 10 messages.
+
+=back
+
+Messages are always displayed in folder order even if message numbers
+specified with this option are listed out of order.
+
+=item B<-u>, B<--unread>
+
+Only show information about unread messages.
+
+Some protocols (e.g. POP3) do not store this information, so all messages
+will be treated as unread.
+But this is generally supported for IMAP and local mbox folders.
+
+=item B<-m>, B<--match-text=>I<TEXT>
+
+Seach for messages which contain I<TEXT> in one of the headers specified
+with B<--match-header>.
+
+Matching using this option is performed server-side for IMAP
+folders and in that case is always case-insensitive, as required by
+L<RFC3501 E<sect>6.4.4|http://tools.ietf.org/html/rfc3501#section-6.4.4>.
+If you need case-sensitive search with IMAP folders, use
+B<--match-text-regexp> instead.
+
+=item B<-M>, B<--match-header=>I<H1,H2,...>
+
+Search only headers included in list for text specified with B<--match-text>.
+By default, the headers searched are
+C<Sender>, C<From>, C<To>, C<Cc>, C<Subject>, and their C<Resent-> variants.
+
+The pseudoheader C<{BODY}> can be used to search the actual message body.
+
+This option may be repeated more than once.
+
+=item B<-s>, B<--sender=>I<ADDR>
+
+Show only messages sent from I<ADDR>.
+This is equivalent to specifying the options
+S<--match-header='From, Sender' --match-text=I<ADDR>>.
+
+=item B<--mtr>, B<--match-text-regexp=>I<REGEXP>
+
+Only print messages in which I<REGEXP> could be found in the header(s)
+matching the regexp specified with B<--match-header-regexp>, or the list of
+headers specified with B<--match-header> if the former is not specified.
+
+This search is always performed client-side, which means that headers in
+networked folders must be downloaded first in order to be searched.
+
+=item B<--mhr>, B<--match-header-regexp=>I<REGEXP>
+
+Seach only headers matching REGEXP for patterns specified with
+B<--match-text> or B<--match-text-regexp>.
+
+=item B<--mmr>, B<--match-me-regexp=>I<REGEXP>
+
+Pattern to match against the C<From> field to determine whether you are the
+sender (affects the C<{FROMTO}> format specifier).
+Defaults to everything up until the first comma in your GECOS information.
+
+=item B<-i>, B<--ignore-case>
+
+Make text and regular expression searches case-insensitive.
+
+=item B<--no-ignore-case>
+
+Make searches case-sensitive.  This is the default.
+
+Header names are always case-insensitive per RFC2822, so this does not
+affect B<--match-header-regexp> or B<--match-header>.
+
+=back
+
+=back
+
 =head2 CONNECTION AND SSL OPTIONS
 
 =over 2
 
 =over 4
+
+=item B<-U>, B<--user=>I<USER>
+
+Show headers of I<USER>'s messages.  This either selects that user's local
+mbox file or provides the username for network mailboxen whose IMAP or POP3
+urls don't specify one.
 
 =item B<--timeout>=I<seconds>, B<--connect-timeout>=I<seconds>    (default: 10)
 
@@ -3366,9 +3491,9 @@ If not specified, a few typical locations will be searched.
 
 =item B<--ssl-verify-hostname>
 
-If server certificate is not signed by recognized authority, compare the
-subject CN (Common Name) and matching aliases against the server name or
-address, and accept the certificate if they match.
+If server certificate is not signed by a recognized certificate authority,
+compare the subject CN (Common Name) and matching aliases against the
+server name or address, and accept the certificate if they match.
 
 This is less secure than verification via a certificate signature chain.
 Use of this option is not recommended.
@@ -3378,15 +3503,15 @@ Use of this option is not recommended.
 Do no certificate verification at all; just encrypt the connection.
 Use of this option is discouraged.
 
-=item B<--prefer-stunnel>
+=item B<--prefer-stunnel>, B<--no-prefer-perl-ssl>
 
 Prefer using the stunnel program for encryption instead of the native
 perl SSL library, if it is available.  This is the default.
 
-=item B<--prefer-perl-ssl>
+=item B<--prefer-perl-ssl>, B<--no-prefer-stunnel>
 
 Prefer using the native perl SSL interface (IO::Socket::SSL) instead of the
-C<stunnel> program, if it is available.
+stunnel program, if it is available.
 
 B<Note>: The perl SSL interface has been observed to be significantly
 slower than stunnel, especially for large transfers in extraction mode.
@@ -3396,7 +3521,7 @@ slower than stunnel, especially for large transfers in extraction mode.
 Name of the stunnel program to call.  This can be a fully-qualified name or
 a relative name that will be searched for in the user's PATH.
 
-=item B<--prefer-socklib>=I<classes>
+=item B<--prefer-socklib>=I<classes>          (default: C<inet6, ip, inet>)
 
 Specify priority of perl classes to use for ordinary sockets.
 The first available class is used.
@@ -3410,19 +3535,17 @@ specially-recognized aliases:
 
 =item * B<inet6>
 
-This refers to C<IO::Socket::INET6>, which supports ipv4 and ipv6.
+IO::Socket::INET6; supports ipv4 and ipv6.
 
 =item * B<ip>
 
-This refers to C<IO::Socket::IP>, which supports ipv4 and ipv6.
+IO::Socket::IP; supports ipv4 and ipv6.
 
-=item * B<inet4> or B<inet>
+=item * B<inet4>, B<inet>
 
-This refers to C<IO::Socket::INET>, which supports ipv4 only.
+IO::Socket::INET; supports ipv4 only.
 
 =back
-
-The default order is C<inet6, ip, inet>.
 
 =back
 
@@ -3694,7 +3817,7 @@ This includes the body and all headers.
 
 The sender of the message if it isn't you, or C<< To I<recipient> >> otherwise.
 
-The option B<--me-match> sets the regexp which matches your email address.
+The option B<--match-me-regexp> sets the regexp which matches your email address.
 By default, this is just your current full name (as identified in the password database).
 
 =item * B<{ENVFROM}>
@@ -3834,18 +3957,21 @@ or
 
 Only plaintext authentication schemes are currently supported.
 
+Search support is fairly primitive; you cannot build boolean
+queries with different patterns for different headers.
+
+No option for threaded display of summaries.
+
 MIME entities are not parsed.
 In extraction mode, for example, it would be useful to have the option to
 display only the text/plain version of multipart/alternative messages,
 or to decode quoted-printable and base64 text.
 
+POP3 support is relatively primitive.  This isn't likely to change, since
+this protocol is very primitive itself.
+
 The C<IO::Socket::IP> class does not implement connection timeouts as of
 perl v5.14.  I don't know why.
-
-IMAP server-side search is not yet implemented.
-
-POP3 support is relatively primitive.  This isn't likely to change, since
-this protocol is barely worth supporting at all.
 
 =head1 SEE ALSO
 
