@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.84 2014/02/18 23:44:43 friedman Exp $
+# $Id: from,v 1.85 2014/02/21 20:57:57 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "3.1.0";
+our $version = "3.1.1";
 
 # Optional perl modules that will improve the functionality of this program:
 our @optional_modules
@@ -1157,19 +1157,18 @@ sub new
   my $class = ref ($type) || $type;
   my $self = $class->SUPER::new (@_);
 
-  $self->{folder} = "INBOX" unless $self->{folder};
+  return unless $self->connect;
+
   $self->{folder_data} = {};
-
-  $self->connect;
-  return unless $self->{fh};
-
   $self->{imap_tagno} = 1;
-  $self->response_ok_p ("*");
+
+  return unless $self->response_ok_p ('*');
+  $self->capability ($self->analyze_response);
 
   return if ($opt{starttls} && !$self->starttls);
   return unless $self->login ($self->{user}, $self->{pass});
 
-  $self->message_count;  # sets folder
+  $self->message_count ($self->{folder} || 'INBOX'); # Sets folder
   $self->{message_range} = $self->normalize_ranges (@{$opt{message_numbers}});
   $self->{batch_list}    = $self->batch_ranges (@{$self->{message_range}});
 
@@ -1230,8 +1229,8 @@ sub response
     }
   $fh->blocking (1);
 
+  ::DEBUG { {state=>1}, $_ };
   $self->{response} = $_;
-  return $_;
 }
 
 # Amazingly cheesy recursive descent parser.
@@ -1290,15 +1289,6 @@ sub parse_response
   return (\@list, pos $_) if @_ > 1;
 
   push @all, \@list if @list;
-  map { if ($_->[1] eq 'OK')
-          {
-            my @new = splice (@$_, 0, 2);
-            push @new, shift @$_ if ref $_->[0];
-            push @new, join (" ", @$_) if @$_;
-            $_ = \@new;
-          }
-      } @all;
-
   ::DEBUG { {state=>1}, \@all };
   return \@all;
 }
@@ -1311,6 +1301,12 @@ sub analyze_response
 
   my $response = @_ ? $_[0] : $self->parse_response;
   $response = $self->parse_response ($response) unless ref $response;
+
+  # If there is only the tagged response, treat it as untagged for analysis
+  # purposes.  But don't use it in other cases since that might clobber
+  # more valuable untagged data (e.g. SEARCH responses).
+  $response->[0]->[0] = '*' if (@$response == 1
+                                && $response->[0]->[0] eq $self->{imap_tag});
 
   my %data;
   map { local *_ = $_; # dereference @$_ into @_
@@ -1335,8 +1331,10 @@ sub analyze_response
                 splice (@_, 0, 2);
                 $data{SEARCH} = \@_;
               }
-            elsif ($_[1] eq 'FLAGS')            { $data{$_[1]} = $_[2] }
-            elsif (@_ == 3 && $_[1] =~ /^\d+$/) { $data{$_[2]} = $_[1] }
+            elsif ($_[1] =~ /^(?:FLAGS|NO|BAD)$/)
+              { $data{$_[1]} = $_[2] }
+            elsif (@_ == 3 && $_[1] =~ /^\d+$/)
+              { $data{$_[2]} = $_[1] }
             else
               {
                 my $n = $_[1];
@@ -1346,7 +1344,7 @@ sub analyze_response
                 while (@$list)
                   {
                     my ($key, $val) = splice (@$list, 0, 2);
-                    $key = $1 if $key =~ /^BODY\[(HEADER|TEXT)/;
+                    $key = $1 if $key =~ /^(?:BODY|BINARY)\[(HEADER|TEXT)/;
                     $field{$key} = $val;
                   }
                 $data{$n} = \%field;
@@ -1356,6 +1354,49 @@ sub analyze_response
 
   ::DEBUG { {state=>1}, \%data };
   return \%data;
+}
+
+# If passed hashref, use it to create capability list.
+# If no arg, retrieve cap list from server and save it.
+# if cap exists and has subcaps, return list of subcaps.
+# Otherwise if cap exists, return that cap name.
+# Otherwise, return void.
+sub capability
+{
+  my $self = shift;
+  my ($arg) = @_;
+
+  unless (@_)
+    {
+      return unless $self->command_ok_p ('CAPABILITY');
+      $arg = $self->analyze_response;
+    }
+  if (ref $arg eq 'HASH' && exists $arg->{CAPABILITY})
+    {
+      my %cap;
+      map { if (/=/)
+              {
+                my ($key, $val) = split (/=/, $_, 2);
+                $cap{$key}->{$val} = undef;
+              }
+            $cap{$_} ||= undef;
+          } @{$arg->{CAPABILITY}};
+      ::DEBUG { {state=>1}, \%cap };
+      return $self->{CAPABILITY} = \%cap;
+    }
+
+  ::DEBUG { $arg };
+
+  my $caps = $self->{CAPABILITY};
+  if (!exists $caps->{$arg}) { return }
+  elsif (ref $caps->{$arg} eq 'HASH')
+    {
+      my @keys = sort keys %{$caps->{$arg}};
+      ::DEBUG { {state=>1}, @keys };
+      return wantarray ? @keys : @keys ? \@keys : undef;
+    }
+  ::DEBUG { {state=>1}, $arg };
+  return $arg;
 }
 
 sub search
@@ -1431,11 +1472,14 @@ sub login
 {
   my ($self, $login, $pass) = @_;
 
-  return 1 if $self->command_ok_p ("LOGIN", $login, $pass);
-
-  ::_error ($self->{uri}, scalar $self->response);
-  $self->disconnect;
-  return;
+  unless ($self->command_ok_p ("LOGIN", $login, $pass))
+    {
+      ::_error ($self->{uri}, scalar $self->response);
+      $self->disconnect;
+      return;
+    }
+  $self->capability ($self->analyze_response);
+  return 1;
 }
 
 sub logout
