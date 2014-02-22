@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.85 2014/02/21 20:57:57 friedman Exp $
+# $Id: from,v 1.86 2014/02/21 23:19:06 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -1168,7 +1168,8 @@ sub new
   return if ($opt{starttls} && !$self->starttls);
   return unless $self->login ($self->{user}, $self->{pass});
 
-  $self->message_count ($self->{folder} || 'INBOX'); # Sets folder
+  # Sets folder
+  $self->message_count ($self->{folder} || 'INBOX');
   $self->{message_range} = $self->normalize_ranges (@{$opt{message_numbers}});
   $self->{batch_list}    = $self->batch_ranges (@{$self->{message_range}});
 
@@ -2259,6 +2260,8 @@ sub normalize_ranges
 
   my $min = 1;
   my $max = $self->message_count;
+
+  return unless $max >= $min;
 
   unless (@_ && defined $_[0]) # ignore undef
     {
