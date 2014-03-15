@@ -44,16 +44,8 @@ sub main
 
   for my $from (@_)
     {
-      my ($dirname, $basename) = ("", $from);
-
-      if ($from =~ /^(.*\/)/)
-        {
-          $dirname = $1;
-          $basename = substr ($from, length $dirname);
-        }
-
-      eval "\$basename =~ $re";
-      my $to = $dirname . $basename;
+      my $to = $from;
+      eval "\$to =~ $re";
 
       if ($actually_do_it)
         {
