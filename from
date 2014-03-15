@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.86 2014/02/21 23:19:06 friedman Exp $
+# $Id: from,v 1.87 2014/02/22 00:05:09 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,7 +30,7 @@ use Carp;
 use Getopt::Long;
 use Pod::Usage;
 
-our $version = "3.1.1";
+our $version = "3.1.2";
 
 # Optional perl modules that will improve the functionality of this program:
 our @optional_modules
@@ -45,6 +45,7 @@ our %SSL_options;
 our ($SOCKLIB, $SOCKLIB_SSL);
 
 sub DEBUG (&;@); # prototype
+*DEBUG = \&From::Debug::DEBUG;
 
 use constant MIN_BLOCKSIZE => 4096;
 
@@ -650,90 +651,6 @@ sub _error
   return;
 }
 
-sub DEBUG (&;@)
-{
-  return unless $debug;
-
-  if ($debug > 1)
-    {
-      local $Carp::CarpLevel = 2;
-      local ($@, $SIG{__DIE__});
-      eval { confess "DEBUG" };
-      $@ =~ s/^/** /gm;
-      print STDERR "**\n", $@;
-    }
-
-  my $fn = shift;
-  @_ = eval { &$fn };
-
-  my @caller = caller (1);
-  my $pkg = $caller[0];
-  my $fn  = $caller[3];
-  $fn =~ s/.*:://;
-
-  my $state = 0;
-  if (@_ && ref $_[0] eq 'HASH' && exists $_[0]->{state})
-    {
-      $state = 1;
-      shift;
-    }
-
-  my $args = join (", ", map { printobj ($_) } @_);
-  $args =~ s/\r/\\r/mg;
-  $args =~ s/\n/\\n/mg;
-
-  my $fmt = $state ? "** %s::%s : %s\n" : "** %s->%s (%s)\n";
-  my $msg = sprintf ($fmt, $pkg, $fn, $args);
-  print STDERR $msg;
-  return;
-}
-
-sub printobj
-{
-  my $obj = shift;
-  my @list;
-
-  return "undef" unless defined $obj;
-  my $ref = ref $obj;
-
-  if ($ref eq 'ARRAY')
-    {
-      return "[" . join (", ", map { printobj ($_) } @$obj) . "]";
-    }
-  elsif ($ref eq 'HASH')
-    {
-      return ("{ "
-              . join (", ", map { sprintf "%s => %s",
-                                    $_, ($_ eq "pass"
-                                         ? '"*"'
-                                         : printobj ($obj->{$_}))
-                                } sort keys %$obj)
-              . " }");
-    }
-  elsif ($ref eq 'CODE')   { return $ref  }
-  elsif ($ref eq 'SCALAR') { return "\\" . printobj ($$obj) }
-  elsif ($ref eq 'Regexp') { return "$$obj" }
-  elsif ($ref ne "")
-    {
-      $ref =~ s/=.*//;
-      return $ref;
-    }
-  elsif ($obj =~ /^[+-]?[\d.]+/) { return $obj }
-
-  my $len = length $obj;
-  if ($::debug < 2 && $len > 64)
-    {
-      substr ($obj, 32, -32) = "...";
-      $obj =~ s/"/\\"/g;
-      return "\"$obj\" {$len}";
-    }
-  else
-    {
-      $obj =~ s/"/\\"/g;
-      return "\"$obj\"";
-    }
-}
-
 # For rc file convenience.
 sub command_output
 {
@@ -1168,8 +1085,7 @@ sub new
   return if ($opt{starttls} && !$self->starttls);
   return unless $self->login ($self->{user}, $self->{pass});
 
-  # Sets folder
-  $self->message_count ($self->{folder} || 'INBOX');
+  $self->message_count ($self->{folder} || 'INBOX'); # Sets folder
   $self->{message_range} = $self->normalize_ranges (@{$opt{message_numbers}});
   $self->{batch_list}    = $self->batch_ranges (@{$self->{message_range}});
 
@@ -2259,8 +2175,7 @@ sub normalize_ranges
   ::DEBUG { @_ } @_;
 
   my $min = 1;
-  my $max = $self->message_count;
-
+  my $max = $self->message_count (1);
   return unless $max >= $min;
 
   unless (@_ && defined $_[0]) # ignore undef
@@ -3198,6 +3113,153 @@ sub strftime_iso8601
 
   s=%=%%=g;  # re-quote outstanding `%' for reinput to strftime again.
   return $_;
+}
+
+
+package From::Debug;
+
+use Carp;
+use Scalar::Util qw(reftype);
+
+our $printobj_indent =  0;
+our $printobj_maxlen = 64;
+
+sub __escape_ctrl
+{
+  $_[0] =~ s/\r/\\r/g;
+  $_[0] =~ s/\n/\\n/g;
+}
+
+sub DEBUG (&;@)
+{
+  return unless $::debug;
+
+  if ($debug > 2)
+    {
+      local $Carp::CarpLevel = 2;
+      local ($@, $SIG{__DIE__});
+      eval { confess "DEBUG" };
+      print STDERR "\n", $@;
+    }
+
+  my $fn = shift;
+  @_ = eval { &$fn };
+
+  my @caller = caller (1);
+  my $pkg = $caller[0];
+  my $fn  = $caller[3];
+  $fn =~ s/.*:://;
+
+  my $state = 0;
+  if (@_ && ref $_[0] eq 'HASH' && exists $_[0]->{state})
+    {
+      $state = 1;
+      shift;
+    }
+
+  my ($args, $fmt);
+  my @elt  = map { printobj ($_) } @_;
+  my @refs = grep { ref $_ } @_;
+  $args = join (", ", @elt) unless @refs;
+
+  if ($::debug > 1 && !(defined $args && length $args < $printobj_maxlen))
+    {
+      $fmt = $state ? "%s::%s :\n %s\n\n" : "%s->%s (\n %s)\n\n";
+      $args = join (",\n ", @elt);
+    }
+  else
+    {
+      $fmt = $state ? "%s::%s : %s\n" : "%s->%s (%s)\n";
+      $fmt .= "\n" if $::debug > 1;
+      $args ||= join (", ", @elt);
+      __escape_ctrl ($args);
+    }
+
+  my $msg = sprintf ($fmt, $pkg, $fn, $args);
+  print STDERR $msg;
+  return;
+}
+
+sub printobj
+{
+  my $obj = shift;
+  my @list;
+
+  return "undef" unless defined $obj;
+
+  my $ref     = ref $obj;
+  my $reftype = reftype ($obj);
+  my $refstr  = $ref eq $reftype ? "" : "$ref=";
+
+  local $printobj_indent = $printobj_indent + 2 + length $refstr;
+  my $prefix = "\n" . (" " x $printobj_indent) if $::debug > 1;
+
+  if ($reftype eq 'ARRAY')
+    {
+      return "${refstr}[]" unless @$obj;
+      my @res = map { printobj ($_) } @$obj;
+      my $sep = ($prefix && length ("@res") > (120 - $printobj_indent)
+                 ? ",$prefix "
+                 : ", ");
+      return "${refstr}[ " . join ($sep, @res) . " ]" if $prefix;
+      return "${refstr}["  . join ($sep, @res) .  "]";
+    }
+  elsif ($reftype eq 'HASH')
+    {
+      return "${refstr}{}" unless %$obj;
+
+      my @keys = sort { ($a =~ /^\d+$/ && $b =~ /^\d+$/
+                         ? $a <=> $b
+                         : $a cmp $b)
+                      } keys %$obj;
+
+      my %pkey;
+      my $w = ::max (map { my $pkey = $_;
+                           $pkey{$_} = $pkey
+                           if $pkey =~ s/^(.*?[^A-Za-z0-9_].*)$/'$1'/;
+                         length $pkey;
+                       } @keys);
+
+      $printobj_indent += $w + 4;
+      my $fmt = $prefix ? "%-${w}s => %s," : "%s => %s";
+      my @elt = map { sprintf ($fmt,
+                               (exists $pkey{$_} ? $pkey{$_} : $_),
+                               ($_ eq "pass" ? '"*"' : printobj ($obj->{$_})))
+                    } @keys;
+      if ($prefix)
+        {
+          my $hprefix = substr ($prefix, 0, length ($prefix) - 1);
+          return "${refstr}{ " . join ("$prefix ", @elt) . " }";
+        }
+      return ("${refstr}{ " . join (", ", @elt) . " }");
+    }
+  elsif ($reftype eq 'CODE')   { return "$refstr" . $ref  }
+  elsif ($reftype eq 'SCALAR') { return "${refstr}\\" . printobj ($$obj) }
+  elsif ($reftype eq 'Regexp') { return printobj ("$refstr$obj") }
+  elsif ($ref ne "")
+    {
+      $ref =~ s/=.*//;
+      return $ref;
+    }
+  elsif ($obj =~ /^[+-]?[\d.]+/)
+    { return $obj }
+   #{ return $prefix ? sprintf ("%6d", $obj) : $obj }
+
+  my $len = length $obj;
+  if ($::debug < 3 && $len > $printobj_maxlen)
+    {
+      my $n = $printobj_maxlen / 2;
+      substr ($obj, $n, -$n) = "...";
+      __escape_ctrl ($obj);
+      $obj =~ s/"/\\"/g;
+      return "\"$obj\" {$len}";
+    }
+  else
+    {
+      __escape_ctrl ($obj) if $len <= $printobj_maxlen;
+      $obj =~ s/"/\\"/g;
+      return "\"$obj\"";
+    }
 }
 
 
