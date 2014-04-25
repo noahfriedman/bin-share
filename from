@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.87 2014/02/22 00:05:09 friedman Exp $
+# $Id: from,v 1.88 2014/03/15 21:12:37 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -349,6 +349,13 @@ sub process_message
       return 1 unless $header->filter_matches_p;
     }
 
+  # We don't want to count messages that don't exist.
+  unless (exists $mbox->{message_range})
+    {
+      $msg ||= $mbox->retrieve ($fmsgno);
+      return unless $msg;
+    }
+
   if ($opt{countp})
     {
       $mbox->{message_match_count}++;
@@ -365,6 +372,7 @@ sub process_message
     }
 
   $msg ||= $mbox->retrieve ($fmsgno);
+  return unless $msg;
   if ($opt{extractp} || $opt{all_headers})
     {
       my $env_str = $mbox->envelope_string ($fmsgno);
@@ -1823,7 +1831,8 @@ sub new
   $self->{buffer}        = "";
   $self->{last_scanned}  = 0;
   $self->{folder_data}   = {};
-  $self->{message_range} = $self->normalize_ranges (@{$opt{message_numbers}});
+  # Don't initialize this.  Lazy read unless later necessary.
+  #$self->{message_range} = $self->normalize_ranges (@{$opt{message_numbers}});
   return $self;
 }
 
@@ -2037,20 +2046,27 @@ sub message_count
   ::DEBUG { @_ } @_;
   my $n = scalar keys %{$self->{folder_data}};
 
-  if ($n == 0 && $_[0]) # force full scan
+  if ($n == 0)
     {
-      return unless ($opt{simple_count_p}
-                     || $self->{fh}->seek (0, SEEK_CUR) # seekable?
-                     || $self->copy_to_tmpfile);
+      if ($_[0]) # force full scan
+        {
+          return unless ($opt{simple_count_p}
+                         || $self->{fh}->seek (0, SEEK_CUR) # seekable?
+                         || $self->copy_to_tmpfile);
 
-      # Try scanning as many messages as there are bytes in the file.
-      # scan will stop at last message, and because there are no
-      # intermediate method calls and marker recording, this will be faster
-      # than calling iteratively from 1 to n.
-      $self->scan_msgno ($self->{stat}->[7]); # st_size
-      $n = $self->{last_scanned};
+          # Try scanning as many messages as there are bytes in the file.
+          # scan will stop at last message, and because there are no
+          # intermediate method calls and marker recording, this will be faster
+          # than calling iteratively from 1 to n.
+          $self->scan_msgno ($self->{stat}->[7]); # st_size
+          $n = $self->{last_scanned};
+        }
+      else
+        {
+          $n = $self->{stat}->[7];  # provide upper bound
+        }
     }
-  return $n ? $n : undef;
+  return $n;
 }
 
 sub message_size
@@ -2175,8 +2191,10 @@ sub normalize_ranges
   ::DEBUG { @_ } @_;
 
   my $min = 1;
-  my $max = $self->message_count (1);
-  return unless $max >= $min;
+  # regexp: we only need the real max for mbox files if counting backwards
+  # from the end.
+  my $max = $self->message_count ("@_" =~ m/(?:^|[\s,])-\d/);
+  return unless defined $max && $max >= $min;
 
   unless (@_ && defined $_[0]) # ignore undef
     {
