@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: flac2mp3,v 1.4 2012/10/10 06:38:19 friedman Exp $
+# $Id: flac2mp3,v 1.5 2013/04/27 23:23:34 friedman Exp $
 
 decode_flac()
 {
@@ -32,6 +32,8 @@ tag_mp3()
                      y/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
                             /^date$/s//year/
                      /^tracknumber$/s//track/
+                      /^tracktotal$/s//track-total/
+                       /^disctotal$/s//disc-total/
                      s/^/--/
                      G
                      s/\n/=/
