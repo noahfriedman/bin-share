@@ -4,7 +4,7 @@
 # Created: 1996-01-15
 # Public domain
 
-# $Id: untar,v 1.28 2013/12/11 01:25:26 friedman Exp $
+# $Id: untar,v 1.29 2014/05/19 18:07:14 friedman Exp $
 
 # Commentary:
 
@@ -129,6 +129,9 @@ extract()
             basename=${file##*/}
             pkgdir=${basename%.pkg}.app
             7z x -o"$pkgdir" "$file" ;;
+
+        */initramfs* | */ramdisk.img )
+            gzip -dc $file | cpio -iv ;;
     esac
 }
 
