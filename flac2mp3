@@ -1,85 +1,233 @@
-#!/bin/sh
-# $Id: flac2mp3,v 1.6 2014/06/09 05:18:04 friedman Exp $
+#!/usr/bin/env perl
+# flac2mp3 --- convert flac files to mp3, with tags
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2009-10-28
+# Public domain
 
-decode_flac()
+# $Id$
+
+# Commentary:
+
+# Requires commands: flac, lame, metaflac, eyeD3
+
+# This version works with eyeD3 0.6.x.
+# The lyrics option has changed in 0.7.x.
+
+# Code:
+
+use strict;
+
+$^W = 1;
+
+sub xtrace
 {
-  flac --silent --force --decode "$@"
+  my @xq = @_;  # don't modify original
+  map { s/'/'\\''/sg;
+        s/^(.*)$/'$1'/s if /[][{}\(\)<>\'\"\!\?\|\$&\*;\s\\]/s;
+        $_ } @xq;
+  print STDERR "+ ", join (" ", @xq), "\n";
 }
 
-encode_mp3()
+sub xsystem
 {
-  set x --nohist -h -p --preset standard --vbr-new "$@"
-  shift
-  if ! [ -t 1 ]; then set x --silent; shift; fi
-
-  lame "$@"
+  xtrace (@_);
+  die "$_[0]: $!" if system (@_) < 0;
+  return ($? == 0);
 }
 
-tag_mp3()
+sub bt
 {
-  flac=$1
-  flacdir=`dirname "$flac"`
-  mp3=$2
+  #xtrace (@_);
 
-  eval set fnord \
-      `metaflac --export-tags-to=- "$flac" \
-           | sed -e 'h
-                     s/^[^=]*=//
-                     s/^/"/
-                     s/$/"/
-                     x
-                     s/=.*//
-                     y/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/
-                            /^date$/s//year/
-                     /^tracknumber$/s//track/
-                      /^tracktotal$/s//track-total/
-                      /^discnumber$/s//disc/
-                       /^disctotal$/s//disc-total/
-                     s/^/--/
-                     G
-                     s/\n/=/
-                     /^--comment/s/=/=::/
-                    '`
+  my $fh;
+  my $pid = open ($fh, "-|");
+  die "fork: $!" unless defined $pid;
 
-  for apic in FRONT_COVER BACK_COVER LEAFLET OTHER ; do
-      if [ -f "$flacdir/$apic.JPG" ]; then
-          set "$@" --add-image="$flacdir/$apic.JPG:$apic"
-      fi
-  done
-  shift
+  local $/ = wantarray ? $/ : undef;
+  return <$fh> if $pid; # parent
 
-  eyeD3 \
-      --no-tagging-time-frame \
-      --set-encoding utf16-LE \
-      --to-v2.3 \
-      "$@" \
-      "$mp3"
-
-  touch -r "$flac" "$mp3"
+  exec (@_) or die "exec: $_[0]: $!";  # child
 }
 
-flac_to_mp3()
-{
-  flac=$1
-  base=`basename "$flac" .flac`
-  wav=/tmp/_flac2mp3_$$.wav
-  mp3=$base.mp3
+
+use Encode;
+use Unicode::Normalize;
 
-  decode_flac -o "$wav" "$flac" &&
-  encode_mp3 "$wav" "$mp3"
-  rm -f "$wav"
-  tag_mp3 "$flac" "$mp3"
+# We always try these encodings before anything caller requests.
+# Don't add iso8859-1 or similar unibyte character sets here, because those
+# will always succeed since all 8-bit chars are legal in them.
+my @always_try_encodings = (qw(utf8 utf16 utf32 cp1252));
+
+my %charmap =
+  ( "\N{U+00C6}" => "AE",    "\N{U+00E6}" => "ae",
+    "\N{U+0152}" => "OE",    "\N{U+0153}" => "oe",
+    "\N{U+FB00}" => "ff",
+    "\N{U+FB01}" => "fi",    "\N{U+FB03}" => "ffi",
+    "\N{U+FB02}" => "fl",    "\N{U+FB04}" => "ffl",
+    "\N{U+2018}" => "'",     "\N{U+2019}" => "'",
+    "\N{U+201A}" => ",",     "\N{U+201E}" => ",,",
+    "\N{U+201B}" => "`",     "\N{U+201F}" => "``",
+    "\N{U+201C}" => "\"",    "\N{U+201D}" => "\"",
+    "\N{U+2024}" => ".",     "\N{U+2025}" => "..",    "\N{U+2026}" => "...",
+    "\N{U+2032}" => "'",     "\N{U+2033}" => "''",    "\N{U+2034}" => "'''",
+    "\N{U+2035}" => "`",     "\N{U+2036}" => "``",    "\N{U+2037}" => "```",
+    "\N{U+2039}" => "<",     "\N{U+203A}" => ">",
+    "\N{U+203C}" => "!!",    "\N{U+2047}" => "??",
+    "\N{U+203D}" => "?!",    "\N{U+2048}" => "?!",    "\N{U+2049}" => "!?",
+    "\N{U+2044}" => "/",     "\N{U+204E}" => "*",     "\N{U+00A6}" => "|",
+    "\N{U+00B1}" => " +/- ",
+    "\N{U+0A09}" => " (C) ", "\N{U+00AE}" => " (R) ",
+    "\N{U+00AB}" => "<<",    "\N{U+00BB}" => ">>",
+    "\N{U+00BC}" => " 1/4 ", "\N{U+00BD}" => " 1/2 ", "\N{U+00BE}" => " 3/4 ",
+    "\N{U+00B9}" =>  "^1 ",  "\N{U+00B2}" =>  "^2 ",  "\N{U+00B3}" =>  "^3 ",
+    "\N{U+2010}" => "-",     "\N{U+2011}" => "-",     "\N{U+2027}" => "-",
+    "\N{U+2012}" => "--",    "\N{U+2013}" => "--",    "\N{U+2014}" => "---",
+    "\N{U+2053}" => "~",
+    "\N{U+00DF}" => "ss",    "\N{U+1E9E}" => "SS",
+
+    # Common combining marks accessible after normalized decomposition
+    "\N{U+0300}" => "`",     "\N{U+0301}" => "'",     "\N{U+0302}" => "^",
+    "\N{U+0303}" => "~",     "\N{U+0308}" => "^: ",   "\N{U+030A}" => "^o ",
+    "\N{U+0327}" => ",",     "\N{U+02CB}" => "`",
+  );
+
+my $asciify_chars = join ("", keys %charmap);
+
+sub asciify
+{
+  my $text = shift;
+  local $_;
+
+  my @try = (@_, @always_try_encodings);
+  for my $encoding (@try)
+    {
+      eval { $_ = decode ($encoding, $text, Encode::FB_CROAK) };
+      last unless $@;
+    }
+  die "Input not uniformly encoded in any of {@try}" unless defined $_;
+
+  # Convert control characters to "^X" strings, except CR/LF/TAB
+  s/([\x00-\x08\x0b\x0c\x0e-\x1f\x7f])/"^" . chr (ord ($1) | 0x40)/ge;
+
+  $_ = Unicode::Normalize::NFD ($_);  # decompose combining marks
+  s/([${asciify_chars}])/$charmap{$1}/go;
+  $_ = Unicode::Normalize::NFC ($_);  # recompose remaining combining marks
+
+  encode ('utf8', $_);                # convert to octets
 }
 
-main()
+
+sub decode_flac
 {
-  for f in "$@"; do
-    echo "$f"
-    flac_to_mp3 "$f"
-    echo
-  done
+  xsystem (qw(flac --silent --force --decode), @_);
 }
 
-main "$@"
+sub encode_mp3
+{
+  my @args = (qw(--nohist -h -p --preset standard --vbr-new));
+  push @args, qw(--silent) unless -t fileno (STDOUT);
+  xsystem (qw(lame), @args, @_);
+}
+
+my %flac2eyeD3 =
+  ( artist          => 'artist',
+    album           => 'album',
+    title           => 'title',
+    date            => 'year',
+    tracknumber     => 'track',
+    tracktotal      => 'track-total',
+    discnumber      => 'disc-num',
+    disctotal       => 'disc-total',
+  );
+
+# These options are of the form --opt=[LANGUAGE]:[DESCRIPTION]:DATA
+# We use "=::" below.
+# NOTE: this version works with eyeD3 0.6.x.
+# The lyrics option has changed in 0.7.x.
+my %flac2eyeD3_langopt =
+  ( comment         => 'comment',
+    unsyncedlyrics  => 'lyrics',
+  );
+
+sub tag_mp3
+{
+  my ($flac, $mp3) = (shift, shift);
+  my $flacdir = $flac =~ m=(^.*?)/[^/]+$= ? $1 : "." ;
+
+  my $flacdata = bt (qw(metaflac --export-tags-to=-), $flac);
+
+  my %tag;
+  map { my ($key, $val) = split (/=/, $_, 2);
+        $key = lc $key;
+        $val =~ s/\r//g;
+        chomp $val;
+
+        $tag{$key} = (defined $tag{$key}
+                      ? join ("\n", $tag{$key}, $val)
+                      : $val);
+      } split (/(?=^\S+=)/ms, $flacdata);
+
+  # n.b. version 0.6.18 does not implement --preserve-file-times
+  # Version 0.7.4 does, but we can just use utime below.
+  my @cmd = (qw(eyeD3
+                --strict
+                --no-tagging-time-frame
+                --set-encoding utf16-LE
+                --to-v2.3));
+
+  while (my ($key, $val) = each %tag)
+    {
+      if (exists $flac2eyeD3{$key})
+        {
+          push @cmd, sprintf ("--%s=%s", $flac2eyeD3{$key}, $val);
+        }
+      elsif (exists $flac2eyeD3_langopt{$key})
+        {
+          $val = asciify ($val);
+          push @cmd, sprintf ("--%s=::%s", $flac2eyeD3_langopt{$key}, $val);
+        }
+    }
+
+  map { my $apic = uc $_;
+        for my $jpg (uc "$apic.jpg", lc "$apic.jpg")
+          {
+            if (-f "$flacdir/$jpg")
+              {
+                push @cmd, "--add-image=$flacdir/$jpg:$apic";
+                last;
+              }
+          }
+      } (qw(FRONT_COVER BACK_COVER LEAFLET OTHER));
+
+  xsystem (@cmd, @_, $mp3);
+  my @st = stat ($flac);
+  utime ($st[8], $st[9], $mp3);  # touch -r $flac $mp3
+}
+
+sub flac_to_mp3
+{
+  my  $flac = shift;
+  (my $base = $flac) =~ s=^(?:.*/|)(.*)\.flac$=$1=i;
+  my  $mp3  = "$base.mp3";
+  my  $wav  = "/tmp/_flac2mp3_$$.wav";
+
+  decode_flac ("-o", $wav, $flac) || die;
+  encode_mp3 ($wav, $mp3)         || die;
+  unlink ($wav);
+  tag_mp3 ($flac, $mp3, @_);
+}
+
+sub main
+{
+  my @switches;
+  while (@_ && $_[0] =~ /^-/)
+    {
+      push @switches, shift;
+    }
+
+  map { flac_to_mp3 ($_, @switches) } @_;
+}
+
+main (@ARGV);
 
 # eof
