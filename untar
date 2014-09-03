@@ -4,7 +4,7 @@
 # Created: 1996-01-15
 # Public domain
 
-# $Id: untar,v 1.30 2014/06/23 21:25:22 friedman Exp $
+# $Id: untar,v 1.31 2014/06/23 21:25:50 friedman Exp $
 
 # Commentary:
 
@@ -88,7 +88,7 @@ extract()
         *.tar | *.xtar | *.ova | *.tar.md5 )
             ${TAR-tar} -xpvf "$file" ;;
 
-        *.zip | *.cbz | *.fbu | *.jar | *.apk | *.xpi )
+        *.zip | *.cbz | *.fbu | *.jar | *.apk | *.xpi | *.epub )
             ${UNZIP-unzip} -o -d . "$file" ;;
 
         *.rpm )
