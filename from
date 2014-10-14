@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.89 2014/04/25 23:32:57 friedman Exp $
+# $Id: from,v 1.90 2014/04/26 00:14:01 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -129,7 +129,7 @@ sub parse_options
      'mhr|match-header-regexp=s' =>      \$opt{match_hdr_regexp},
      'mtr|match-text-regexp=s'   =>      \$opt{match_txt_regexp},
 
-     'M|match-header=s@'         =>      \$opt{match_header},
+     'M|match-header=s@'         =>       $opt{match_header}, # arrayref
      'm|match-text=s'            =>      \$opt{match_text},
      's|sender=s'                => sub { $opt{match_header} = [qw(From Sender)];
                                           $opt{match_text}    = $_[1] },
