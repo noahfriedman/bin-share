@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.90 2014/04/26 00:14:01 friedman Exp $
+# $Id: from,v 1.91 2014/10/14 00:44:09 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,6 +22,15 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # Commentary:
+
+# Optional Fedora/RHEL/CentOS packages that will improve the functionality
+# of this program:
+#	perl-TimeDate
+#	perl-Time-ParseDate
+#	perl-Text-CharWidth
+#	perl-IO-Socket-INET6
+#	perl-IO-Socket-IP
+
 # Code:
 
 use 5.8.0;  # Not tested with anything older.  YMMV.
@@ -32,7 +41,6 @@ use Pod::Usage;
 
 our $version = "3.1.4";
 
-# Optional perl modules that will improve the functionality of this program:
 our @optional_modules
   = qw( Date::Parse
         Time::ParseDate
