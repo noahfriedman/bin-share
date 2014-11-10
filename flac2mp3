@@ -4,7 +4,7 @@
 # Created: 2009-10-28
 # Public domain
 
-# $Id$
+# $Id: flac2mp3,v 1.8 2014/08/05 08:03:02 friedman Exp $
 
 # Commentary:
 
@@ -18,6 +18,8 @@
 use strict;
 
 $^W = 1;
+
+my $eyeD3_version = eyeD3_version ();
 
 sub xtrace
 {
@@ -47,6 +49,13 @@ sub bt
   return <$fh> if $pid; # parent
 
   exec (@_) or die "exec: $_[0]: $!";  # child
+}
+
+sub eyeD3_version
+{
+  local $_ = bt (qw(eyeD3 --version));
+  return $1 if m/^eyeD3\s+(\d+\.\d+)/;
+  return "";
 }
 
 
@@ -130,14 +139,20 @@ sub encode_mp3
 }
 
 my %flac2eyeD3 =
-  ( artist          => 'artist',
-    album           => 'album',
-    title           => 'title',
-    date            => 'year',
+  ( artist          => 'TPE1:',   # primary album artist(s)
+    albumartist     => 'TPE2:',   # may have multiple performers
+    album           => 'TALB:',
+    title           => 'TIT2:',
+    date            => 'TYER:',
     tracknumber     => 'track',
     tracktotal      => 'track-total',
-    discnumber      => 'disc-num',
+    discnumber      => ($eyeD3_version eq '0.6' ? 'disc' : 'disc-num'),
     disctotal       => 'disc-total',
+    genre           => 'genre',
+    composer        => 'TCOM:',
+
+    # Not official part of id3 spec; used by iTunes.
+    compilation     => 'TCMP:',
   );
 
 # These options are of the form --opt=[LANGUAGE]:[DESCRIPTION]:DATA
@@ -148,6 +163,19 @@ my %flac2eyeD3_langopt =
   ( comment         => 'comment',
     unsyncedlyrics  => 'lyrics',
   );
+
+# n.b. version 0.6.18 does not implement --preserve-file-times
+# Version 0.7.4 does, but we can just use utime.
+my @tag_cmd =
+  (qw(eyeD3 --to-v2.3
+     ),
+   ($eyeD3_version eq '0.6'
+    ? qw(--no-tagging-time-frame
+         --set-encoding utf16-LE
+        )
+    : qw(--encoding utf16
+         --quiet
+        )));
 
 sub tag_mp3
 {
@@ -167,24 +195,26 @@ sub tag_mp3
                       : $val);
       } split (/(?=^\S+=)/ms, $flacdata);
 
-  # n.b. version 0.6.18 does not implement --preserve-file-times
-  # Version 0.7.4 does, but we can just use utime below.
-  my @cmd = (qw(eyeD3
-                --strict
-                --no-tagging-time-frame
-                --set-encoding utf16-LE
-                --to-v2.3));
-
+  my @arg;
   while (my ($key, $val) = each %tag)
     {
       if (exists $flac2eyeD3{$key})
         {
-          push @cmd, sprintf ("--%s=%s", $flac2eyeD3{$key}, $val);
+          my $opt = $flac2eyeD3{$key};
+          if ($opt =~ /:$/)
+            {
+              my $sw = $eyeD3_version eq '0.6' ? "set-text-frame" : "text-frame";
+              push @arg, sprintf ("--%s=%s%s", $sw, $opt, $val);
+            }
+          else
+            {
+              push @arg, sprintf ("--%s=%s", $opt, $val);
+            }
         }
       elsif (exists $flac2eyeD3_langopt{$key})
         {
           $val = asciify ($val);
-          push @cmd, sprintf ("--%s=::%s", $flac2eyeD3_langopt{$key}, $val);
+          push @arg, sprintf ("--%s=::%s", $flac2eyeD3_langopt{$key}, $val);
         }
     }
 
@@ -193,13 +223,14 @@ sub tag_mp3
           {
             if (-f "$flacdir/$jpg")
               {
-                push @cmd, "--add-image=$flacdir/$jpg:$apic";
+                push @arg, "--add-image=$flacdir/$jpg:$apic";
                 last;
               }
           }
       } (qw(FRONT_COVER BACK_COVER LEAFLET OTHER));
 
-  xsystem (@cmd, @_, $mp3);
+  local $ENV{LC_CTYPE} = "en_US.UTF-8";
+  xsystem (@tag_cmd, @arg, @_, $mp3);
   my @st = stat ($flac);
   utime ($st[8], $st[9], $mp3);  # touch -r $flac $mp3
 }
