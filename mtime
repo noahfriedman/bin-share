@@ -1,6 +1,7 @@
 #!/bin/sh
-# $Id$
+# $Id: mtime,v 1.1 2010/03/04 10:42:04 friedman Exp $
 
+# Default
 TIME='\n*** Timing Information ***\n
 Elapsed time     : %E
 CPU Time         : %Ss kernel, %Us user
@@ -18,6 +19,21 @@ Socket msgs      : %r received, %s sent
 Signals received : %k\n
 Exit status: %x\n'
 
+# As of kernel 3.16 these are the only supported fields.
+TIME_linux='\n*** Timing Information ***\n
+CPU  : %E real, %S sys, %U user (%P util)
+RSS  : %Mk
+FLT  : %F major, %R minor
+CTX  : %w voluntary, %c involuntary
+I/O  : %I / %O
+Exit : %x\n'
+
+case `uname -s` in
+    Linux ) TIME=$TIME_linux ;;
+esac
+
 export TIME
 
 exec time ${1+"$@"}
+
+# eof
