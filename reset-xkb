@@ -4,7 +4,7 @@
 # Created: 2010-02-17
 # Public domain
 
-# $Id: reset-xkb,v 1.9 2011/10/26 23:59:41 friedman Exp $
+# $Id: reset-xkb,v 1.10 2012/07/22 22:32:15 friedman Exp $
 
 # Commentary:
 
@@ -59,8 +59,15 @@ customize()
 
 xmodmap_hacks()
 {
-    case $product_version:$product_version in
-        ThinkPad*:*Tablet )
+    case $bios_version:$product_version in
+        Google_*:* )  # chromebook
+            # Search key registers as "Multi_Key" with default Crouton
+            # "xorg" config.
+            docmd xmodmap -e 'keycode 133 = Control_L'
+            docmd xmodmap -e 'add control = Control_L'
+            ;;
+
+        *:ThinkPad*Tablet )
             docmd xmodmap -e 'keycode 161 = XF86RotationPB'
             ;;
     esac
