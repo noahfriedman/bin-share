@@ -4,7 +4,7 @@
 # Created: 2010-02-17
 # Public domain
 
-# $Id: reset-xkb,v 1.10 2012/07/22 22:32:15 friedman Exp $
+# $Id: reset-xkb,v 1.11 2015/01/21 17:17:41 friedman Exp $
 
 # Commentary:
 
@@ -18,6 +18,8 @@ verbose=t
 
 initialize()
 {
+    read_dmi
+
     # Always use screen 0 because the _XKB_RULES_NAMES property may not
     # be defined on the other root screens.
     DISPLAY=${DISPLAY%.[0-9]*}.0
@@ -28,20 +30,31 @@ initialize()
     xkb_geometry=${XKB_GEOMETRY}
     xkb_keycodes=${XKB_KEYCODES}
     xkb_variant=${XKB_VARIANT}
-    xkb_option=${XKB_OPTION-"
-    ctrl:nocaps
-    compose:lwin
-    "}
+    xkb_symbols=${XKB_SYMBOLS}
+    xkb_device=${XKB_DEVICE}
+    xkb_option=${XKB_OPTION-"ctrl:nocaps
+                             compose:lwin
+                            "}
     # Other xkb_options:
     #   terminate:ctrl_alt_bksp    - Allow Ctrl-Alt-BS to kill X server
     #   srvrkeys:none              - Disable Ctrl-Alt-Fn vt switching
     # See /usr/share/X11/xkb/rules/xorg.lst for others
 }
 
+read_dmi()
+{
+    dmi=/sys/class/dmi/id
+
+    for prop in $dmi/* ; do
+        test -L $prop && continue
+        test -f $prop || continue
+        test -r $prop || continue
+        read ${prop##*/} < $prop
+    done
+}
+
 customize()
 {
-    read_dmi
-
     case $product_version in
         ThinkPad* )
             xkb_model=${XKB_MODEL-thinkpad}
@@ -52,8 +65,7 @@ customize()
                 *Tablet       ) xkb_model=${XKB_MODEL-thinkpad60} ;;
             esac ;;
 
-        *"Ideapad S10"* ) :
-            ;;
+        *"Ideapad S10"* ) : ;;
     esac
 }
 
@@ -75,15 +87,17 @@ xmodmap_hacks()
 
 run_setxkbmap()
 {
-    set ${SETXKBMAP-setxkbmap}
+    set fnord ${SETXKBMAP-setxkbmap} -I $HOME/lib/xkb
 
     # xkb_option handled as a special case later.
     xkb_vars='xkb_rules
-            xkb_model
-            xkb_layout
-            xkb_variant
-            xkb_geometry
-            xkb_keycodes
+              xkb_model
+              xkb_layout
+              xkb_variant
+              xkb_geometry
+              xkb_keycodes
+              xkb_symbols
+              xkb_device
     '
 
     for var in $xkb_vars ; do
@@ -101,6 +115,7 @@ run_setxkbmap()
         set "$@" -option $opt
     done
 
+    shift # fnord
     docmd "$@" -print
 }
 
@@ -108,18 +123,6 @@ load()
 {
     run_setxkbmap | docmd xkbcomp -w "${XKB_WARNLEVEL-0}" - "$DISPLAY"
     xmodmap_hacks
-}
-
-read_dmi()
-{
-    dmi=/sys/class/dmi/id
-
-    for prop in $dmi/* ; do
-        test -L $prop && continue
-        test -f $prop || continue
-        test -r $prop || continue
-        read ${prop##*/} < $prop
-    done
 }
 
 delq()
@@ -170,6 +173,8 @@ option_overrides()
             -v | --variant  | --v* ) eval "$getopt"; xkb_variant=$optarg  ;;
             -g | --geometry | --g* ) eval "$getopt"; xkb_geometry=$optarg ;;
             -k | --keycodes | --k* ) eval "$getopt"; xkb_keycodes=$optarg ;;
+            -s | --symbols  | --s* ) eval "$getopt"; xkb_symbols=$optarg  ;;
+            -d | --device   | --d* ) eval "$getopt"; xkb_device=$optarg   ;;
             -o | --option   | --o* ) eval "$getopt"; xkb_option="$xkb_option $optarg" ;;
 
             -q | --quiet    | --q* ) verbose=f ; shift ;;
@@ -200,6 +205,7 @@ main()
     customize
     option_overrides "$@"
     load
+    docmd xset r rate 250 30
 }
 
 main "$@"
