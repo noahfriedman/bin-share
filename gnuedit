@@ -5,7 +5,7 @@
 # Created: 2000-01-14
 # Public domain.
 
-# $Id$
+# $Id: gnuedit,v 1.9 2011/12/05 21:39:46 friedman Exp $
 
 # Commentary:
 
@@ -39,7 +39,7 @@ my $server_user      = (   $ENV{GNUEDIT_USER}
 my $server_host;
 my $server_uid;
 
-my $yemacs_dir = "/export/src/emacs/build/current/lib-src";
+my $yemacs_prefix = "/export/src/emacs/build";
 
 my $verbose = (defined $ENV{GNUEDIT_VERBOSE}
                ?       $ENV{GNUEDIT_VERBOSE}
@@ -56,6 +56,13 @@ sub _verbose
 {
   print $progname, ": ", join (" ",  @_), "\n" if $verbose;
   return;
+}
+
+sub yemacs_latest
+{
+  map { return $_ if -f "$_/lib-src/emacsclient";
+      } sort { $b cmp $a } <$yemacs_prefix/*>;
+  return "";
 }
 
 sub copy_to_tmpfile
@@ -230,6 +237,7 @@ sub parse_options
   $server_socket = sprintf ("%s/emacs%d/%s",
                             $ENV{TMPDIR} || "/tmp", $server_uid, $server_name);
 
+  my $yemacs_dir = yemacs_latest() . "/lib-src";
   $ENV{PATH} = "$yemacs_dir:$ENV{PATH}" if -x "$yemacs_dir/$client_program";
 }
 
