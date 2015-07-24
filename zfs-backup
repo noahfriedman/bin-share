@@ -1,0 +1,69 @@
+#!/bin/bash
+# $Id: zfs-backup,v 1.2 2014/12/09 04:26:50 friedman Exp $
+
+# To initialize iscsi target:
+#	iscsiadm modify initiator-node --node-name iqn.1995-06.com.splode:prv.file-server
+# 	iscsiadm modify discovery --static enable --sendtargets enable --iSNS enable
+#
+# 	iscsiadm add isns-server isns.prv.splode.com
+#	iscsiadm add discovery-address readynas-nv.prv.splode.com
+#
+# To bring iscsi backup pool online:
+# 	svcadm enable svc:/network/iscsi/initiator:default
+# 	zpool import [poolname]
+#
+# To take offline:
+# 	zpool export [poolname]
+# 	svcadm disable svc:/network/iscsi/initiator:default
+#
+
+lastsnap()
+{
+  zfs list -t snapshot -H -d 1 -o name -S name $1 \
+   | sed -e '/@backup\./!d' \
+         -e 's/.*@//' \
+         -e q
+}
+
+mksnap()
+{
+  name=backup.`date +"%Y-%m-%d.%H:%M:%S"`
+  zfs snapshot -r $1@$name
+  echo $name
+}
+
+fslist()
+{
+  zfs list -H -r -o name "$@"
+}
+
+backup()
+{
+  srcpool=$1
+  dstpool=$2
+
+  oldsnap=`lastsnap $srcpool`
+  newsnap=`mksnap $srcpool`
+
+  for fs in `fslist $srcpool`; do
+    echo Backing up $fs
+    time { zfs send -I $oldsnap $fs@$newsnap | zfs recv -F -v -d $dstpool; }
+  done
+}
+
+main()
+{
+  case $# in
+    2 ) : ;;
+    * ) echo "Usage: ${0##*/} [srcpool] [dstpool]" 1>&2
+        exit 1 ;;
+  esac
+
+  PATH=/usr/gnu/bin:/sbin:$PATH
+
+  backup "$@"
+}
+
+main "$@"
+
+# eof
