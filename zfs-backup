@@ -1,5 +1,5 @@
 #!/bin/bash
-# $Id: zfs-backup,v 1.1 2015/07/24 09:35:38 friedman Exp $
+# $Id: zfs-backup,v 1.2 2015/07/26 00:01:24 friedman Exp $
 
 # To initialize iscsi target:
 #	iscsictl -A -d wdmc-1.prv.splode.com
@@ -10,6 +10,8 @@
 #
 # To take offline:
 # 	zpool export [poolname]
+#	iscsictl -R -p obey-chomsky.prv.splode.com
+
 
 lastsnap()
 {
@@ -41,7 +43,7 @@ backup()
 
   for fs in `fslist $srcpool`; do
     date +"[%Y-%m-%d %H:%M:%S%z] Backing up $fs"
-    time { zfs send ${oldsnap:+-I $oldsnap} $fs@$newsnap | zfs recv -F -v -d $dstpool; }
+    time { zfs send -p ${oldsnap:+-I $oldsnap} $fs@$newsnap | zfs recv -F -v -d $dstpool; }
   done
   date +"[%Y-%m-%d %H:%M:%S%z] Done."
 }
