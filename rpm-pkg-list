@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.32 2014/01/25 18:52:50 friedman Exp $
+# $Id: rpm-pkg-list,v 1.33 2014/06/09 23:53:56 friedman Exp $
 
 # Commentary:
 # Code:
@@ -117,12 +117,13 @@ my %repo_fingerprint
       'e74f0522' => 'rpmfusion-free-el5',       'ab194290' => 'rpmfusion-nonfree-el5',
       '849c449f' => 'rpmfusion-free-el6',       '5568bbb2' => 'rpmfusion-nonfree-el6',
 
-      '443e1821' => 'centos-4',
-      'e8562897' => 'centos-5',
       'c105b9de' => 'centos-6',                 'fe837f6f' => 'centos-security-6',
+      'e8562897' => 'centos-5',
+      '443e1821' => 'centos-4',
 
       '9c800aca' => 'SuSE',                     '3d25d3d9' => 'SuSE-security',
 
+      'f14ab620' => 'zfsonlinux.org',
       'f6777c67' => 'adobe',
       '66534c2b' => 'atrpms',
       '6b8d79e6' => 'dag',
