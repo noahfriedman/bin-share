@@ -4,7 +4,7 @@
 # Created: 2001-01-11
 # Public domain.
 
-# $Id: mdf,v 1.15 2014/01/25 01:14:51 friedman Exp $
+# $Id: mdf,v 1.16 2014/02/10 10:56:13 friedman Exp $
 
 $^W = 1;  # enable warnings
 
@@ -420,17 +420,19 @@ sub main
 
   my @df = get_df (@_);
   shift @df; # discard header
-  if ($df[0]->[0] eq 'rootfs')
+
+  # Later distributions link /etc/mtab to /proc/mounts,
+  # which has a dummy "rootfs" entry.
+  # Until kernel 3.19.  Dummy entry seems to have gone away.
+  # (Or is it some change to dracut?  Who knows.)
+  shift @df  if ($df[0]->[0] eq 'rootfs');
+
+  # Either way move file root fs entry to top.
+  for (my $i = 0; $i < @df; $i++)
     {
-      # Later distributions link /etc/mtab to /proc/mounts,
-      # which has a dummy rootfs entry.
-      shift @df;
-      for (my $i = 0; $i < @df; $i++)
-        {
-          next unless $df[$i]->[5] eq "/";
-          unshift @df, splice (@df, $i, 1);
-          last;
-        }
+      next unless $df[$i]->[5] eq "/";
+      unshift @df, splice (@df, $i, 1);
+      last;
     }
 
   my @mountinfo = mountinfo ();
