@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: ssh-add-all,v 1.4 2004/02/17 08:49:27 friedman Exp $
+# $Id: ssh-add-all,v 1.5 2005/06/07 23:39:08 friedman Exp $
 
 foundp=f
 for dir in $HOME/etc/certs/ssh $HOME/.ssh/certs ; do
@@ -18,7 +18,7 @@ else
 fi
 
 for id in $ids; do
-  for key in id_rsa id_dsa identity ; do
+  for key in id_ed25519 id_ecdsa id_rsa id_dsa identity ; do
     if [ -f $id/$key ]; then
       ssh-add $id/$key
     fi
