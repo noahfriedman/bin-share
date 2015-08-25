@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.33 2014/06/09 23:53:56 friedman Exp $
+# $Id: rpm-pkg-list,v 1.34 2015/08/03 01:39:09 friedman Exp $
 
 # Commentary:
 # Code:
@@ -70,82 +70,38 @@ my %field_alias
       installdate => q(installtime),      installed => q(installtime),
       version     => q(version-release),  ver       => q(version-release),
       release     => q(version-release),  rel       => q(version-release),
-      package     => q(name),             pkg       => q(name),
+      'package'   => q(name),             pkg       => q(name),
       repo        => q(repository),       depot     => q(repository),
     );
 
-my %repo_fingerprint
-  = (
-      '95a43f54' => 'fedora-21',                'a0a7badb' => 'fedora-21-secondary',
-      '246110c1' => 'fedora-20',                'efe550f5' => 'fedora-20-secondary',
-      'fb4b18e6' => 'fedora-19',                'ba094068' => 'fedora-19-secondary',
-      'de7f38bd' => 'fedora-18',                'a4d647e9' => 'fedora-18-secondary',
-      '1aca3465' => 'fedora-17',                'f8df67e6' => 'fedora-17-secondary',
-      'a82ba4b7' => 'fedora-16',                '10d90a9e' => 'fedora-16-secondary',
-      '069c8460' => 'fedora-15',
-      '97a1071f' => 'fedora-14',                'fdb36b03' => 'fedora-14-s390x',
-      'e8e40fde' => 'fedora-13',
-      '57bbccba' => 'fedora-12',
-      'd22e77f2' => 'fedora-11',
-      '4ebfc273' => 'fedora-10',
-      '6df2196f' => 'fedora-8or9',  # only used for fedora 8/9 updates
-      'df9b0ae9' => 'fedora-8or9-test',
-
-      # These fedora keys are discontinued as of 9/2008
-      '4f2a6fd2' => 'fedora-core',
-      '1ac70ce6' => 'fedora-extras',
-      '30c9ecf8' => 'fedora-test',
-      '1cddbca9' => 'fedora-rawhide',
-      '731002fa' => 'fedora-legacy',
-
-      'fd431d51' => 'rhel-6',
-
-      '6446d859' => 'rpmfusion-free-f21',       'a668b376' => 'rpmfusion-nonfree-f21',
-      'ae688223' => 'rpmfusion-free-f20',       'b5f29883' => 'rpmfusion-nonfree-f20',
-      '172ff33d' => 'rpmfusion-free-f19',       'cd30c86b' => 'rpmfusion-nonfree-f19',
-      '982e0a7c' => 'rpmfusion-free-f18',
-      '8296fa0f' => 'rpmfusion-free-f17',       'd2382b83' => 'rpmfusion-nonfree-f17',
-      'adf25d9c' => 'rpmfusion-free-f16',       '952f3af8' => 'rpmfusion-nonfree-f16',
-      '00a4d52b' => 'rpmfusion-free-f15',       '6d0c8ec2' => 'rpmfusion-nonfree-f15',
-      '865cc9ea' => 'rpmfusion-free-f14',       'f09d8368' => 'rpmfusion-nonfree-f14',
-      'a3780952' => 'rpmfusion-free-f13',       '2425b284' => 'rpmfusion-nonfree-f13',
-      '16ca1a56' => 'rpmfusion-free-f12',       'a3a882c1' => 'rpmfusion-nonfree-f12',
-      '8fcff4da' => 'rpmfusion-free-f11',       '8dc43844' => 'rpmfusion-nonfree-f11',
-      '49c8885a' => 'rpmfusion-free-f10',       'b1981b68' => 'rpmfusion-nonfree-f10',
-      # rpmfusion uses the f10 keys for earlier releases
-
-      'e74f0522' => 'rpmfusion-free-el5',       'ab194290' => 'rpmfusion-nonfree-el5',
-      '849c449f' => 'rpmfusion-free-el6',       '5568bbb2' => 'rpmfusion-nonfree-el6',
-
-      'c105b9de' => 'centos-6',                 'fe837f6f' => 'centos-security-6',
-      'e8562897' => 'centos-5',
-      '443e1821' => 'centos-4',
-
-      '9c800aca' => 'SuSE',                     '3d25d3d9' => 'SuSE-security',
-
-      'f14ab620' => 'zfsonlinux.org',
-      'f6777c67' => 'adobe',
-      '66534c2b' => 'atrpms',
-      '6b8d79e6' => 'dag',
-      '1aa78495' => 'dries',
-      'e42d547b' => 'freshrpms',
-      '7fac5991' => 'google',
-      'ff6382fa' => 'kde-redhat',
-      'a109b1ec' => 'livna',
-      '22b2951d' => 'mhensler-suspend2',
-      '98ab5139' => 'oracle-virtualbox',
-      'a9464aa9' => 'pidgin',
-      'ba392878' => 'splode-local', # internal reference key; not secure
-
-      # Note: these redhat keys should be discontinued as of 9/2008
-      'db42a60e' => 'redhat',
-      '897da07a' => 'redhat-beta',
-      'e418e3aa' => 'redhat-rawhide-2003',
-
-      '(none)'   => '(unknown)',  # unsigned, so dont know what repo it came from
-    );
-
 my $datefmt = $ENV{DATEFMT} || '%Y-%m-%d %H:%M:%S' ;
+
+my %repo_fingerprint;
+
+sub xopen
+{
+  my $file = $_[0];
+  return unless -f $file;
+
+  open (my $fh, $file);
+  return $fh if $fh;
+
+  print STDERR "open: $file: $!\n";
+  return;
+}
+
+sub repo_fingerprint_init
+{
+  my $fh = @_ ? xopen ($_[0]) : q(main::DATA);
+  return unless $fh;
+
+  while (<$fh>) # read data from end of this file
+    {
+      s/\s*#.*//;
+      $repo_fingerprint{$1} = $2 if m/^\s*(\S+)\s+(\S+)/;
+    }
+  close ($fh);
+}
 
 sub fieldnames
 {
@@ -432,11 +388,125 @@ sub main
                  } map { split (/[\s,]+/, $_) } @$sortby];
 
   @ARGV = ('*') unless @ARGV;
+
+  my $rc = $ENV{RPMFINGERPRINTS} || "$ENV{HOME}/.rpm-fingerprints";
+  repo_fingerprint_init ();    # data section
+  repo_fingerprint_init ($rc); # user config
+
   printlines (fmtlines (sortlines (rpmq (@ARGV))));
 }
 
-main;
+main ();
 
-# local variables:
-# mode: perl
-# end:
+__DATA__
+
+######
+## GPG key fingerprints for RPM signatures
+######
+
+34ec9cba	fedora-23
+8e1431d5	fedora-22
+95a43f54	fedora-21
+246110c1	fedora-20
+fb4b18e6	fedora-19
+de7f38bd	fedora-18
+1aca3465	fedora-17
+a82ba4b7	fedora-16
+069c8460	fedora-15
+97a1071f	fedora-14
+e8e40fde	fedora-13
+57bbccba	fedora-12
+d22e77f2	fedora-11
+4ebfc273	fedora-10
+6df2196f	fedora-8or9	# only used for fedora 8/9 updates
+df9b0ae9	fedora-8or9-test
+
+873529b8	fedora-23-secondary
+a29cb19c	fedora-22-secondary
+a0a7badb	fedora-21-secondary
+efe550f5	fedora-20-secondary
+ba094068	fedora-19-secondary
+a4d647e9	fedora-18-secondary
+f8df67e6	fedora-17-secondary
+10d90a9e	fedora-16-secondary
+3ad31d0b	fedora-15-sparc
+19be0bf9	fedora-14-secondary
+fdb36b03	fedora-14-s390x
+5bf71b5e	fedora-13-sparc
+f613cbe8	fedora-ia64	# only used for fedora 9/10/11
+00458545	fedora-9-sparc
+
+# These fedora keys were discontinued as of 9/2008
+4f2a6fd2	fedora-core
+1ac70ce6	fedora-extras
+30c9ecf8	fedora-test
+1cddbca9	fedora-rawhide
+731002fa	fedora-legacy
+
+fd431d51	rhel-6
+
+97f4d1c1	rpmfusion-free-f22
+6446d859	rpmfusion-free-f21
+ae688223	rpmfusion-free-f20
+172ff33d	rpmfusion-free-f19
+982e0a7c	rpmfusion-free-f18
+8296fa0f	rpmfusion-free-f17
+adf25d9c	rpmfusion-free-f16
+00a4d52b	rpmfusion-free-f15
+865cc9ea	rpmfusion-free-f14
+a3780952	rpmfusion-free-f13
+16ca1a56	rpmfusion-free-f12
+8fcff4da	rpmfusion-free-f11
+49c8885a	rpmfusion-free-f10-or-earlier
+
+a6708da3	rpmfusion-nonfree-f22
+a668b376	rpmfusion-nonfree-f21
+b5f29883	rpmfusion-nonfree-f20
+cd30c86b	rpmfusion-nonfree-f19
+e31b30ca	rpmfusion-nonfree-f18
+d2382b83	rpmfusion-nonfree-f17
+952f3af8	rpmfusion-nonfree-f16
+6d0c8ec2	rpmfusion-nonfree-f15
+f09d8368	rpmfusion-nonfree-f14
+2425b284	rpmfusion-nonfree-f13
+a3a882c1	rpmfusion-nonfree-f12
+8dc43844	rpmfusion-nonfree-f11
+b1981b68	rpmfusion-nonfree-f10-or-earlier
+
+849c449f	rpmfusion-free-el6
+e74f0522	rpmfusion-free-el5
+
+5568bbb2	rpmfusion-nonfree-el6
+ab194290	rpmfusion-nonfree-el5
+
+c105b9de	centos-6
+e8562897	centos-5
+443e1821	centos-4
+
+fe837f6f	centos-security-6
+
+9c800aca	SuSE
+3d25d3d9	SuSE-security
+
+f14ab620	zfsonlinux.org
+f6777c67	adobe
+66534c2b	atrpms
+6b8d79e6	dag
+1aa78495	dries
+e42d547b	freshrpms
+7fac5991	google
+ff6382fa	kde-redhat
+a109b1ec	livna
+22b2951d	mhensler-suspend2
+98ab5139	oracle-virtualbox
+a9464aa9	pidgin
+ba392878	splode-local	# internal reference key; not secure
+
+# Note: these redhat keys should be discontinued as of 9/2008
+db42a60e	redhat
+897da07a	redhat-beta
+e418e3aa	redhat-rawhide-2003
+
+(none)  	(unknown)	# unsigned so dont know what repo it came from
+
+# eof
