@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.34 2015/08/03 01:39:09 friedman Exp $
+# $Id: rpm-pkg-list,v 1.35 2015/08/25 08:26:16 friedman Exp $
 
 # Commentary:
 # Code:
@@ -95,7 +95,7 @@ sub repo_fingerprint_init
   my $fh = @_ ? xopen ($_[0]) : q(main::DATA);
   return unless $fh;
 
-  while (<$fh>) # read data from end of this file
+  while (<$fh>)
     {
       s/\s*#.*//;
       $repo_fingerprint{$1} = $2 if m/^\s*(\S+)\s+(\S+)/;
