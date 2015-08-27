@@ -25,8 +25,7 @@ sub expand_range
       local $_;
 
       $range =~ s/^\s*(.*?)\s*$/$1/; # strip surrounding whitespace
-      # First split the range into the sub sections as seperated by
-      # commas, and then expand each sub range
+
       foreach (split (/\s*,\s*/, $range))
         {
           my %range;
