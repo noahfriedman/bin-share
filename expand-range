@@ -17,7 +17,7 @@ sub aton
 
 sub expand_range
 {
-  my %composite;
+  my %result;
   my $idx = 0;
 
   for my $range (@_)
@@ -25,7 +25,6 @@ sub expand_range
       local $_;
 
       $range =~ s/^\s*(.*?)\s*$/$1/; # strip surrounding whitespace
-
       foreach (split (/\s*,\s*/, $range))
         {
           my %range;
@@ -122,16 +121,16 @@ sub expand_range
 
           # Depending on "action" merge it in or filter it out
           if (($action eq '+') || ($action eq '|'))
-            { %composite = (%composite, %range) }
+            { %result = (%result, %range) }
           elsif (($action eq '-') || ($action eq '!'))
-            { map { delete $composite{$_} } keys %range }
+            { map { delete $result{$_} } keys %range }
           elsif ($action eq '&')
-            { map { delete $composite{$_} if !$range{$_} } keys %composite }
+            { map { delete $result{$_} if !$range{$_} } keys %result }
         }
     }
   return (wantarray
-          ? sort { $composite{$a} <=> $composite{$b} } keys %composite
-          : \%composite);
+          ? sort { $result{$a} <=> $result{$b} } keys %result
+          : \%result);
 }
 
 map { print $_, "\n" } expand_range (@ARGV);
