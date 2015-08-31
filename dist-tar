@@ -1,5 +1,5 @@
 #! /bin/sh
-# $Id: dist-tar,v 1.6 2010/03/23 05:16:32 friedman Exp $
+# $Id: dist-tar,v 1.7 2011/01/31 22:23:48 friedman Exp $
 
 LC_COLLATE=C
 export LC_COLLATE
@@ -8,12 +8,20 @@ if ${TAR-tar} --version 2>&1 | grep 'GNU tar' > /dev/null; then
   gnutar=t
 fi
 
-case ${DIST_TAR_ZIP-gzip} in
-  gzip  ) zip=gzip  z=gz   ;;
-  bzip2 ) zip=bzip2 z=bz2  ;;
-  lzma  ) zip=lzma  z=lzma ;;
-  xz    ) zip=xz    z=xz   ;;
+case $1 in
+    -gzip | -bzip2 | -lzma | -xz ) DIST_TAR_ZIP=${1#-} ; shift ;;
 esac
+
+case ${DIST_TAR_ZIP-gzip} in
+  gzip  ) zip=gzip  z=gz   zargs='-9' ;;
+  bzip2 ) zip=bzip2 z=bz2  zargs='-9' ;;
+  lzma  ) zip=lzma  z=lzma zargs='-9 --extreme --threads=0' ;;
+  xz    ) zip=xz    z=xz   zargs='-9 --extreme --threads=0' ;;
+  *     ) echo "dist-tar: $DIST_TAR_ZIP: unknown compression method" 1>&2
+          exit 1 ;;
+esac
+
+exit
 
 for dir in ${1+"$@"} ; do
   # Protect against accidental trailing slash, i.e. if someone does
@@ -29,10 +37,10 @@ for dir in ${1+"$@"} ; do
       t ) find "$dir" -print \
            | sort \
            | ${TAR-tar} --no-recursion -T - -cvf - \
-           | $zip --best > "$dir.tar.$z" ;;
+           | $zip $zargs > "$dir.tar.$z" ;;
 
       * ) ${TAR-tar} -cvf - "$dir" \
-           | $zip --best > "$dir.tar.$z" ;;
+           | $zip $zargs > "$dir.tar.$z" ;;
     esac
   } && touch -r "$dir" "$dir.tar.$z" \
     && rm -rf "$dir"
