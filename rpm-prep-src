@@ -1,0 +1,33 @@
+#!/bin/bash
+# $Id$
+
+orig_dir=${PWD-`pwd`}
+
+case $1 in
+    *.src.rpm )
+        rpm=${1##*/}
+        rpm_dir=${rpm%.rpm}
+        mkdir -p $rpm_dir \
+            && cd $rpm_dir \
+            && ${RPM2CPIO-rpm2cpio} "$1" \
+                | ${CPIO-cpio} -dimv --no-absolute-filenames
+        shift
+        ;;
+esac
+
+mkdir -p rpmbuild/BUILD
+if [ -d rpmbuild/SOURCES ]; then
+    rm rpmbuild/SOURCES || rmdir rpmbuild/SOURCES || exit 1
+fi
+ln -s .. rpmbuild/SOURCES
+
+if rpmbuild --define '_topdir %(pwd)/rpmbuild' --nodeps -bp "$@" *.spec
+then
+    mv rpmbuild/BUILD/* $orig_dir
+    case $rpm_dir in
+        '' ) rm -rf rpmbuild ;;
+        *  ) cd .. && rm -rf $rpm_dir ;;
+    esac
+fi
+
+# eof
