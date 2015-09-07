@@ -4,7 +4,7 @@
 # Created: 2001-01-11
 # Public domain.
 
-# $Id: mdf,v 1.16 2014/02/10 10:56:13 friedman Exp $
+# $Id: mdf,v 1.17 2015/08/06 00:05:38 friedman Exp $
 
 $^W = 1;  # enable warnings
 
@@ -17,7 +17,18 @@ use bignum;
 
 (my $progname = $0) =~ s|.*/||;
 
-my $version = "2.0.1";
+my $version = "2.0.2";
+
+# DF_* = fields of arrays created by get_df
+# MI_* = fields of arrays created by parse_mountinfo
+use constant
+  { DF_FS    => 0,     MI_ID  => 0,
+    DF_TOTAL => 1,     MI_PID => 1,
+    DF_USED  => 2,     MI_DEV => 2,
+    DF_AVAIL => 3,     MI_RT  => 3,
+    DF_PCT   => 4,     MI_MPT => 4,
+    DF_MPT   => 5,
+  };
 
 my %mult
   = ( b      => 512,          human => 1024,
@@ -81,8 +92,7 @@ sub dnsdomain
 
 sub xcat
 {
-  my $fh = gensym;
-  open ($fh, $_[0]) || die "$!";
+  open (my $fh, $_[0]) || die "$!";
   local $/ = undef;
   return <$fh>;
 }
@@ -133,29 +143,29 @@ sub compact_devmapper
 # Return an array of array of fields
 sub fieldarray { map { [split (/\s+/, $_)] } split (/[\r\n]+/, $_[0]) }
 
-my %df_cmd = ( hpux    => 'bdf',
-               default => 'df',
+my %df_cmd = ( default => 'df',
+               hpux    => 'bdf',
              );
 
-my %df_arg = ( linux   => [qw(--all --block-size=1)],
-               hpux    => [],
+my %df_arg = ( default => [qw(-a -k)],
                aix     => [qw(-k -P)],
-               default => [qw(-a -k)],
+               hpux    => [],
+               linux   => [qw(--all --block-size=1)],
              );
 
-# Returns array of vectors where each elt is:
-#     (0) fs
-#     (1) total
-#     (2) used
-#     (3) avail
-#     (4) pct
-#     (5) mntpt
+my %df_per = ( darwin  => [qw(-t nodevfs,fdesc)],
+               freebsd => [qw(-t nodevfs,fdescfs,linprocfs,linsysfs,mqueuefs,procfs,tmpfs)],
+               linux   => [qw(-x tmpfs -x devtmpfs -x ramfs)],
+               netbsd  => [qw(-t nokernfs,procfs,ptyfs)],
+             );
+
 sub get_df
 {
   my $dfcmd  =   $df_cmd{$^O} || $df_cmd{default};
   my @dfargs = @{$df_arg{$^O} || $df_arg{default}};
 
   my $df = ($progname eq $dfcmd ? next_in_path ($0) : next_in_path ($dfcmd));
+  push @dfargs, @{$df_per{$^O}} if $opt{persistent} && $df_per{$^O};
   push @dfargs, "-l" if $opt{local};
   push @dfargs, "-i" if $opt{inodes};
 
@@ -196,14 +206,47 @@ sub mountinfo
 sub parse_mountinfo
 {
   my %root;
-  map { $root{$_->[2]} = $_->[4] if !defined $root{$_->[2]} && $_->[3] eq "/";
+  my %stdev;
+  map { if ($_->[MI_RT] eq "/")
+          {
+            my $dev = $_->[MI_DEV];
+            my $mpt = $_->[MI_MPT];
+
+            $root{$dev} = $mpt unless defined $root{$dev};
+
+            $stdev{$dev} ||= [];
+            push @{$stdev{$dev}}, $mpt;
+          }
       } @_;
 
+  # %notfirst is a list of mountpoints which are actually the same literal
+  # mount appearing in multiple places, usually because they are atop
+  # another bind mount.  This is typical for e.g. fuse mounts which might
+  # appear on top of the original local fs mountpoint, and a bind mount of
+  # a portion of that local fs somewhere else where the fuse mount is also
+  # visible.  For example:
+  #
+  #          # mount /dev/sda1 /foo
+  #          # mount -o bind /foo/bar /bar
+  #          # sshfs rhost:/ /bar/rhost
+  #
+  #  Now "rhost" will appear as a mount on /foo/bar/rhost and /bar/rhost,
+  #  but they are literally the same mount, not two separate mounts that
+  #  just happen to specify the same origin.
+  my %notfirst;
+  while (my ($dev, $list) = each %stdev)
+    {
+      next unless @$list > 1;
+      my $first = shift @$list;
+      map { $notfirst{$_} = $first } @$list;
+    }
+
   my %mdev;
-  map { ($mdev{$_->[4]} = $root{$_->[2]} . $_->[3]) =~ s=^//=/=
-          if defined $root{$_->[2]} && $_->[3] ne "/";
+  map { ($mdev{$_->[MI_MPT]} = $root{$_->[MI_DEV]} . $_->[MI_RT]) =~ s=^//=/=
+          if defined $root{$_->[MI_DEV]} && $_->[MI_RT] ne "/";
       } @_;
-  return %mdev;
+
+  return (\%mdev, \%notfirst);
 }
 
 # Determines which mount entries are duplicates because they appear under a
@@ -213,12 +256,12 @@ sub duplicate_binds
   my $m = shift;
   my %mdev = %$m;
 
-  my %seen;
   my %dup;
-  map { if ($_->[3] ne "/")
+  my %seen;
+  map { if ($_->[MI_RT] ne "/")
           {
-            my $key  = $_->[2] . " " . $_->[3];
-            my $this = $_->[4];
+            my $key  = $_->[MI_DEV] . " " . $_->[MI_RT];
+            my $this = $_->[MI_MPT];
 
             if ($seen{$key} && $this ne $seen{$key})
               {
@@ -232,9 +275,12 @@ sub duplicate_binds
                     $this =~ s=/[^/]*$==;
                   }
               }
-            else { $seen{$key} = $_->[4] }
+            else { $seen{$key} = $_->[MI_MPT] }
           }
       } @_;
+
+  map { print STDERR "dup: $_\n" } keys %dup;
+
   return %dup;
 }
 
@@ -373,6 +419,7 @@ sub parse_options
      "a|all"                    => \$opt{all},
      "A|bind-mounts"            => \$opt{showbinds},
      "l|local"                  => \$opt{local},
+     "p|persistent"             => \$opt{persistent},
 
      "i|inodes"                 => sub { $opt{inodes}    = 1;
                                          $opt{blocksize} = 1
@@ -425,30 +472,32 @@ sub main
   # which has a dummy "rootfs" entry.
   # Until kernel 3.19.  Dummy entry seems to have gone away.
   # (Or is it some change to dracut?  Who knows.)
-  shift @df  if ($df[0]->[0] eq 'rootfs');
+  shift @df  if ($df[0]->[DF_FS] eq 'rootfs');
 
   # Either way move file root fs entry to top.
   for (my $i = 0; $i < @df; $i++)
     {
-      next unless $df[$i]->[5] eq "/";
+      next unless $df[$i]->[DF_MPT] eq "/";
       unshift @df, splice (@df, $i, 1);
       last;
     }
 
   my @mountinfo = mountinfo ();
-  my %mdev = parse_mountinfo (@mountinfo);
+  my ($mdev, $notfirst) = parse_mountinfo (@mountinfo);
   # Do not show zero-size pseudofilesystems by default.
-  @df = grep { $_->[1]                } @df unless $opt{all};
-  @df = grep { !exists $mdev{$_->[5]} } @df unless $opt{all} || $opt{showbinds};
+  @df = grep { $_->[DF_TOTAL]                } @df unless $opt{all};
+  @df = grep { ! (   exists     $mdev->{$_->[DF_MPT]}
+                  || exists $notfirst->{$_->[DF_MPT]})
+             } @df unless $opt{all} || $opt{showbinds};
   if ($opt{showbinds} && !$opt{all})
     {
       # dup is a table of entries which are redundant with some other entry,
       # but not of entries which themselves appear multiple times.
       # That can happen if an identical mount is made twice.
       # We still want to show that mount one time.
-      my %dup = duplicate_binds (\%mdev, @mountinfo);
+      my %dup = duplicate_binds ($mdev, @mountinfo);
       my %seen;
-      @df = grep { my $dir = $_->[5];
+      @df = grep { my $dir = $_->[DF_MPT];
                    my $uniq = !(exists $dup{$dir} || exists $seen{$dir});
                    $seen{$dir} = undef;
                    $uniq;
@@ -456,14 +505,14 @@ sub main
     }
 
   # Fix bind mount "devices"
-  map { $_->[0] = $mdev{$_->[5]} if $mdev{$_->[5]} } @df;
+  map { $_->[DF_FS] = $mdev->{$_->[DF_MPT]} if $mdev->{$_->[DF_MPT]} } @df;
   # Sort before we process numbers
   @df = sortrows (@df) if $opt{sort};
 
-  map { $_->[1] = to_unit ($_->[1]);
-        $_->[2] = to_unit ($_->[2]);
-        $_->[3] = to_unit ($_->[3]);
-        $_->[4] .= "%" unless $_->[4] eq "-";
+  map { $_->[DF_TOTAL] = to_unit ($_->[DF_TOTAL]);
+        $_->[DF_USED]  = to_unit ($_->[DF_USED]);
+        $_->[DF_AVAIL] = to_unit ($_->[DF_AVAIL]);
+        $_->[DF_PCT]  .= "%" unless $_->[DF_PCT] eq "-";
       } @df;
 
   unless ($opt{noheader})
