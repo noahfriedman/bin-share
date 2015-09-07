@@ -1,5 +1,5 @@
 #!/bin/bash
-# $Id$
+# $Id: rpm-prep-src,v 1.1 2015/08/31 22:21:35 friedman Exp $
 
 orig_dir=${PWD-`pwd`}
 
@@ -16,10 +16,13 @@ case $1 in
 esac
 
 mkdir -p rpmbuild/BUILD
-if [ -d rpmbuild/SOURCES ]; then
-    rm rpmbuild/SOURCES || rmdir rpmbuild/SOURCES || exit 1
-fi
-ln -s .. rpmbuild/SOURCES
+for d in SOURCES SPECS; do
+    if [ -d rpmbuild/$d ]; then
+        rm rpmbuild/$d || rmdir rpmbuild/$d || exit 1
+    fi
+    ln -s .. rpmbuild/$d
+done
+
 
 if rpmbuild --define '_topdir %(pwd)/rpmbuild' --nodeps -bp "$@" *.spec
 then
