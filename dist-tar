@@ -1,5 +1,5 @@
 #! /bin/sh
-# $Id: dist-tar,v 1.7 2011/01/31 22:23:48 friedman Exp $
+# $Id: dist-tar,v 1.8 2015/08/31 19:53:37 friedman Exp $
 
 LC_COLLATE=C
 export LC_COLLATE
@@ -20,8 +20,6 @@ case ${DIST_TAR_ZIP-gzip} in
   *     ) echo "dist-tar: $DIST_TAR_ZIP: unknown compression method" 1>&2
           exit 1 ;;
 esac
-
-exit
 
 for dir in ${1+"$@"} ; do
   # Protect against accidental trailing slash, i.e. if someone does
