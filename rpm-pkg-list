@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.35 2015/08/25 08:26:16 friedman Exp $
+# $Id: rpm-pkg-list,v 1.36 2015/08/27 22:05:10 friedman Exp $
 
 # Commentary:
 # Code:
@@ -21,6 +21,8 @@ my $reverse_sort;
 my $header;
 my $progname;
 my $fmtsize = 0;
+my $show_total;
+my $total = 0;
 
 # Meaning of fields:
 #  * column  - column number in output.
@@ -148,6 +150,7 @@ sub capitalize
 
 sub fmtdate
 {
+  return "" if $_[0] eq "";
   strftime ($datefmt, localtime ($_[0]));
 }
 
@@ -220,21 +223,22 @@ sub rpmq
   s/^package .*? is not installed\n//gm;
 
   my @prefmt = field_prefmt_list ();
-  if (@prefmt)
-    {
-      return [map { my @f = split (/\x1/, $_);
-                    for (my $i = 0; $i < @f; $i++)
+  my @lines = map { my @f = split (/\x1/, $_);
+                    $total += $f[0];
+                    if (@prefmt)
                       {
-                        my $fn = $prefmt[$i];
-                        $f[$i] = &$fn ($f[$i]) if $fn;
+                        for (my $i = 0; $i < @f; $i++)
+                          {
+                            my $fn = $prefmt[$i];
+                            $f[$i] = &$fn ($f[$i]) if $fn;
+                          }
                       }
                     \@f;
-                  } split (/\n/, $_)];
-    }
-  else
-    {
-      return [map { [split (/\x1/, $_)] } split (/\n/, $_)];
-    }
+                  } split (/\n/, $_);
+
+  push @lines, [$total, "TOTAL", ("") x ((scalar keys %field) - 2)]
+    if $show_total;
+  return \@lines;
 }
 
 sub rpmsigkey
@@ -379,7 +383,8 @@ sub main
               "h|human-readable", sub { $fmtsize = 1024 },
               "si",               sub { $fmtsize = 1000 },
               "r|reverse",        \$reverse_sort,
-              "s|sort=s",         sub { push @$sortby, $_[1] });
+              "s|sort=s",         sub { push @$sortby, $_[1] },
+              "t|total",          \$show_total);
 
   $sortby = [qw(name version-release arch)] unless @$sortby;
   $sortby = [map { $field_alias{$_}
