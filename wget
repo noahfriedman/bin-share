@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# $Id: wget,v 1.8 2009/06/09 15:57:21 friedman Exp $
+# $Id: wget,v 1.9 2011/05/01 04:38:06 friedman Exp $
 
 wget=`run-next -p "$0" || echo :`
 
@@ -15,7 +15,7 @@ eval `$wget --version \
         | sed -ne '1s/^.*get \([0-9]*\)\.\([0-9]*\).*/vmajor=\1 vminor=\2/p'`
 
 case $vmajor:$vminor in
-  : | *: | :* ) exit 1 ;;
+    : | *: | :* ) exit 1 ;;
 esac
 
 atleast() { [ $vmajor -eq $1 ] && [ $vminor -ge $2 ] || [ $vmajor -gt $1 ]; }
@@ -25,61 +25,68 @@ opts="--wait=0
       --cache=off
       --passive-ftp
      "
-#     --follow-ftp
+     #--follow-ftp
 
 case " $* " in
-  *" -q "* | *" --quiet "* ) : ;;
-  * ) opts="$opts
-            --verbose
-            --server-response
-           " ;;
+    *" -q "* | *" --quiet "* ) : ;;
+    * ) opts="$opts
+              --verbose
+              --server-response
+             " ;;
 esac
 
 # wget 1.11.1 doesn't allow -N (--timestamping) with -O
 case " $* " in
-  *" -O "* ) : ;;
-  * ) opts="$opts
-            --timestamping
-           " ;;
+    *" -O "* ) : ;;
+    * ) opts="$opts
+              --timestamping
+             " ;;
 esac
 
 if atleast 1 6; then
-  opts="$opts
-        --html-extension
-        --waitretry=60
-       "
+    opts="$opts
+          --html-extension
+          --waitretry=60
+         "
 fi
 
 if atleast 1 7 && [ -f "$cookies" ]; then
-  opts="$opts
-        --cookies=on
-        --load-cookies=$cookies
-       "
-  if [ -w "$cookies" ] && [ ! -h "$cookies" ]; then
-    opts="$opts --save-cookies=$cookies"
-  fi
+    opts="$opts
+          --cookies=on
+          --load-cookies=$cookies
+         "
+    if [ -w "$cookies" ] && [ ! -h "$cookies" ]; then
+        opts="$opts --save-cookies=$cookies"
+    fi
 fi
 
 if atleast 1 8 && [ -t 1 ]; then
-  # Use in-place progress bar if stdout is a tty
-  opts="$opts --progress=bar:force"
+    # Use in-place progress bar if stdout is a tty
+    opts="$opts --progress=bar:force"
 fi
 
 # Add timeout and retry options to wget 1.9 and later
 if atleast 1 9; then
-  opts="$opts
-        --dns-timeout=30
-        --connect-timeout=30
-        --read-timeout=300
+    opts="$opts
+          --dns-timeout=30
+          --connect-timeout=30
+          --read-timeout=300
 
-        --retry-connrefused
-       "
-       #--dns-cache=off
+          --retry-connrefused
+         "
+         #--dns-cache=off
+fi
+
+if atleast 1 13; then
+    # use the name specified by the redirection url's last component
+    opts="$opts
+          --trust-server-names
+         "
 fi
 
 exec $wget \
-  --user-agent="$user_agent" \
-  --execute 'robots = off' \
-  $opts ${1+"$@"}
+     --user-agent="$user_agent" \
+     --execute 'robots = off' \
+     $opts ${1+"$@"}
 
 # wget ends here
