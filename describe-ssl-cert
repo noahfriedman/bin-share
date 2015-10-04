@@ -4,7 +4,7 @@
 # Created: 2015-10-04
 # Public domain
 
-# $Id$
+# $Id: describe-ssl-cert,v 1.1 2015/10/04 22:43:50 friedman Exp $
 
 $^W = 1;
 
@@ -45,13 +45,21 @@ sub bt
 }
 
 
+my $alts_re = qr/(X509v3 Subject Alternative Name:\s*\n)(\s*)(.*?\n)/i;
+
 sub describe
 {
   my $file = shift;
   my @cmd = ($openssl, qw(x509 -noout -in), $file, @_);
 
-  system (@cmd, qw(-text -nameopt RFC2253 -certopt ext_parse));
-  print "\n";
+  local $_ = bt (@cmd, qw(-text -nameopt RFC2253 -certopt ext_parse));
+  if (/$alts_re/)
+    {
+      my $indent = $2;
+      (my $alts = $3) =~ s/,\s*/\n$indent/g;
+      s/$alts_re/$1$2$alts/;
+    }
+  print $_, "\n";
 
   print "    Fingerprints:\n";
   for my $type (qw(md5 sha1 sha256))
