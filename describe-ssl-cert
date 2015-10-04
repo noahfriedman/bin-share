@@ -1,0 +1,169 @@
+#!/usr/bin/env perl
+# describe-ssl-cert -- display x509 certificates with descriptive text
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2015-10-04
+# Public domain
+
+# $Id$
+
+$^W = 1;
+
+use strict;
+
+my $openssl = $ENV{OPENSSL} || "openssl";
+
+my $tmpdir = $ENV{TMPDIR} || "/tmp";
+my $tmpfile = "$tmpdir/describe-ssl-cert.$$";
+END { unlink ($tmpfile) }
+
+sub xcat
+{
+  open (my $fh, $_[0]) || die "open ro: $_[0]: $!";
+  local $/ = undef;
+  return <$fh>;
+}
+
+sub write_file
+{
+  my $file = shift;
+
+  my $old_umask = umask (077);
+  open (my $fh, "> $file") || die "open rw: $file: $!\n";
+  umask ($old_umask);
+
+  print $fh @_;
+  close ($fh);
+  return 1;
+}
+
+# Like `foo` in bourne shell.
+sub bt
+{
+  open (my $fh, "-|", @_) || die "exec: $_[0]: $!\n";
+  local $/ = undef;
+  return <$fh>;
+}
+
+
+sub describe
+{
+  my $file = shift;
+  my @cmd = ($openssl, qw(x509 -noout -in), $file, @_);
+
+  system (@cmd, qw(-text -nameopt RFC2253 -certopt ext_parse));
+  print "\n";
+
+  print "    Fingerprints:\n";
+  for my $type (qw(md5 sha1 sha256))
+    {
+      local $_ = bt (@cmd, '-fingerprint', "-$type");
+      printf ("        %-6s = %s\n", $1, $2) if /^(\S+)\s+Fingerprint=(.*)/i;
+    }
+  print "\n";
+
+  my @l = split (/[\r\n]+/, bt (@cmd, '-purpose'));
+  foreach $_ (@l)
+    {
+      if (/^(.*?) : (yes|no)/i)
+        {
+          printf ("    %-25s : %s\n", $1, $2);
+        }
+      else
+        { print "    ", $_, "\n" }
+    }
+  print "\n";
+}
+
+# Only print '--BEGIN..END--' sections of input file, skipping
+# any external comments that might be present.
+#
+# If the file contains multiple '--BEGIN..END--' sections, print and
+# describe each one separately because the x509 util will only process the
+# first certificate it reads.
+sub describe_file
+{
+  my $file = shift;
+  my $text = xcat ($file);
+
+  if ($text =~ /^-+BEGIN\s/s)
+    {
+      my @blob;
+      while ($text =~ /^(-+BEGIN\s+)(.*?)(-+\n.*?\n-+END\s+)\2(-+\n)/gms)
+        {
+          push @blob, join ("", $1, $2, $3, $2, $4);
+        }
+
+      if (@blob == 1)
+        {
+          print @blob;
+          describe ($file) if ($blob[0] =~ /CERTIFICATE/);
+        }
+      else
+        {
+          map { print $_;
+                if (/CERTIFICATE/)
+                  {
+                    write_file ($tmpfile, $_);
+                    describe ($tmpfile);
+                  }
+              } @blob;
+        }
+    }
+  else
+    {
+      system ($openssl, qw(x509 -inform der -in), $file);
+      describe ($file, qw(-inform der));
+    }
+}
+
+# Retrieve certificate from remote ssl server.
+sub fetch
+{
+  my ($url, $file) = @_;
+
+  $url =~ s=^[^:]*://==;
+  $url =~ s=/.*==;
+  $url .= ":443" unless $url =~ /:[0-9a-z]+/i;
+
+  my $pid = open (my $fh, "-|");
+  die "fork: $!\n" unless defined $pid;
+  if ($pid == 0)
+    {
+      open (STDIN, "/dev/null");
+      open (STDERR, ">&1");
+      exec ($openssl, qw(s_client -connect), $url);
+    }
+  else
+    {
+      local $/ = undef;
+      local $_ = <$fh>;
+      close ($fh);
+
+      return write_file ($file, $1)
+        if (/(?:^|\n)(-+BEGIN .*\n-+END .*?-\n)/s);
+      print STDERR $_;
+    }
+  return 0;
+}
+
+sub main
+{
+  for my $file (@_)
+    {
+      # If file isn't present but arg looks like a local file name rather
+      # than a url or hostname, try reading it and error out.
+      if (-f $file || ($file =~ m=/= && $file !~ m=^[a-z]+://=i))
+        {
+          describe_file ($file);
+        }
+      else
+        {
+          next unless fetch ($file, $tmpfile);
+          describe_file ($tmpfile);
+        }
+    }
+}
+
+main (@ARGV);
+
+# eof
