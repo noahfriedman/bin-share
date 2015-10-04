@@ -4,7 +4,7 @@
 # Created: 2015-10-04
 # Public domain
 
-# $Id: describe-ssl-cert,v 1.1 2015/10/04 22:43:50 friedman Exp $
+# $Id: describe-ssl-cert,v 1.2 2015/10/04 23:25:45 friedman Exp $
 
 $^W = 1;
 
@@ -74,7 +74,7 @@ sub describe
     {
       if (/^(.*?) : (yes|no)/i)
         {
-          printf ("    %-25s : %s\n", $1, $2);
+          printf ("        %-25s : %s\n", $1, $2);
         }
       else
         { print "    ", $_, "\n" }
