@@ -4,7 +4,7 @@
 # Created: 2010-02-17
 # Public domain
 
-# $Id: reset-xkb,v 1.12 2015/01/28 03:08:12 friedman Exp $
+# $Id: reset-xkb,v 1.13 2015/10/05 03:48:44 friedman Exp $
 
 # Commentary:
 
@@ -82,6 +82,7 @@ xmodmap_hacks()
         *:ThinkPad*Tablet )
             docmd xmodmap -e 'keycode 161 = XF86RotationPB'
             docmd xmodmap -e 'keycode 162 = XF86RotateWindows'
+            docmd xset -r 161 -r 162 # or use xkbset, same syntax
             ;;
     esac
 }
