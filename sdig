@@ -1,10 +1,28 @@
 #!/bin/sh
-# $Id$
+# $Id: sdig,v 1.1 2003/03/25 18:00:26 friedman Exp $
 
-for addr in ${1+"$@"}; do
-  if expr "$addr" : '[0-9.][0-9.]*' > /dev/null; then
-    dig -x "$addr" +noall +answer
-  else
-    dig "$addr" any +noall +answer
-  fi
-done | sed -e '/^;/d'
+mdig()
+{
+    dig +nocmd +noall +nocl +nottlid +answer "$@"
+}
+
+ip()
+{
+    expr "$1" : '^[0-9.][0-9.]*$' ||
+    expr "$1" : '^[:0-9a-f][:0-9a-f]*$'
+}
+
+main()
+{
+    for addr in ${1+"$@"}; do
+        if ip "$addr" > /dev/null ; then
+            mdig -x "$addr"
+        else
+            mdig "$addr" any
+        fi
+    done
+}
+
+main "$@"
+
+# eof
