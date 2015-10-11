@@ -1,0 +1,64 @@
+#!/bin/sh
+# $Id$
+
+_osd_cat()
+{
+    if [ -f $pidfile ]; then
+        read pid < $pidfile
+        kill -0 $pid 2> /dev/null && kill $pid
+    fi
+
+    font="-*-bitstream vera sans-medium-r-*-*-24-*-*-*-*-*-*-*"
+    osd_cat --color  green \
+            --pos    bottom \
+            --offset 100 \
+            --indent  60 \
+            --delay    3 \
+            --shadow   2 \
+            --lines    2 \
+            --font   "$font" \
+            ${1+"$@"} &
+
+    echo $! > $pidfile
+}
+
+notify()
+{
+    echo "$*" > $txtfile
+    _osd_cat $txtfile
+}
+
+pct()
+{
+    pct=$1
+    shift
+    _osd_cat --barmode percentage --percentage "$pct" --text "$*"
+}
+
+setup()
+{
+    umask 077
+
+    uid=${UID:-`id -u`}
+    if [ -d /run/user/$uid ]; then
+        prefix=/run/user/$uid
+    else
+        prefix=${TMPDIR-/tmp}
+    fi
+
+    pidfile=$prefix/.osg-msg.$uid.pid
+    txtfile=$prefix/.osg-msg.$uid.txt
+}
+
+main()
+{
+    setup
+    case $1 in
+        pct | notify )        "$@" ;;
+        *            ) notify "$@" ;;
+    esac
+}
+
+main ${1+"$@"}
+
+# eof
