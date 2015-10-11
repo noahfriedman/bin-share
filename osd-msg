@@ -1,12 +1,34 @@
 #!/bin/sh
-# $Id$
+# osd-msg --- show text or percentage message onscreen
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2010-10-02
+# Public domain
 
-_osd_cat()
+# $Id: osd-msg,v 1.1 2015/10/11 03:29:03 friedman Exp $
+
+kill_prior()
 {
     if [ -f $pidfile ]; then
         read pid < $pidfile
-        kill -0 $pid 2> /dev/null && kill $pid
+        if [ -d /proc/$$ ]; then
+            # If we have /proc we can examine the process name and make
+            # sure we don't accidentally kill something else just because
+            # the pidfile is stale.
+            if [ -d /proc/$pid ]; then
+                read procname < /proc/$pid/comm
+                case $procname in
+                    $1 | */$1 ) kill $pid ;;
+                esac
+            fi
+        else
+            kill -0 $pid 2> /dev/null && kill $pid
+        fi
     fi
+}
+
+_osd_cat()
+{
+    kill_prior osd_cat
 
     font="-*-bitstream vera sans-medium-r-*-*-24-*-*-*-*-*-*-*"
     osd_cat --color  green \
@@ -41,6 +63,7 @@ setup()
 
     uid=${UID:-`id -u`}
     if [ -d /run/user/$uid ]; then
+        # linux systemd-logind 219 or later
         prefix=/run/user/$uid
     else
         prefix=${TMPDIR-/tmp}
@@ -54,8 +77,8 @@ main()
 {
     setup
     case $1 in
-        pct | notify )        "$@" ;;
-        *            ) notify "$@" ;;
+        pct | notify )        ${1+"$@"} ;;
+        *            ) notify ${1+"$@"} ;;
     esac
 }
 
