@@ -4,7 +4,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Public domain.
 
-# $Id: dist-chmod,v 1.5 2005/11/22 20:39:54 friedman Exp $
+# $Id: dist-chmod,v 1.6 2013/11/01 19:54:14 friedman Exp $
 
 setgid=
 sticky=
@@ -14,6 +14,7 @@ verbose=
 
 while : ; do
   case $1 in
+    -0    ) bits=       ; shift ;;  # just for consistency
     -1    ) bits=o      ; shift ;;  # legacy dist-chmod1 behavior
     -2    ) bits=og     ; shift ;;  # legacy dist-chmod2 behavior
     -v    ) verbose=-v  ; set -x ; shift ;;
@@ -24,14 +25,16 @@ while : ; do
     -t    ) sticky=,-t  ; shift  ;;
     -[ou] ) owner=$2    ; shift  ; shift ;;
     --*   ) :           ; shift  ; break ;;
-    -?*   ) opts=$1   # split single-letter options and reparse
+    -??*  ) opts=$1   # split single-letter options and reparse
             shift
             set fnord `echo $opts | sed -e 's/^-//;s/\(.\)/-\1 /g'` ${1+"$@"}
             shift ;;
-    +*    ) opts=$1   # split single-letter options and reparse
+    +??*  ) opts=$1   # split single-letter options and reparse
             shift
             set fnord `echo $opts | sed -e 's/^\+//;s/\(.\)/+\1 /g'` ${1+"$@"}
             shift ;;
+    [-+]* ) echo "$1: Unknown option." 1>&2
+            exit 1 ;;
     *     ) break ;;
   esac
 done
