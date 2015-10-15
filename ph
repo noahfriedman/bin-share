@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: ph,v 1.3 2012/11/27 21:56:22 friedman Exp $
+# $Id: ph,v 1.4 2013/04/09 00:55:55 friedman Exp $
 
 use Net::LDAP;
 use Getopt::Long;
@@ -158,13 +158,13 @@ sub result_format
       my %node;
       $node{dn} = $entry->dn;
 
-      map { my $key = $remap{$_} || $_;
+      map { my $elt = lc $_;
             my $val = $entry->get_value ($_);
             if (defined $val)
               {
-                my $fmtfn = $format_attr{$_};
-                $val = &$fmtfn ($_, $val) if ref $fmtfn eq 'CODE';
-                $node{$key} = $val;
+                my $fmtfn = $format_attr{$elt};
+                $val = &$fmtfn ($elt, $val) if ref $fmtfn eq 'CODE';
+                $node{$remap{$elt} || $elt} = $val;
               }
           } $entry->attributes;
       push @entry, \%node;
