@@ -1,9 +1,36 @@
 #!/bin/sh
-# $Id: sdig,v 1.1 2003/03/25 18:00:26 friedman Exp $
+# $Id: sdig,v 1.2 2015/10/07 05:40:57 friedman Exp $
 
-mdig()
+idig()
 {
-    dig +nocmd +noall +nocl +nottlid +answer "$@"
+    dig +nocmd +noall +nocl +nottlid +answer -f - "$@"
+}
+
+ns()
+{
+    ns=`echo "$1" ns +short | idig`
+    case $#:$ns in
+        1: ) set x `echo "$1" soa +authority | idig`
+             case $# in
+                 1 ) return ;;
+                 * ) ns "$2" norepeat ;;
+             esac ;;
+        2: ) return ;;
+        * ) set x $ns
+            echo $2 ;;
+    esac
+}
+
+# An 'any' query will only return what's already cached (if anything is),
+# so to make sure we actually get all records, find an authoritative
+# nameserver for that domain and query it.
+adig()
+{
+    ns=`ns "$1"`
+    case $ns in
+        '' ) echo "$@" any ;;
+        *  ) echo @$ns -t any "$@" +norecurse ;;
+    esac
 }
 
 ip()
@@ -14,13 +41,35 @@ ip()
 
 main()
 {
-    for addr in ${1+"$@"}; do
+    while [ $# -gt 0 ]; do
+        server=
+        case $1 in @* ) server=$1 ; shift ;; esac
+
+        addr=$1; shift
+
         if ip "$addr" > /dev/null ; then
-            mdig -x "$addr"
+            echo $server -x "$addr"
+        elif [ $# -eq 0 ]; then
+            echo $server "$addr" any
         else
-            mdig "$addr" any
+            options= types=
+            while [ $# -gt 0 ]; do
+                case $1 in
+                    *.* | @* ) break ;;
+                    +*  ) options="$options $1"; shift ;;
+                    *   )   types="$types   $1"; shift ;;
+                esac
+            done
+
+            case $types in '' ) types=any ;; esac
+            for type in $types; do
+                case $type in
+                    all ) adig "$addr" $options ;;
+                    *   ) echo $server "$addr" $type $options ;;
+                esac
+            done
         fi
-    done
+    done | idig
 }
 
 main "$@"
