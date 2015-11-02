@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.36 2015/08/27 22:05:10 friedman Exp $
+# $Id: rpm-pkg-list,v 1.37 2015/09/17 20:26:35 friedman Exp $
 
 # Commentary:
 # Code:
@@ -409,6 +409,7 @@ __DATA__
 ## GPG key fingerprints for RPM signatures
 ######
 
+81b46521	fedora-24
 34ec9cba	fedora-23
 8e1431d5	fedora-22
 95a43f54	fedora-21
@@ -426,6 +427,7 @@ d22e77f2	fedora-11
 6df2196f	fedora-8or9	# only used for fedora 8/9 updates
 df9b0ae9	fedora-8or9-test
 
+030d5aed	fedora-24-secondary
 873529b8	fedora-23-secondary
 a29cb19c	fedora-22-secondary
 a0a7badb	fedora-21-secondary
