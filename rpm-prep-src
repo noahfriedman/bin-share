@@ -1,7 +1,25 @@
 #!/bin/bash
-# $Id: rpm-prep-src,v 1.1 2015/08/31 22:21:35 friedman Exp $
+# $Id: rpm-prep-src,v 1.2 2015/09/07 08:09:30 friedman Exp $
 
 orig_dir=${PWD-`pwd`}
+
+case $# in
+    0 ) : ;;
+    * ) if ! [ -f "$1" ]; then
+            inst=`rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}\n' $1`
+            case $inst in
+                *"is not installed" ) : ;;
+                * ) rpm=`locate $inst.src.rpm`
+                    case $rpm in
+                        '' ) : ;;
+                        * )
+                            shift
+                            set x "$rpm" "$@"
+                            shift ;;
+                    esac ;;
+            esac
+        fi ;;
+esac
 
 case $1 in
     *.src.rpm )
