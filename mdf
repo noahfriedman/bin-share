@@ -4,11 +4,12 @@
 # Created: 2001-01-11
 # Public domain.
 
-# $Id: mdf,v 1.17 2015/08/06 00:05:38 friedman Exp $
-
-$^W = 1;  # enable warnings
+# $Id: mdf,v 1.18 2015/09/07 08:08:13 friedman Exp $
 
 use strict;
+use warnings qw(all);
+no  warnings 'qw';  # don't complain about commas in qw lists.
+
 use Getopt::Long;
 use Pod::Usage;
 use POSIX;
@@ -408,7 +409,7 @@ sub parse_options
   my $help; # no init; perl 5.8 will treat as REF() instead of SCALAR()
 
   my $parser = Getopt::Long::Parser->new;
-  $parser->configure (qw(bundling autoabbrev gnu_compat));
+  $parser->configure (qw(bundling autoabbrev gnu_compat no_ignorecase));
 
   my $succ = $parser->getoptions
     ("help"                     => sub { $help = 3 },
