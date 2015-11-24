@@ -4,7 +4,7 @@
 # Created: 1996-01-15
 # Public domain
 
-# $Id: untar,v 1.32 2014/09/03 08:18:14 friedman Exp $
+# $Id: untar,v 1.33 2014/12/12 02:29:12 friedman Exp $
 
 # Commentary:
 
@@ -131,9 +131,33 @@ extract()
             7z x -o"$pkgdir" "$file" ;;
 
         *initramfs*.img | *initrd*.img | *ramdisk.img )
-            gzip -dc "$file" | cpio -iv ;;
+            extract_initrd "$file" ;;
     esac
 }
+
+extract_initrd()
+{
+    if ${GREP-grep} -q 'early_cpio' "$file"; then
+        # Skip uncompressed cpu microcode blobs at head of actual archive.
+        blocks=`${CPIO-cpio} -t < "$file" 2>&1 \
+                  | sed -ne '/^\([0-9]*\) blocks$/s//\1/p'`
+        exp() { ${DD-dd} bs=1b skip=$blocks status=none if="$1"; }
+    else
+        exp() { ${CAT-cat} -- "$1"; }
+    fi
+
+    kind=`exp "$file" | file -`
+    case $kind in
+        *gzip*  ) exp2() { ${GZIP-gzip}   -dc; } ;;
+        *bzip2* ) exp2() { ${BZIP2-bzip2} -dc; } ;;
+        *XZ*    ) exp2() { ${XZ-xz}       -dc; } ;;
+        *cpio*  ) exp2() { ${CAT-cat};         } ;;
+        *       ) echo "$file: unknown file format" 1>&2
+                  exit 1 ;;
+    esac
+    exp "$file" | exp2 | ${CPIO-cpio} -dimv --no-absolute-filenames
+}
+
 
 main()
 {
