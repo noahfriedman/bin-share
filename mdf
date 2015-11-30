@@ -4,7 +4,7 @@
 # Created: 2001-01-11
 # Public domain.
 
-# $Id: mdf,v 1.18 2015/09/07 08:08:13 friedman Exp $
+# $Id: mdf,v 1.19 2015/11/21 00:02:07 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -460,6 +460,10 @@ sub parse_options
     }
   else
     { delete $opt{sort} }
+
+  # On linux, if there are any fs args remaining, enable all so that bind-
+  # and non-persistent mounts will be displayed.
+  $opt{all} = 1 if @ARGV && $^O eq 'linux';
 }
 
 sub main
