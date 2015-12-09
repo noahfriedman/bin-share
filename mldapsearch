@@ -5,18 +5,20 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.2 2012/09/29 00:40:23 friedman Exp $
+# $Id: mldapsearch,v 1.3 2012/11/27 21:36:08 friedman Exp $
+
+use strict;
+use warnings qw(all);
 
 use Net::LDAP;
+use Net::LDAP::LDIF;
 use Getopt::Long;
-use strict;
 
-$^W = 1;
-
-our %opt = ( host    => "ldap",
+our %opt = ( host    => 'ldap',
              scope   => 'sub',
              onerror => 'die',
              verify  => 'none',
+             exclude => [],
            );
 
 sub parse_options
@@ -26,14 +28,19 @@ sub parse_options
   my $parser = Getopt::Long::Parser->new;
   $parser->configure (qw(bundling autoabbrev));
   my $succ = $parser->getoptions
-    ( "debug:i"        => \$opt{debug},
-      "b|root|base=s"  => \$opt{base},
-      "h|host=s",      => \$opt{host},
-      "D|bind=s",      => \$opt{bind},
-      "w|pswd|pass=s", => \$opt{password},
-      "p|port=s",      => \$opt{port},
-      "s|scope=s",     => \$opt{scope},
-      "P|cert=s"       => \$opt{cafile},
+    ( "debug:i"                => \$opt{debug},
+      "b|root|base=s"          => \$opt{base},
+      "h|host=s",              => \$opt{host},
+      "D|bind=s",              => \$opt{bind},
+      "w|pswd|pass=s",         => \$opt{password},
+      "p|port=s",              => \$opt{port},
+      "s|scope=s",             => \$opt{scope},
+      "P|cert=s"               => \$opt{cafile},
+
+      "E|exclude-attribute=s@" => \$opt{exclude},
+      "wrap=i"                 => \$opt{wrap},
+      "lowercase|lcase"        => \$opt{lcase},
+      "sort"                   => \$opt{sort},
     );
 
   $opt{debug} = 1 if defined $opt{debug} && $opt{debug} == 0;
@@ -43,6 +50,8 @@ sub parse_options
       map { $n = ($n << 1) | $_ } split //, $opt{debug};
       $opt{debug} = $n;
     }
+
+  $opt{exclude} = [map { split (/(?:\s*,\s*)|\s+/, $_) } @{$opt{exclude}}];
 }
 
 # Query server to find out what directory roots are available, and if more
@@ -78,7 +87,17 @@ sub baseDN
         shift @dc;
       } @dc;
 
-  return @nc[0]; # if all else fails, return first advertised.
+  return $nc[0]; # if all else fails, return first advertised.
+}
+
+sub LDIF
+{
+  my $data = shift;
+
+  open (my $fh, '>', \my $buffer);
+  my $ldif = Net::LDAP::LDIF->new ($fh, 'w', @_);
+  $ldif->write_entry ($data);
+  return $buffer;
 }
 
 sub main
@@ -99,8 +118,18 @@ sub main
   $opt{attrs} = \@attr if @attr;
   $opt{base} = baseDN ($ldap) unless defined $opt{base};
 
+  my @excl   = map { $_ => undef } @{$opt{exclude}};
+  my @lopt   = (change    => undef     );
+  push @lopt,  (sort      => 1         ) if $opt{sort};
+  push @lopt,  (wrap      => $opt{wrap}) if $opt{wrap};
+  push @lopt,  (lowercase => 1         ) if $opt{lcase};
+
   my $result = $ldap->search (%opt);
-  print $_->ldif while $_ = $result->shift_entry;
+  while ($_ = $result->shift_entry)
+    {
+      $_->delete (@excl) if @excl;
+      print LDIF ($_, @lopt);
+    }
 }
 
 main (@ARGV);
