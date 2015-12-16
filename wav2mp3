@@ -1,0 +1,31 @@
+#!/bin/sh
+# $Id$
+
+wav_to_mp3()
+{
+  wav=$1
+  shift
+
+  base=`basename "$wav" .wav`
+  mp3=$base.mp3
+
+  lame --nohist -h -p --preset standard "$@" "$wav" "$mp3"
+}
+
+main()
+{
+  case $1 in
+    -1 ) shift
+         wav_to_mp3 "$@" ;;
+     * )
+         for wav in "$@"; do
+           echo "$wav"
+           wav_to_mp3 "$wav"
+           echo
+         done ;;
+  esac
+}
+
+main "$@"
+
+# eof
