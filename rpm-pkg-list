@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.37 2015/09/17 20:26:35 friedman Exp $
+# $Id: rpm-pkg-list,v 1.38 2015/11/02 20:34:01 friedman Exp $
 
 # Commentary:
 # Code:
@@ -507,7 +507,8 @@ a109b1ec	livna
 22b2951d	mhensler-suspend2
 98ab5139	oracle-virtualbox
 a9464aa9	pidgin
-ba392878	splode-local	# internal reference key; not secure
+ba392878	splode-internal-2005	# internal reference key; not secure
+dbcccc4b	splode-internal-2015	# internal reference key; not secure
 
 # Note: these redhat keys should be discontinued as of 9/2008
 db42a60e	redhat
