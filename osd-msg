@@ -4,7 +4,7 @@
 # Created: 2010-10-02
 # Public domain
 
-# $Id: osd-msg,v 1.1 2015/10/11 03:29:03 friedman Exp $
+# $Id: osd-msg,v 1.2 2015/10/11 03:40:47 friedman Exp $
 
 kill_prior()
 {
@@ -39,7 +39,7 @@ _osd_cat()
             --shadow   2 \
             --lines    2 \
             --font   "$font" \
-            ${1+"$@"} &
+            ${1+"$@"} > /dev/null &
 
     echo $! > $pidfile
 }
