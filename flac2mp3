@@ -4,7 +4,7 @@
 # Created: 2009-10-28
 # Public domain
 
-# $Id: flac2mp3,v 1.8 2014/08/05 08:03:02 friedman Exp $
+# $Id: flac2mp3,v 1.9 2014/11/10 03:52:21 friedman Exp $
 
 # Commentary:
 
@@ -133,7 +133,7 @@ sub decode_flac
 
 sub encode_mp3
 {
-  my @args = (qw(--nohist -h -p --preset standard --vbr-new));
+  my @args = (qw(--nohist -q 0 --preset extreme --vbr-new));
   push @args, qw(--silent) unless -t fileno (STDOUT);
   xsystem (qw(lame), @args, @_);
 }
