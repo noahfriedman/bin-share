@@ -6,7 +6,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
 
-# $Id: from,v 1.93 2015/04/17 17:56:03 friedman Exp $
+# $Id: from,v 1.94 2015/04/17 19:47:46 friedman Exp $
 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -1248,15 +1248,18 @@ sub analyze_response
             if ($_[1] eq 'OK')
               {
                 my $list = $_[2];
-                my $label = $list->[0];
-                if (@$list > 2)
+                if (ref $list)
                   {
-                    splice (@$list, 0, 1);
-                    $data{$label} = $list;
-                  }
-                else
-                  {
-                    $data{$label} = $list->[1];
+                    my $label = $list->[0];
+                    if (@$list > 2)
+                      {
+                        splice (@$list, 0, 1);
+                        $data{$label} = $list;
+                      }
+                    else
+                      {
+                        $data{$label} = $list->[1];
+                      }
                   }
               }
             elsif ($_[1] eq 'SEARCH')
