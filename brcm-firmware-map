@@ -1,0 +1,59 @@
+#!/usr/bin/perl
+# brcm-firmware-map -- map hex firmware files to linux hcd file names
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2016-05-21
+# Public domain
+
+use strict;
+use warnings qw(all);
+
+sub file_contents
+{
+  open (my $fh, $_[0]) || die "$_[0]: $!\n";
+  local $/ = undef;
+  scalar <$fh>;
+}
+
+sub bcm_devlist
+{
+  my $bcm = $1 if $_[0] =~ /\[\s*Broadcom\s*\]\s*\n(.*?)\n\[/is;
+  $bcm =~ s/\s*;.*//g;
+  $bcm =~ s/^.*driverinstall.*\n//img;
+  $bcm =~ s/.*?=//g;
+  $bcm =~ s/[ \t,]+/ /g;
+  $bcm =~ s/usb.vid_([0-9a-z]+).pid_([0-9a-z]+)/$1 $2/ig;
+  $bcm =~ s/\n\n//mg;
+
+  my %dev = map { my @e = split (/\s+/, $_);
+                  $e[0] => sprintf ("%s-%s.hcd", lc ($e[1]), lc ($e[2]));
+                } split (/\n+/, $bcm);
+  return \%dev;
+}
+
+sub bcm_hexfile
+{
+  my $key = quotemeta ("$_[0].CopyList");
+  my $re = qr/\[\s*$key\s*\]\s*(.*?)\s*\[/is;
+
+  my $text = $1 if $_[1] =~ /$re/;
+  my @l = split (/\n+/, $text);
+
+  return $l[1];
+}
+
+sub main
+{
+  my $cft = file_contents ($_[0]);
+  $cft =~ s/\r//g;
+
+  my $dev = bcm_devlist ($cft);
+  map { my $hf = bcm_hexfile ($_, $cft);
+        my $prefix = $1 if $hf =~ /^(.*?)_/;
+
+        printf "%s\t%s-%s\n", $hf, $prefix, $dev->{$_};
+      } keys %$dev;
+}
+
+main (@ARGV || 'bcbtums-win7x86-brcm.inf');
+
+# eof
