@@ -44,16 +44,16 @@ sub main
 
   for my $from (@_)
     {
-      my $to = $from;
-      eval "\$to =~ $re";
+      local $_ = $from;
+      eval "$re";
 
       if ($actually_do_it)
         {
-          xrename_safe ($from, $to);
+          xrename_safe ($from, $_);
         }
       else
         {
-          msg ("PROPOSED", join (" -> ", $from, $to));
+          msg ("PROPOSED", join (" -> ", $from, $_));
         }
     }
 }
