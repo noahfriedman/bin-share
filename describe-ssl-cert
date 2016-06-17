@@ -4,7 +4,7 @@
 # Created: 2015-10-04
 # Public domain
 
-# $Id: describe-ssl-cert,v 1.4 2015/10/05 07:13:24 friedman Exp $
+# $Id: describe-ssl-cert,v 1.5 2016/05/12 04:17:08 friedman Exp $
 
 $^W = 1;
 
@@ -86,6 +86,21 @@ sub describe
         { print "    ", $_, "\n" }
     }
   print "\n";
+}
+
+sub describe_csr
+{
+  my $file = shift;
+  my @cmd = ($openssl, qw(req -noout -in), $file, @_);
+
+  local $_ = bt (@cmd, qw(-text -nameopt RFC2253 -reqopt ext_parse));
+  if (/$alts_re/)
+    {
+      my $indent = $2;
+      (my $alts = $3) =~ s/,\s*/\n$indent/g;
+      s/$alts_re/$1$2$alts/;
+    }
+  print $_, "\n";
 }
 
 # Only print '--BEGIN..END--' sections of input file, skipping
@@ -173,7 +188,10 @@ sub main
       # than a url or hostname, try reading it and error out.
       if (-f $file || ($file =~ m=/= && $file !~ m=^[a-z]+://=i))
         {
-          describe_file ($file);
+          if ($file =~ /\.(csr|req)$/i)
+            { describe_csr ($file) }
+          else
+            { describe_file ($file) }
         }
       else
         {
