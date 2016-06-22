@@ -4,7 +4,7 @@
 # Created: 2015-10-04
 # Public domain
 
-# $Id: describe-ssl-cert,v 1.5 2016/05/12 04:17:08 friedman Exp $
+# $Id: describe-ssl-cert,v 1.6 2016/06/17 19:03:38 friedman Exp $
 
 $^W = 1;
 
@@ -114,6 +114,7 @@ sub describe_file
   my $file = shift;
   my $text = xcat ($file);
 
+  $text =~ s/\r//g;
   if ($text =~ /^-+BEGIN\s/ms)
     {
       my @blob;
