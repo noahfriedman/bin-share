@@ -1,5 +1,5 @@
 #!/bin/bash
-# $Id: zfs-backup,v 1.4 2015/08/08 22:27:04 friedman Exp $
+# $Id: zfs-backup,v 1.5 2016/06/11 05:53:28 friedman Exp $
 
 # To initialize iscsi target on freebsd:
 #	iscsictl -A -d wdmc-1.prv.splode.com
@@ -73,7 +73,7 @@ backup()
 
     for fs in `fslist $srcpool`; do
         date +"[%Y-%m-%d %H:%M:%S%z] Backing up $fs"
-        time { zfs send -e -p ${oldsnap:+-I $oldsnap} $fs@$newsnap | zfs recv -F -v -d $dstpool; }
+        time { zfs send -e ${oldsnap:+-I $oldsnap} $fs@$newsnap | zfs recv -F -v -d $dstpool; }
     done
     date +"[%Y-%m-%d %H:%M:%S%z] Done."
 }
