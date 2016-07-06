@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# $Id: wget,v 1.9 2011/05/01 04:38:06 friedman Exp $
+# $Id: wget,v 1.10 2015/09/30 18:14:50 friedman Exp $
 
 wget=`run-next -p "$0" || echo :`
 
@@ -45,7 +45,6 @@ esac
 
 if atleast 1 6; then
     opts="$opts
-          --html-extension
           --waitretry=60
          "
 fi
