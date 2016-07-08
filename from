@@ -1,36 +1,13 @@
 #!/usr/bin/env perl
 # from --- show you who your mail is from
 
-# Copyright (C) 1992, 1995-2000, 2002-2003, 2011, 2014 Noah S. Friedman
-
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1992-01-19
+# Public domain
 
-# $Id: from,v 1.94 2015/04/17 19:47:46 friedman Exp $
-
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2, or (at your option)
-# any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# $Id: from,v 1.95 2016/05/12 04:17:58 friedman Exp $
 
 # Commentary:
-
-# Optional Fedora/RHEL/CentOS packages that will improve the functionality
-# of this program:
-#	perl-TimeDate
-#	perl-Time-ParseDate
-#	perl-Text-CharWidth
-#	perl-IO-Socket-INET6
-#	perl-IO-Socket-IP
-
 # Code:
 
 use 5.8.0;  # Not tested with anything older.  YMMV.
@@ -38,8 +15,9 @@ use strict;
 use Carp;
 use Getopt::Long;
 use Pod::Usage;
+use Socket;
 
-our $version = "3.1.4";
+our $version = "3.2";
 
 our @optional_modules
   = qw( Date::Parse
@@ -79,9 +57,10 @@ sub parse_options
       c_timeout       => 10,
       prefer_stunnel  => 1,
       stunnel_prog    => $ENV{STUNNEL} || "stunnel",
+      addrfamily      => AF_UNSPEC, # use either ipv6 or ipv4
 
-      batch_size      => 64,      # set to 0 to retrieve all at once
-      block_size      => 2**19,   # read 512k at a time
+      batch_size      => 64,        # set to 0 to retrieve all at once
+      block_size      => 2**19,     # read 512k at a time
     );
 
   my @match_header_default
@@ -142,9 +121,12 @@ sub parse_options
      's|sender=s'                => sub { $opt{match_header} = [qw(From Sender)];
                                           $opt{match_text}    = $_[1] },
 
+     # don't autovivify SSL_options values; wrap them in a delayed eval thunk
+     'ssl-ca-file=s'             => sub { $SSL_options{SSL_ca_file} = $_[1] },
+     'ssl-ca-path=s'             => sub { $SSL_options{SSL_ca_path} = $_[1] },
+     'ssl-version=s'             => sub { $SSL_options{SSL_version} = $_[1] },
+
      'S|starttls'                =>      \$opt{starttls},
-     'ssl-ca-file=s'             =>      \$SSL_options{SSL_ca_file},
-     'ssl-ca-path=s'             =>      \$SSL_options{SSL_ca_path},
      'ssl-verify-hostname'       =>      \$opt{ssl_verify_hostname},
      'ssl-no-verify'             =>      \$opt{ssl_no_verify},
      'prefer-perl-ssl!'          => sub { $opt{prefer_stunnel} = ! $_[1] },
@@ -152,6 +134,8 @@ sub parse_options
      'stunnel-program=s'         =>      \$opt{stunnel_prog},
      'connect-timeout|timeout'   =>      \$opt{c_timeout},
      'prefer-socklib=s'          => sub { $opt{prefer_socklib} .= $_[1] . ' '},
+     '4|ipv4-only'               => sub { $opt{addrfamily} = AF_INET  },
+     '6|ipv6-only'               => sub { $opt{addrfamily} = AF_INET6 },
      'U|user=s'                  =>      \$opt{user},
      'password=s'                =>      \$opt{pass}, # don't use!
 
@@ -554,16 +538,31 @@ sub output_columns
   my $fileno = fileno ($fh);
   if (-t $fileno)
     {
-      my $result = 0;
-      eval { require 'sys/ioctl.ph';
-             my $data = "";
-             if (ioctl ($fh, TIOCGWINSZ(), $data))
-               {
-                 my ($rows, $cols, $xpix, $ypix) = unpack ('S4', $data);
-                 $result = $cols;
-               }
-           };
-      return max (0, $result - 1) unless $@;
+      unless (defined &TIOCGWINSZ)
+        {
+          # The .ph files do not define the sizeof variable used in a lot
+          # of macros.  These are typical sizes, but not guaranteed to be
+          # portably correct.
+          our %sizeof = ( 'struct winsize' => 8,
+                          'struct ttysize' => 4, );
+          local *__OPTIMIZE__ = sub { 1; }; # silence warnings in v5.22
+          for my $ph (map { $_ . ".ph"
+                          } (qw(sys/ioctl sys/termios sys/ttycom ttold)))
+            {
+              eval { require "$ph" };
+              last if defined &TIOCGWINSZ;
+            }
+        }
+      if (defined &TIOCGWINSZ)
+        {
+          my $result;
+          if (ioctl ($fh, &TIOCGWINSZ, my $data = ''))
+            {
+              my ($rows, $cols, $xpix, $ypix) = unpack ('S4', $data);
+              $result = $cols;
+            }
+          return max (0, $result - 1) if defined $result;
+        }
 
       my $stty = ($fileno == 1 ? `stty -a` : `stty -a 0<&$fileno`);
       return max (0, $1 - 1) if $stty =~ /columns (\d+);/;
@@ -573,9 +572,7 @@ sub output_columns
 
 sub default_user
 {
-  my @envvars = qw(FROMUSER USER LOGNAME);
-
-  for my $var (@envvars)
+  for my $var (qw(FROMUSER USER LOGNAME))
     {
       my $val = $ENV{$var};
       return $val if defined $val && $val ne '';
@@ -632,13 +629,12 @@ our $debug          =  0;
 # Usage: canread ($handle, $timeout)
 sub canread
 {
-  my $v = '';
-  vec ($v, fileno ($_[0]), 1) = 1;
+  vec (my $v = '', fileno ($_[0]), 1) = 1;
   my $n = select ($v, undef, undef, $_[1]);
 
-  return ::_error ("select", $!) if $n < 0;
-  return 0 if $n == 0;
-  return 1;
+  ::DEBUG { { res => $n, mask => unpack ('B*', $v) } };
+  ::_error ("select", $!) if !defined $n || $n < 0;
+  return $n;
 }
 
 sub _verbose
@@ -681,6 +677,7 @@ sub command_output
 package From::Socket;
 
 use strict;
+use Socket;
 use Symbol;
 
 my $stunnel_class = q(From::Socket::Stunnel);
@@ -688,18 +685,37 @@ my $ssl_class     = q(IO::Socket::SSL);
 
 our $SSL_ERROR    = ""; # Will be overridden by ssl_class if loaded.
 
+our $SSL_version_default = 'TLSv1.2'; # 2016-07-04
+
+# These only contain mappings for values that need to be adjusted.
+# If not listed here, they will be passed through as-is.
+# The keys are case-insensitive for our purposes.
+our %SSL_version_normalize
+  = ( 'From::Socket::Stunnel' =>
+      { 'tlsv1_1' => 'TLSv1.1',  'tlsv11' => 'TLSv1.1',
+        'tlsv1_2' => 'TLSv1.2',  'tlsv12' => 'TLSv1.2',
+        'tlsv1_3' => 'TLSv1.3',  'tlsv13' => 'TLSv1.3',
+      },
+
+      'IO::Socket::SSL' =>
+      { 'tlsv1.1' => 'TLSv1_1',  'tlsv11' => 'TLSv1_1',
+        'tlsv1.2' => 'TLSv1_2',  'tlsv12' => 'TLSv1_2',
+        'tlsv1.3' => 'TLSv1_3',  'tlsv13' => 'TLSv1_3',
+      },
+    );
+
+my %socklib = ( inet6 => q(IO::Socket::INET6),      # supports ipv4, ipv6
+                inet4 => q(IO::Socket::INET),       # supports ipv4
+                inet  => q(IO::Socket::INET),       # supports ipv4
+                ip    => q(IO::Socket::IP),         # supports ipv4, ipv6
+              );
+
 sub __init
 {
   local $errors_fatal = 1;
 
   if ($opt{need_net})
     {
-      my %socklib = ( inet6 => q(IO::Socket::INET6), # supports ipv4, ipv6
-                      inet4 => q(IO::Socket::INET),  # supports ipv4
-                      inet  => q(IO::Socket::INET),  # supports ipv4
-                      ip    => q(IO::Socket::IP),    # supports ipv4, ipv6
-                    );
-
       $opt{prefer_socklib} ||= "inet6 ip inet"; # try ipv6-supporting first
       unless (ref $opt{prefer_socklib})
         {
@@ -745,8 +761,12 @@ sub _connect_internal
   my $self  = shift;
   my $class = shift;
 
+  return ::_error ($self->{uri}, "$class does not support IPv6")
+      if ($opt{addrfamily} == AF_INET6 && $class eq $socklib{inet4});
+
   my $fh;
-  my %p = (Type    => &SOCK_STREAM,
+  my %p = (Type    => SOCK_STREAM,
+           Domain  => $opt{addrfamily}, # ignored by IO::Socket::INET
            Timeout => $opt{c_timeout},
            @_);
 
@@ -818,8 +838,7 @@ sub starttls
 
 sub mkpipe
 {
-  # use &fn so that these do not need to be defined at compile-time.
-  my @pair = $SOCKLIB->socketpair (&AF_UNIX, &SOCK_STREAM, &PF_UNSPEC);
+  my @pair = $SOCKLIB->socketpair (AF_UNIX, SOCK_STREAM, PF_UNSPEC);
   map { $_->autoflush (1) } @pair;
   return @pair;
 }
@@ -830,11 +849,18 @@ sub _ssl_args
 
   (my $proto = $self->{proto}) =~ s=s$==;
 
-  my %param = (SSL_version         => 'TLSv1',
+  my %param = (SSL_version         => $SSL_version_default,
                SSL_verify_mode     => ($opt{ssl_no_verify} ? 0 : 2|4),
                SSL_verify_callback => sub { $self->_ssl_verifycb (@_) },
                %SSL_options,
               );
+
+  if ($param{SSL_version})
+    {
+      my $ver = lc $param{SSL_version};
+      $param{SSL_version} = $SSL_version_normalize{$SOCKLIB_SSL}->{$ver}
+        if defined $SSL_version_normalize{$SOCKLIB_SSL}->{$ver};
+    }
 
   # Native SSL class in v5.18 does not permit both SSL_ca_file and
   # SSL_ca_path to be specified.
@@ -916,7 +942,7 @@ sub spawn
   my ($rc, $wc) = $self->mkpipe () if $fnparent;
   my ($rh, $wh) = $self->mkpipe ();
 
-  $SIG{CHLD} = q(IGNORE); # automatically reap zombies
+  $SIG{CHLD} = q(IGNORE);
   my $pid = fork;
   unless (defined $pid)
     {
@@ -943,6 +969,7 @@ sub spawn
 package From::Socket::Stunnel;
 
 use strict;
+use Socket qw(:all);
 
 our @ISA = qw(From::Socket);
 
@@ -955,35 +982,66 @@ sub connect
 {
   my $class = shift;
   my %param = @_;
-
   my $self = $param{self};
+
+  my $re_ipaddr = qr/^(?:[0-9.]+|[0-9a-f:]+)$/i;
+
+  my (@connect, $canon);
+  if ($opt{addrfamily} == AF_UNSPEC || $param{PeerHost} =~ /$re_ipaddr/)
+    {
+      @connect = ($param{PeerHost});
+    }
+  else
+    {
+      # We cannot control whether stunnel uses ipv4 or ipv6, if a host name
+      # has both kinds of address records.  So resolve the corresponding
+      # addresses for the specified address family and direct stunnel to
+      # connect to those instead.
+      ($canon, @connect) = hostaddrs ($param{PeerHost});
+    }
+  unless (@connect)
+    {
+      $@ = "Host not found";
+      return;
+    }
 
   my $fnparent
     = sub { my $wc = shift;
-            my @conf = ("foreground     = no",
+            my @conf = ("foreground     = yes",
                         "syslog         = no",
+                        "debug          = " . ($::debug ? 'debug' : 'err'),
 
                         "client         = yes",
-                        "connect        = $param{PeerHost}:$param{PeerPort}",
+                        (map { "connect        = $_:$param{PeerPort}" } @connect),
                         "TIMEOUTconnect = $param{Timeout}",
-                        "compression    = zlib",
 
                         "ciphers        = HIGH",
                         "sslVersion     = $param{SSL_version}",
                        );
-            push @conf, "fips           = no"                  if $stunnel_fips_enabled;
-            push @conf, "CApath         = $param{SSL_ca_path}" if $param{SSL_ca_path};
-            push @conf, "CAfile         = $param{SSL_ca_file}" if $param{SSL_ca_file};
-            push @conf, "verify         = 2"               unless $opt{ssl_no_verify};
-            push @conf, ("debug         = debug",
-                         "foreground    = yes", # override; diagnostics on stderr
-                        ) if $::debug;
+            push @conf, "fips           = no"                    if $stunnel_fips_enabled;
+            push @conf, "CApath         = $param{SSL_ca_path}"   if $param{SSL_ca_path};
+            push @conf, "CAfile         = $param{SSL_ca_file}"   if $param{SSL_ca_file};
+
             push @conf, "protocol       = $self->{proto}"
               if ($opt{starttls} && $self->{proto} !~ /s$/);
 
-            map { ::DEBUG { {state=>1}, $_ };
-                  print $wc $_, "\n"
-                } @conf;
+            unless ($opt{ssl_no_verify})
+              {
+                push @conf, "verify         = 2";
+                # n.b. stunnel v5.17 won't allow this option in the global
+                # section of a config.  stunnel v5.30 seems to allow it.
+                if ($opt{ssl_verify_hostname})
+                  {
+                    push @conf, "checkHost      = $canon" if defined $canon;
+                    map { push @conf, (/$re_ipaddr/
+                                       ? "checkIP        = $_"
+                                       : "checkHost      = $_")
+                        } @connect;
+                  }
+              }
+
+            ::DEBUG { @conf };
+            map { print $wc $_, "\n" } @conf;
 
             $self->{tls_started} = 1 if $opt{starttls};
           };
@@ -1011,8 +1069,45 @@ sub have_stunnel
   local $_ = <$fh>;
   close ($fh);
 
-  $stunnel_fips_enabled     = $_ && /SSL:\S*FIPS[ ,]/;
+  $stunnel_fips_enabled     = $_ && /(?:SSL|TLS):\S*FIPS[ ,]/;
   $have_stunnel_cacheresult = $_ && /Global options:/;
+}
+
+sub hostaddrs
+{
+  return (defined &getaddrinfo
+          ? ha_getaddrinfo   (@_)
+          : ha_gethostbyname (@_));
+}
+
+sub ha_gethostbyname
+{
+  return ::_error ("Cannot obtain ipv6 addresses without getaddrinfo")
+    if ($opt{addrfamily} == AF_INET6);
+
+  my ($name, $aliases, $addrtype, $length, @addrs ) = gethostbyname ($_[0]);
+
+  return unless @addrs;
+  map { $_ = inet_ntoa ($_) } @addrs;
+  return ($name, @addrs);
+}
+
+sub ha_getaddrinfo
+{
+  my $hints = { family   => $opt{addrfamily},
+                socktype => SOCK_STREAM,
+                flags    => AI_CANONNAME | AI_ADDRCONFIG,
+              };
+  my ($err, @result) = getaddrinfo ($_[0], undef, $hints);
+  return if $err;
+
+  my @addr;
+  map { my ($err, $ipaddr) = getnameinfo ($_->{addr}, NI_NUMERICHOST, NIx_NOSERV);
+        push @addr, $ipaddr unless $err;
+      } @result;
+
+  return unless @addr;
+  return ($result[0]->{canonname}, @addr);
 }
 
 
@@ -1151,19 +1246,20 @@ sub response
   my $fh = $self->{fh};
 
   local $_;
-  my ($offset, $read) = (0, 0);
+  my $offset = 0;
   $fh->blocking (0);
   while (::canread ($fh))  # Don't use timeout
     {
       # Must use sysread; don't mix buffered io with select.
-      $offset += $read
-        while $read = $fh->sysread ($_, $opt{block_size}, $offset);
+      my $read = $fh->sysread ($_, $opt{block_size}, $offset);
+      last if defined $read && $read == 0;
       last if /^$tag (?:OK|NO|BAD|PREAUTH)(?: .*|)\n/m;
+      $offset += $read;
     }
   $fh->blocking (1);
 
   ::DEBUG { {state=>1}, $_ };
-  $self->{response} = $_;
+  $self->{response} = defined $_ ? $_ : "";
 }
 
 # Amazingly cheesy recursive descent parser.
@@ -1239,6 +1335,7 @@ sub analyze_response
   # purposes.  But don't use it in other cases since that might clobber
   # more valuable untagged data (e.g. SEARCH responses).
   $response->[0]->[0] = '*' if (@$response == 1
+                                && exists $self->{imap_tag}
                                 && $response->[0]->[0] eq $self->{imap_tag});
 
   my %data;
@@ -2277,7 +2374,7 @@ sub normalize_ranges
       else                     { push @single, $beg }
     }
 
-  my @range  = sort { $a->[0] <=> $b->[0] } @range; # now needs to be sorted
+  @range  = sort { $a->[0] <=> $b->[0] } @range; # now needs to be sorted
   while (@range) # Keep merging overlapping or adjacent ranges
     {
       my @k = ($range[0]);
@@ -2475,7 +2572,7 @@ sub new
   my %spec = _parse_spec ($loc);
 
   my $proto = lc ($spec{proto});
-  my $class = $protoclass{$proto};
+  $class    = $protoclass{$proto};
 
   unless (defined $class)
     {
@@ -3151,11 +3248,12 @@ package From::Debug;
 
 use strict;
 use Carp;
-use Scalar::Util qw(reftype);
+use Scalar::Util qw(reftype refaddr);
 
 our $object_pp_indent =  0;
 our $object_pp_maxlen = 64;
 our $object_pp_verbose = 0;
+our $object_pp_maxwidth = 120;
 
 *max = \*::max; # import from main
 
@@ -3174,7 +3272,11 @@ sub object_pp
 
   my $ref     = ref $obj;
   my $reftype = reftype ($obj) || "";
-  my $refstr  = $ref eq $reftype ? "" : "$ref=";
+  my $refstr  = ($ref eq $reftype
+                 ? ""
+                 : ($object_pp_verbose > 2
+                    ? sprintf ("$ref(0x%x)=", refaddr ($obj))
+                    : "$ref="));
 
   local $object_pp_indent = $object_pp_indent + 2 + length $refstr;
   my $prefix = "\n" . (" " x $object_pp_indent) if $object_pp_verbose > 1;
@@ -3183,7 +3285,7 @@ sub object_pp
     {
       return "${refstr}[]" unless @$obj;
       my @res = map { object_pp ($_) } @$obj;
-      my $sep = ($prefix && length ("@res") > (120 - $object_pp_indent)
+      my $sep = ($prefix && length ("@res") > ($object_pp_maxwidth - $object_pp_indent)
                  ? ",$prefix "
                  : ", ");
       return "${refstr}[ " . join ($sep, @res) . " ]" if $prefix;
@@ -3226,7 +3328,7 @@ sub object_pp
       $ref =~ s/=.*//;
       return $ref;
     }
-  elsif ($obj =~ /^[+-]?[\d.]+$/)
+  elsif ($obj =~ /^[+-]?[\d.]+$/ && $obj ne '.')
     { return $obj }
    #{ return $prefix ? sprintf ("%6d", $obj) : $obj }
 
@@ -3266,7 +3368,7 @@ sub DEBUG (&;@)
 
   my @caller = caller (1);
   my $pkg = $caller[0];
-  my $fn  = $caller[3];
+  $fn     = $caller[3];
   $fn =~ s/.*:://;
 
   my $state = 0;
@@ -3320,31 +3422,39 @@ from - summarize mailbox folder
 =head1 SYNOPSIS
 
      {-h|--help|--usage}                   {-C|--columns       COLS}
-     {-D|--debug}                          {-f|--format        FMT}
-     {-W|--warnings}                       {-d|--date-format   FMT}
+     {-D|--debug}                          {-f|--format        OUTPUTFMT}
+     {-W|--warnings}                       {-d|--date-format   STRFTIME}
                                            {-T|--time-zone     TZ}
      {-c|--count-only}                     {--utc|--gmt}
      {-e|--envelope}                       {--folder-time-zone TZ}
 
-                                           {--me-match         REGEX}
-     {-p|--parse}                          {-M|--match-header  REGEX}
-     {-P|--no-parse}                       {-m|--match         REGEX}
-                                           {-s|--sender        REGEX}
-     {-u|--unread-only}                    {-i|--ignore-case}
-     {-n|--message-numbers N1,...}         {--no-ignore-case}
+     {-i|--ignore-case}                    {--utf8|--utf-8}
+     {--no-ignore-case}                    {--no-utf8|--no-utf-8}
 
-     {-1|--one-line-headers}               {-U|--utf8|--utf-8}
-     {-2|--multi-line-headers}             {--no-utf8|--no-utf-8}
-     {-a|--all-headers}
-     {-I|--interesting-headers HDRS,...}   {--user USER}
-     {-E|--extract [LINES]}                {--pass PASS} (don't use this)
+     {-1|--one-line-headers}               {-U|--user USER}
+     {-2|--multi-line-headers}             {--pass PASS} (don't use this)
+     {-a|--all-headers}                    {-u|--unread}
+     {-I|--interesting-headers HDRS,...}   {-n|--message-numbers N1,...}
+     {-E|--extract [LINES]}
+
+     {-M|--match-header  STRING}           {-p|--parse}
+     {-m|--match-text    STRING}           {-P|--no-parse}
+     {-s|--sender        STRING}
+
+     {--mmr|--match-me-regexp     REGEXP}
+     {--mhr|--match-header-regexp REGEXP}
+     {--mtr|--match-text-regexp   REGEXP}
 
      {-S|--starttls}                       {--ssl-ca-file     FILE}
      {--ssl-verify-hostname}               {--ssl-ca-path     DIR}
-     {--ssl-no-verify}                     {--stunnel-program PROGRAM}
-     {--force-stunnel}
-                                           {--batch-size      COUNT}
-     {--connect-timeout SECONDS}           {--block-size      BYTES}
+     {--ssl-no-verify}                     {--ssl-version     PROTOCOL}
+
+     {--prefer-stunnel |--no-prefer-perl-ssl}
+     {--prefer-perl-ssl|--no-prefer-stunnel}
+     {--prefer-socklib  CLASS1,...}        {--stunnel-program PROGRAM}
+
+     {--connect-timeout SECONDS}           {--batch-size      COUNT}
+                                           {--block-size      BYTES}
 
      [folder ...]
 
@@ -3626,6 +3736,15 @@ Initiate encryption after establishing plain connection but before login.
 This option has no effect if connecting via C<imaps> or C<pops>,
 which establish encryption immediately.
 
+=item B<--ssl-version>=I<SSL protocol>
+
+Use the specified version of SSL.
+The syntax for this follows that used by OpenSSL.
+Recognized names include (but may not be limited to)
+C<TLSv1.2>, C<TLSv1.1>, C<TLSv1>, C<SSLv3>, or C<SSLv2>.
+
+The default is C<TLSv1.2>.
+
 =item B<--ssl-ca-file>=I<certificate_file>
 
 Location of CA (Certificate Authority) bundle.
@@ -3652,8 +3771,9 @@ Use of this option is discouraged.
 
 =item B<--prefer-stunnel>, B<--no-prefer-perl-ssl>
 
-Prefer using the stunnel program for encryption instead of the native
-perl SSL library, if it is available.  This is the default.
+Prefer using the stunnel program for encryption instead of the native perl
+SSL library, if it is available.
+This is the default, because it's usually faster.
 
 =item B<--prefer-perl-ssl>, B<--no-prefer-stunnel>
 
@@ -3693,6 +3813,12 @@ IO::Socket::IP; supports ipv4 and ipv6.
 IO::Socket::INET; supports ipv4 only.
 
 =back
+
+=item B<-4>, B<--ipv4-only>, B<-6>, B<--ipv6-only>
+
+Use only IPv4 or IPv6 as indicated.
+By default, whichever address family is available will be chosen,
+subject to the whims and availability of the socket class used.
 
 =back
 
@@ -3735,6 +3861,9 @@ Fetch I<n> messages at a time from remote server, to reduce the number of
 round trips over the network.  A value of 0 means fetch the entire folder
 (or whatever messages were specified via the B<--message-numbers> option)
 at once.  The default is 64.
+
+Higher values may reduce round trip latency, but can also make the output
+from this program appear choppier when run interactively.
 
 =item B<--block-size>=I<n>
 
@@ -4100,6 +4229,24 @@ or
 
 =back
 
+=head1 REQUIREMENTS
+
+Optional system packages that will improve the functionality of this program:
+
+        Fedora/CentOS packages     Debian
+        ----------------------     -------------
+        perl-TimeDate              libtimedate-perl
+        perl-Time-ParseDate        libtime-parsedate-perl
+        perl-Text-CharWidth        libtext-charwidth-perl
+        perl-IO-Socket-INET6       libio-socket-inet6-perl
+        perl-IO-Socket-IP          libio-socket-ip-perl
+
+For SSL, use stunnel 4.x or later, or install:
+
+        IO::Socket::SSL            libio-socket-ssl-perl
+
+Stunnel usually seems to be faster.
+
 =head1 BUGS
 
 Only plaintext authentication schemes are currently supported.
@@ -4118,7 +4265,7 @@ POP3 support is relatively primitive.  This isn't likely to change, since
 this protocol is very primitive itself.
 
 The C<IO::Socket::IP> class does not implement connection timeouts as of
-perl v5.14.  I don't know why.
+perl v5.14, but does seem to as of v5.20.
 
 =head1 SEE ALSO
 
@@ -4127,6 +4274,10 @@ stunnel(8)
 =head1 AUTHOR
 
 Noah Friedman <friedman@splode.com>
+
+=head1 COPYRIGHT
+
+This program is donated to the public domain.
 
 =head1 ACKNOWLEDGEMENTS
 
