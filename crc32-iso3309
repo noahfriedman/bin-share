@@ -15,7 +15,8 @@
 use strict;
 use warnings qw(all);
 
-my @tbl = make_crc_table();
+my @tbl     = make_crc_table();
+my $bufsize = 2**20;  # 1MiB
 
 sub make_crc_table
 {
@@ -59,11 +60,11 @@ sub print_crc_table
     }
 }
 
-sub xcat
+sub xopen
 {
-  open (my $fh, $_[0]) || return;
-  local $/ = undef;
-  scalar <$fh>;
+  if (open (my $fh, $_[0])) { return $fh }
+  print STDERR "open: $_[0]: $!\n";
+  return;
 }
 
 sub main
@@ -77,15 +78,13 @@ sub main
   for my $file (@_)
     {
       next if -d $file;
-
-      my $data = xcat ($file);
-      unless (defined $data)
+      my $fh = xopen ($file) || next;
+      my $crc = 0;
+      while (sysread ($fh, my $buf, $bufsize))
         {
-          print STDERR "open: $file: $!\n";
-          next;
+          $crc = crc32 ($crc, $buf);
         }
-
-      printf "%08x  %s\n", crc32 (0, $data), $file;
+      printf "%08x  %s\n", $crc, $file;
     }
 }
 
