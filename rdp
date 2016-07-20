@@ -4,7 +4,7 @@
 # Created: 2005-08-10
 # Public domain
 
-# $Id: rdp,v 1.8 2012/06/15 00:30:58 friedman Exp $
+# $Id: rdp,v 1.9 2012/07/30 05:07:08 friedman Exp $
 
 # Commentary:
 
@@ -71,9 +71,12 @@ run_rdesktop()
 {
   case $1 in
     -fs ) shift
-          set fnord -T notitle "$@"
+          set : -T notitle "$@"
           shift ;;
   esac
+
+  rhost=$1
+  shift
 
   ${RDP_PROG-rdesktop} \
       -n ${RDP_CLIENT-$client} \
@@ -81,32 +84,42 @@ run_rdesktop()
       -u ${RDP_USER-${LOGNAME-$USER}} \
       -a ${RDP_DEPTH-$depth} \
       -K -P -z \
-      ${1+"$@"} &
+      "$@" \
+      $rhost &
 }
 
 run_xfreerdp()
 {
   case $1 in
-    -fs ) shift
-          set fnord -f "$@"
-          shift ;;
+      -fs ) shift
+            set : "$@" /size:$display_geom -decorations
+            shift ;;
+      *   ) size=/size:${RDP_GEOM-$geom} ;;
   esac
 
+  rhost=$1
+  shift
+
+  set -x
   ${RDP_PROG-xfreerdp} \
-      -n ${RDP_CLIENT-$client} \
-      -g ${RDP_GEOM-$geom} \
-      -u ${RDP_USER-${LOGNAME-$USER}} \
-      -a ${RDP_DEPTH-$depth} \
-      -z \
-      --plugin cliprdr \
-      --plugin rdpsnd \
-      ${1+"$@"} &
+      /client-hostname:${RDP_CLIENT-$client} \
+      $size \
+      /u:${RDP_USER-${LOGNAME-$USER}} \
+      /bpp:${RDP_DEPTH-$depth} \
+      /compression-level:1 \
+      /clipboard \
+      -grab-keyboard \
+      /sound:sys:pulse \
+      /cert-ignore \
+      -sec:rdp \
+      /v:$rhost \
+      "$@" &
 }
 
 main()
 {
   setup "$@"
-  case ${RDP_PROG-rdesktop} in
+  case ${RDP_PROG-freerdp} in
     *rdesktop* ) run_rdesktop "$@" ;;
     *freerdp*  ) run_xfreerdp "$@" ;;
   esac
