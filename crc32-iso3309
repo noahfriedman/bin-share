@@ -6,42 +6,45 @@
 
 # Commentary:
 
-# The CRC computed here also matches that specified in RFC1952, ("GZIP file
-# format specification version 4.3"), which refers to the algorithm
-# specified in ISO3309 and section 8.1.1.6.2 of ITU-T recommendation V.42.
+# The 32-bit CRC computed here is specified in several places, including:
+#
+#	* ISO 3309 ("High-Level Data Link Control")
+#	* Section 8.1.1.6.2 of ITU-T V.42
+#	* RFC 1952 ("GZIP file format specification version 4.3")
+#	* Used in Info-Zip and PK-zip
+#
+# The corresponding 16-bit CRC is just the lower half of the 32-bit CRC.
+
+# This CRC differs from the one specified by POSIX.
+
+# Runtime is completely cpu-dominated for any input larger than a few k.
+# Even though unpack is the fastest way to convert a string to an array of
+# ordinals in pure perl, it's not that fast.  However the actual crc
+# computation is even more expensive than that.  Any implementation in C
+# would wipe the floor with this thing.
 
 # Code:
 
 use strict;
 use warnings qw(all);
 
-my @tbl     = make_crc_table();
-my $bufsize = 2**20;  # 1MiB
+my @tbl      = make_crc_table();
+my $bufsize  = 32768;        # large i/o uses more memory & not faster
+my $exitstat = 0;
+my $progname;
 
 sub make_crc_table
 {
-  no integer;  # use insigned
-
-  my @tbl;
-  for (my $n = 0; $n < 256; $n++)
-    {
-      my $c = $n;
-      for (my $k = 0; $k < 8; $k++)
-        {
-          if ($c & 1)
-            { $c = 0xedb88320 ^ ($c >> 1) }
-          else
-            { $c = $c >> 1 }
-        }
-      push @tbl, $c;
-    }
-  return @tbl;
+  no integer;                # force unsigned
+  map { for my $k (0 .. 7)   # k unused, just need to iter
+          { $_ = ($_ & 1) ? 0xedb88320 ^ ($_ >> 1) : $_ >> 1 }
+        $_
+      } (0 .. 255);
 }
 
 sub crc32
 {
-  no integer; # use unsigned
-
+  no integer;
   my $c = $_[0] ^ 0xffffffff;
   map { $c = $tbl[($c ^ $_) & 0xff] ^ ($c >> 8) } unpack ("C*", $_[1]);
   return $c ^ 0xffffffff;
@@ -49,13 +52,9 @@ sub crc32
 
 sub print_crc_table
 {
-  @_ = @tbl unless @_;
-
-  my $fmt = "0x%08x,";
-  printf "$fmt\n", shift;
-  for (my $i = 1; @_ > 0; $i++)
+  for (my $i = 0; $i < @tbl; $i++)
     {
-      printf $fmt, shift;
+      printf "0x%08x,", $tbl[$i];
       print((($i % 5) == 0) ? "\n" : " ");
     }
 }
@@ -63,7 +62,10 @@ sub print_crc_table
 sub xopen
 {
   if (open (my $fh, $_[0])) { return $fh }
-  print STDERR "open: $_[0]: $!\n";
+
+  ($progname = $0) =~ s=.*/== unless defined $progname;
+  $exitstat = 1;
+  print STDERR "$progname: $_[0]: $!\n";
   return;
 }
 
@@ -84,8 +86,13 @@ sub main
         {
           $crc = crc32 ($crc, $buf);
         }
-      printf "%08x  %s\n", $crc, $file;
+      if (@_ == 1)
+        { printf "%08x\n", $crc }
+      else
+        { printf "%08x  %s\n", $crc, $file }
     }
+
+  exit ($exitstat);
 }
 
 main (@ARGV);
