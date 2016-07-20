@@ -42,7 +42,7 @@ sub crc32
   no integer; # use unsigned
 
   my $c = $_[0] ^ 0xffffffff;
-  map { $c = $tbl[($c ^ ord($_)) & 0xff] ^ ($c >> 8) } split (//, $_[1]);
+  map { $c = $tbl[($c ^ $_) & 0xff] ^ ($c >> 8) } unpack ("C*", $_[1]);
   return $c ^ 0xffffffff;
 }
 
