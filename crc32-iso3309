@@ -1,0 +1,94 @@
+#!/usr/bin/env perl
+# crc32-iso3309 --- Compute CRC32 of files as defined by ISO3309
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2016-07-19
+# Public domain
+
+# Commentary:
+
+# The CRC computed here also matches that specified in RFC1952, ("GZIP file
+# format specification version 4.3"), which refers to the algorithm
+# specified in ISO3309 and section 8.1.1.6.2 of ITU-T recommendation V.42.
+
+# Code:
+
+use strict;
+use warnings qw(all);
+
+my @tbl = make_crc_table();
+
+sub make_crc_table
+{
+  no integer;  # use insigned
+
+  my @tbl;
+  for (my $n = 0; $n < 256; $n++)
+    {
+      my $c = $n;
+      for (my $k = 0; $k < 8; $k++)
+        {
+          if ($c & 1)
+            { $c = 0xedb88320 ^ ($c >> 1) }
+          else
+            { $c = $c >> 1 }
+        }
+      push @tbl, $c;
+    }
+  return @tbl;
+}
+
+sub crc32
+{
+  no integer; # use unsigned
+
+  my $c = $_[0] ^ 0xffffffff;
+  map { $c = $tbl[($c ^ ord($_)) & 0xff] ^ ($c >> 8) } split (//, $_[1]);
+  return $c ^ 0xffffffff;
+}
+
+sub print_crc_table
+{
+  @_ = @tbl unless @_;
+
+  my $fmt = "0x%08x,";
+  printf "$fmt\n", shift;
+  for (my $i = 1; @_ > 0; $i++)
+    {
+      printf $fmt, shift;
+      print((($i % 5) == 0) ? "\n" : " ");
+    }
+}
+
+sub xcat
+{
+  open (my $fh, $_[0]) || return;
+  local $/ = undef;
+  scalar <$fh>;
+}
+
+sub main
+{
+  if (@_ == 1 && $_[0] eq '--table')
+    { # for debugging or curiosity
+      print_crc_table();
+      return;
+    }
+
+  for my $file (@_)
+    {
+      next if -d $file;
+
+      my $data = xcat ($file);
+      unless (defined $data)
+        {
+          print STDERR "open: $file: $!\n";
+          next;
+        }
+
+      printf "%08x  %s\n", crc32 (0, $data), $file;
+    }
+}
+
+main (@ARGV);
+
+# eof
