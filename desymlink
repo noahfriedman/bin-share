@@ -1,211 +1,64 @@
-#! /bin/sh
+#!/usr/bin/env perl
 # desymlink --- replace symlinks with copy of file pointed to
-
-# Copyright (C) 1995, 1998, 2000 Noah S. Friedman
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1995-09-23
+# Public domain
 
-# $Id: desymlink,v 1.8 2000/01/17 18:30:28 friedman Exp $
-
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2, or (at your option)
-# any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, you can either send email to this
-# program's maintainer or write to: The Free Software Foundation,
-# Inc.; 51 Franklin Street, Fifth Floor; Boston, MA 02110-1301, USA.
+# $Id: desymlink,v 1.9 2005/10/02 18:38:43 friedman Exp $
 
 # Commentary:
-
-# This script replaces symlinks with the files they point to.
-# It purposely traverses symlinks to find the canonical file so that it may
-# resolve more deeply than some operating systems normally do.
-
 # Code:
 
-exec ${PERL-perl} -Sx $0 ${1+"$@"}
-#!perl		  [perl will skip all lines in this file before this line]
+use strict;
+use warnings qw(all);
+
+use FindBin;
+use lib "$FindBin::Bin/../lib/perl";
+use lib "$ENV{HOME}/lib/perl";
 
 use Getopt::Long;
-use POSIX;
-use Fcntl;
-use Symbol;
+use Pod::Usage;
 
-# Args: basename, default-directory
-#
-# Convert basename to absolute, and canonicalize it.  Second arg
-# default-directory is directory to start with if basename is relative
-# (does not start with slash); if default-directory is undefined, the
-# current working directory is used.  File name components that are `.' are
-# removed, and so are file name components followed by `..', along with the
-# `..' itself; note that these simplifications are done without checking
-# that the file name actually exists in the file system.
-sub expand_file_name ($;$)
-{
-  my ($basename, $defaultdir) = @_;
-  local $_ = $basename;
-  $_ = join ('/', ($defaultdir || getcwd ()), $_) unless (m|^/|o);
+use NF::FileUtil qw(:name :file :symlink);
 
-  # These substitutions must be done in loops to handle overlapping `/'
-  # characters in adjacent patterns.
-  s|/\./|/|o         while (m|/\./|o);
-  s|//|/|o           while (m|//|o);
-  s|/[^/]+/\.\./|/|o while (m|/[^/]+/\.\./|o);
-  s|/[^/]+/\.\.$||o;
-  s|/.$||go;
-  # Eliminate leading `..'.
-  # It may be harmful to do it if the filesystem interprets `/..' as
-  # something not equivalent to `/'.
-  #s|^/\.\./|/|o     while (m|^/\.\./|o);
+(my $progname = $0) =~ s|.*/||;
+my %opt;
 
-  return $_;
-}
-
-sub dereference_links ($)
-{
-  my $file = shift;
-  my @p = split (m|/|, $file);
-  my $link_count = 0;
-  for (my $j = 0; $j <= $#p; $j++)
-    {
-      my $k = join ("/", @p[0 .. $j]);
-      my $orig_component = $k;
-      while (my $l = readlink ($k))
-        {
-          $k = $l;
-          # Simple way of detecting symlink loops (it unfortunately causes
-          # the system to give up when there are simply too many levels,
-          # even if resolution would eventually occur).  This parameter is
-          # adjustable, of course.  Most unix kernels allow a depth of 8.
-          return errmsg ($file, "Too many levels of symbolic links")
-            if ($link_count++ == 64);
-        }
-      next if ($k eq $orig_component);
-      if (substr ($k, 0, 1) eq "/")
-        {
-          # Absolute link.  Trash $p[0]-$p[$j+1] and replace with readlinked
-          # path components.  Set $j to -1 so that next iteration of loop
-          # will check array @p from start.
-          splice (@p, 0, $j + 1, split (m|/|, $k));
-          $j = -1;
-        }
-      else
-        {
-          # Insert partial (relative) path component into array in place of
-          # current element $p[$j]
-          splice (@p, $j, 1, split (m|/|, $k));
-          $j--;
-        }
-    }
-  join ("/", @p);
-}
-
-sub copy_file ($$;$)
-{
-  my ($from, $to, $preserve) = @_;
-  my $fh_from = gensym;
-  my $fh_to   = gensym;
-
-  verbose ("Copying $from -> $to");
-
-  sysopen ($fh_from, $from, O_RDONLY) || return errmsg ("open", $from, $!);
-  if (!(unlink ($to)
-        && sysopen ($fh_to, $to, O_WRONLY | O_CREAT | O_EXCL | O_TRUNC, 0600)))
-    {
-      close ($fh_from);
-      return errmsg ((-l $to ? "unlink" : "open"), $to, $!);
-    };
-
-  my $data;
-  while (my $len = sysread ($fh_from, $data, 2**20)) # 1mb buffer
-    {
-      if (syswrite ($fh_to, $data, $len) != $len)
-        {
-          errmsg ("write", $to, $!);
-          close ($fh_from);
-          close ($fh_to);
-          return undef;
-        }
-    }
-
-  my @fromstat = stat ($fh_from);
-  my @tostat   = stat ($fh_to);
-  close ($fh_from);
-  close ($fh_to);
-
-  # Always carry over permissions.
-  errmsg (sprintf ("chmod(%o)", $fromstat[2]), $to, $!)
-    unless (chmod ($fromstat[2], $to));
-
-  if ($preserve)
-    {
-      # Restore atime and mtime if possible
-      utime $fromstat[8], $fromstat[9], $to;
-      # Attempt to preserve owner/group, if possible.
-      chown $fromstat[4], $fromstat[5], $to;
-    }
-  return 1;
-}
-
-sub link_file ($$;$)
-{
-  my ($from, $to) = @_;
-  verbose ("Linking $from -> $to");
-  unlink ($to)      || return errmsg ("unlink", "$to", $!);
-  link ($from, $to) || return errmsg ("link", "$from -> $to", $!);
-}
-
-sub errmsg (;@)
+sub errmsg
 {
   print STDERR join (": ", $progname, @_), "\n";
-  return undef;
+  return;
 }
 
-sub verbose (;@)
+sub parse_options
 {
-  print join (": ", $progname, @_), "\n" if ($verbose);
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help = -1;
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev));
+
+  my $succ = $parser->getoptions
+    ("h|help|usage+"  => \$help,
+
+     "l|link"         => \$opt{hardlink},
+     "p|preserve"     => \$opt{preserve},
+     "v|verbose+"     => \$opt{verbose},
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)     unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
+
+  $NF::FileUtil::errors_fatal = 1;
+  $NF::FileUtil::verbose      = $opt{verbose};
 }
 
-sub parse_options ()
+sub main
 {
-  $progname = $0;
-  $progname =~ s|.*/||;
+  parse_options (\@_);
 
-  $hardlink = 0;
-  $preserve = 0;
-  $verbose = 0;
-
-  Getopt::Long::config ('bundling', 'autoabbrev');
-  GetOptions ("l|link",     \$hardlink,
-              "p|preserve", \$preserve,
-              "v|verbose",  \$verbose,
-              "h|help",     \&usage);
-}
-
-sub usage ()
-{
-  print "Usage: $progname {options} [symlinks]\n
-Options are:
--D, --debug                  Turn on debugging.
--h, --help                   You're looking at it.
--l, --link                   Create a hard link to original file; don't copy.
--p, --preserve               Preserve owner, timestamps on copied files.
--v, --verbose                Be verbose.\n";
-  exit (1);
-}
-
-sub main ()
-{
-  parse_options ();
-  for my $to (@ARGV)
+  for my $to (@_)
     {
       if (! -l $to)
         {
@@ -213,14 +66,19 @@ sub main ()
           errmsg ($to, $msg);
           next;
         }
-      my $from = expand_file_name (dereference_links ($to));
-      print "from=$from\n";
+
+      my $from = dereference_symlinks ($to);
       if (-f $from)
         {
-          link_file ($from, $to)            if     ($hardlink);
-          copy_file ($from, $to, $preserve) unless ($hardlink);
+          if ($opt{hardlink})
+            { xlink ($from, $to) }
+          else
+            {
+              xunlink ($to);
+              copy_file ($from, $to, $opt{preserve}, 0);
+            }
         }
-      eval
+      else
         {
           -e $from || return errmsg ($to, "Link does not point to an existing file");
           -f $from || return errmsg ($to, "Link does not point to a regular file");
@@ -228,11 +86,21 @@ sub main ()
     }
 }
 
-main ();
+main (@ARGV);
 
-# local variables:
-# mode: perl
-# eval: (auto-fill-mode 1)
-# end:
+__END__
 
-# symlink-resolve ends here
+=head1 NAME
+
+desymlink - replace symlinks with copy of file pointed to
+
+=head1 SYNOPSIS
+
+ desymlink {options} [symlinks ...]
+
+ -h, --help                   You're looking at it.
+ -l, --link                   Create a hard link to original file; don't copy.
+ -p, --preserve               Preserve owner, timestamps on copied files.
+ -v, --verbose                Be verbose.
+
+=cut
