@@ -4,7 +4,7 @@
 # Created: 1996-01-15
 # Public domain
 
-# $Id: untar,v 1.33 2014/12/12 02:29:12 friedman Exp $
+# $Id: untar,v 1.34 2015/11/24 08:12:39 friedman Exp $
 
 # Commentary:
 
@@ -132,6 +132,15 @@ extract()
 
         *initramfs*.img | *initrd*.img | *ramdisk.img )
             extract_initrd "$file" ;;
+
+        *.iso )
+            xorriso -for_backup \
+                    -indev "$file" \
+                    -osirrox on:auto_chmod_on \
+                    -chmod_r u+rw / -- \
+                    -extract / .  \
+                    -rollback_end
+            ;;
     esac
 }
 
