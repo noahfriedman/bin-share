@@ -5,7 +5,7 @@
 # Created: 1992-01-19
 # Public domain
 
-# $Id: from,v 1.95 2016/05/12 04:17:58 friedman Exp $
+# $Id: from,v 1.96 2016/07/08 08:35:24 friedman Exp $
 
 # Commentary:
 # Code:
@@ -549,6 +549,7 @@ sub output_columns
           for my $ph (map { $_ . ".ph"
                           } (qw(sys/ioctl sys/termios sys/ttycom ttold)))
             {
+              local $@;  # save and restore prior exception
               eval { require "$ph" };
               last if defined &TIOCGWINSZ;
             }
@@ -1096,13 +1097,13 @@ sub ha_getaddrinfo
 {
   my $hints = { family   => $opt{addrfamily},
                 socktype => SOCK_STREAM,
-                flags    => AI_CANONNAME | AI_ADDRCONFIG,
+                flags    => &AI_CANONNAME | &AI_ADDRCONFIG,
               };
   my ($err, @result) = getaddrinfo ($_[0], undef, $hints);
   return if $err;
 
   my @addr;
-  map { my ($err, $ipaddr) = getnameinfo ($_->{addr}, NI_NUMERICHOST, NIx_NOSERV);
+  map { my ($err, $ipaddr) = getnameinfo ($_->{addr}, &NI_NUMERICHOST, &NIx_NOSERV);
         push @addr, $ipaddr unless $err;
       } @result;
 
