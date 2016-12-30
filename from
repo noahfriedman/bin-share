@@ -5,19 +5,19 @@
 # Created: 1992-01-19
 # Public domain
 
-# $Id: from,v 1.97 2016/11/04 17:31:06 friedman Exp $
+# $Id: from,v 1.98 2016/12/06 21:40:38 friedman Exp $
 
 # Commentary:
 # Code:
 
-use 5.8.0;  # Not tested with anything older.  YMMV.
+use 5.10.0;  # Not tested with anything older.  YMMV.
 use strict;
 use Carp;
 use Getopt::Long;
 use Pod::Usage;
 use Socket;
 
-our $version = "3.2.1";
+our $version = "3.3.0";
 
 our @optional_modules
   = qw( Date::Parse
@@ -96,19 +96,22 @@ sub parse_options
      'block-size=i'              =>      \$opt{block_size},
 
      '1|one-line-headers'        =>      \$opt{onelinep},
-     '2|multi-line-headers'      => sub { $opt{onelinep}      = 0 },
-     'a|all-headers'             => sub { $opt{all_headers}   = 1;
-                                          $opt{onelinep}      = 0 },
-     'I|interesting-headers=s@'  =>       $opt{interesting}, # arrayref
+     '2|multi-line-headers'      => sub { $opt{onelinep}     = 0 },
+     'a|all-headers'             => sub { $opt{all_headers}  = 1;
+                                          $opt{onelinep}     = 0 },
+     'I|interesting-headers=s@'  =>       $opt{interesting},  # arrayref
 
-     'E|extract:-1'              => sub { $opt{extractp}  = 1;
-                                          $opt{bodylines} = $_[1] },
+     'E|extract:-1'              => sub { $opt{extractp}     = 1;
+                                          $opt{bodylines}    = $_[1] },
+
+     'if|imap-folders'           => sub { $opt{imap_list}    = 'f' },
+     'is|imap-subscriptions'     => sub { $opt{imap_list}    = 's' },
 
      'C|columns=i'               =>      \$opt{columns},
-     'f|format=s'                => sub { $opt{format}      = interpolate ($_[1]) },
-     'd|date-format:s'           => sub { $opt{date_format} = interpolate ($_[1]) },
+     'f|format=s'                => sub { $opt{format}       = interpolate ($_[1]) },
+     'd|date-format:s'           => sub { $opt{date_format}  = interpolate ($_[1]) },
      'T|time-zone|tz=s'          =>      \$opt{tzdate},
-     'utc|gmt'                   => sub { $opt{tzdate}      = 'UTC' },
+     'utc|gmt'                   => sub { $opt{tzdate}       = 'UTC' },
      'folder-time-zone=s'        =>      \$opt{folder_time_zone},
 
      'i|ignore-case!'            =>      \$opt{ignore_case},
@@ -119,7 +122,7 @@ sub parse_options
      'M|match-header=s@'         =>       $opt{match_header}, # arrayref
      'm|match-text=s'            =>      \$opt{match_text},
      's|sender=s'                => sub { $opt{match_header} = [qw(From Sender)];
-                                          $opt{match_text}    = $_[1] },
+                                          $opt{match_text}   = $_[1] },
 
      # don't autovivify SSL_options values; wrap them in a delayed eval thunk
      'ssl-ca-file=s'             => sub { $SSL_options{SSL_ca_file} = $_[1] },
@@ -281,6 +284,12 @@ sub main
       unless ($mbox)
         {
           $exitstat = 1;
+          next;
+        }
+
+      if ($opt{imap_list} && ref($mbox) =~ /imap/i)
+        {
+          print_imap_list ($mbox);
           next;
         }
 
@@ -468,6 +477,26 @@ sub print_message_summary
     }
   print $s;
 }
+
+sub print_imap_list
+{
+  my $mbox = shift;
+
+  my $method = $opt{imap_list} eq 's' ? 'lsub' : 'list';
+  my $list = $mbox->$method ('', '*');
+  return unless $list;
+
+  (my $uri = $mbox->{uri}) =~ s=:\*\@=@=; # strip out any blanked out password
+  my $url = substr ($uri, 0, length ($uri) - length ($mbox->{path}));
+
+  for my $elt (@$list)
+    {
+      my $flag = $elt->[2];
+      next if $flag->{'\Noselect'};
+      printf "%s%s\n", $url, $elt->[1];
+    }
+}
+
 
 # This is an optimization for IMAP folders to reduce the amount of
 # bandwidth needed for header retrieval.  Other protocols either don't
@@ -1279,7 +1308,7 @@ sub parse_response
       my $beg = $pos - length ($1);
       my $s = $1;
 
-      if ($s eq '"') { push @list, $1 if /(.*?)"/g }
+      if ($s eq '"') { push @list, $1 if /(.*?)(?<!\\)(?>\\\\)*"/g }
       elsif ($s eq '[')
         {
           my $text = $1 if /(.*?)]/g;
@@ -1360,13 +1389,18 @@ sub analyze_response
                       }
                   }
               }
-            elsif ($_[1] eq 'SEARCH')
+            elsif ($_[1] =~ /^(CAPABILITY|SEARCH)$/)
               {
                 splice (@_, 0, 2);
-                $data{SEARCH} = \@_;
+                $data{$1} = \@_;
               }
             elsif ($_[1] =~ /^(?:FLAGS|NO|BAD)$/)
               { $data{$_[1]} = $_[2] }
+            elsif ($_[1] =~ /^(LIST|LSUB)$/)
+              {
+                my %flag = map { $_ => 1 } @{$_[2]};
+                push @{$data{$1}}, [$_[3], $_[4], \%flag];
+              }
             elsif (@_ == 3 && $_[1] =~ /^\d+$/)
               { $data{$_[2]} = $_[1] }
             else
@@ -1486,10 +1520,10 @@ sub analyze_message
     {
       my %h = map { uc ($_) => undef } (@$wanted, q(RETURN-PATH));
       $headers = sprintf ("BODY.PEEK[HEADER.FIELDS (%s)]",
-                          join (" ", map { "\"$_\"" } keys %h));
+                          join (" ", $self->quote (keys %h)));
     }
 
-  my $cmd = sprintf ("FETCH %s (RFC822.SIZE INTERNALDATE FLAGS %s)",
+  my $cmd = sprintf ("FETCH %s (RFC822.SIZE INTERNALDATE ENVELOPE FLAGS %s)",
                      $range, $headers);
   return unless $self->command_ok_p ($cmd);
 
@@ -1500,6 +1534,24 @@ sub analyze_message
     }
 
   return $fdata->{$msgno};
+}
+
+sub list
+{
+  my ($self, $prefix, $pattern) = @_;
+  return unless $self->command_ok_p ("LIST", $self->quote ($prefix, $pattern));
+  my $res = $self->analyze_response;
+  return unless $res;
+  return $res->{LIST};
+}
+
+sub lsub
+{
+  my ($self, $prefix, $pattern) = @_;
+  return unless $self->command_ok_p ("LSUB", $self->quote ($prefix, $pattern));
+  my $res = $self->analyze_response;
+  return unless $res;
+  return $res->{LSUB};
 }
 
 sub login
@@ -1535,7 +1587,7 @@ sub message_count
   $self->{folder} = $_[0] if @_;
   my $folder = $self->{folder};
 
-  return unless $self->command_ok_p ("EXAMINE", "$folder");
+  return unless $self->command_ok_p ("EXAMINE", $self->quote ($folder));
   my $data = $self->analyze_response;
   $self->{folder_metadata} = $data;
 
@@ -1581,14 +1633,33 @@ sub envelope
   my $data = $self->analyze_message ($msgno);
   return unless $data;
 
-  my $rawdate = $data->{INTERNALDATE} || return;
-  my $headers = $data->{HEADER}       || return;
-  # Return-Path usually matches the original SMTP envelope address.
-  my $addr = $1 if $headers =~ /^Return-Path:\s+<(.*?)>/m;
+  # Envelope data elements:
+  #	0 = Date	5 = To
+  #	1 = Subject	6 = Cc
+  #	2 = From	7 = Bcc
+  #	3 = Sender	8 = In-Reply-To
+  #	4 = Reply-To	9 = Message-Id
+  #
+  # Address element structure:
+  # 	0 = personal name
+  #	1 = [SMTP] at-domain-list (source route),
+  #	2 = mailbox (user) name
+  #	3 = host name
+  my $e = $data->{ENVELOPE}->[3]->[0];
+  my $addr;
+  if ($e->[2] && $e->[3])
+    { ($addr = join ("@", $e->[2], $e->[3])) =~ s/[<>]//g }
+  elsif ($e->[0] =~ /<(.*?)>/)
+    { $addr = $1 }
+  elsif ($data->{HEADER} =~ /^Return-Path:\s+<(.*?)>/m)
+    # Return-Path usually matches the original SMTP envelope address.
+    { $addr = 1 }
+  else
+    { $addr = "unknown" }
 
   local $opt{date_format} = "%a %b %e %H:%M:%S %Y";
   local $opt{tzdate}      = 'local';
-  my $date = From::Header::_parse_date ($rawdate);
+  my $date = From::Header::_parse_date ($data->{INTERNALDATE});
 
   my @data = ($addr, $date);
   return wantarray ? @data : \@data;
@@ -1632,7 +1703,7 @@ sub body
 
       while (my ($n, $elt) = each %$resp)
         {
-          $fdata->{$n}->{TEXT} = $elt->{TEXT};
+          $fdata->{$n}->{TEXT} = $elt->{TEXT} . "\n";
         }
     }
   else
@@ -1703,6 +1774,15 @@ sub uncache_message
 {
   my ($self, $msgno) = @_;
   delete $self->{folder_data}->{$msgno};
+}
+
+sub quote
+{
+  my $self = shift;
+  map { my $s = $_;  # make copy
+        $s =~ s/(?<!\\)(?>\\\\)*"/\\"/g;
+        '"' . $s . '"';
+      } @_;
 }
 
 
@@ -2898,10 +2978,10 @@ sub _parse_address
   ::DEBUG { $_ };
 
   $_ = $1
-    if (   m/\((.*?)\)/       # From: foobar@host (real name)
-        || m/"(.*?)"/         # From: "real name" <foobar@host>
-        || m/"".*?<(.*?)>/    # From: "" <foobar@host>
+    if (   m/"(.+?)"/         # From: "real name" <foobar@host>
         || m/^(.+?)</         # From: real name <foobar@host>
+        || m/\((.*?)\)/       # From: foobar@host (real name)
+        || m/"".*?<(.*?)>/    # From: "" <foobar@host>
         || m/^<(.*?)>/);      # From: <foobar@host>
 
   # Address is 'To <user@domain>' as generated by fromto,
@@ -3446,8 +3526,8 @@ from - summarize mailbox folder
      {-m|--match-text    STRING}           {-P|--no-parse}
      {-s|--sender        STRING}
 
-     {--mmr|--match-me-regexp     REGEXP}
-     {--mhr|--match-header-regexp REGEXP}
+     {--mmr|--match-me-regexp     REGEXP}  {--imap-folders}
+     {--mhr|--match-header-regexp REGEXP}  {--imap-subscriptions}
      {--mtr|--match-text-regexp   REGEXP}
 
      {-S|--starttls}                       {--ssl-ca-file     FILE}
@@ -3537,7 +3617,8 @@ Display them as delivered.
 
 Use I<FMT> as the output format.
 See the section L</"OUTPUT FORMAT"> for details.
-The default is S<"%-3{FMSGNO} %-20.20{FROMTO}  %-0.32Date  %Subject\n">
+
+The default is S<< C<"%-3{FMSGNO} %-20.20{FROMTO}  %-0.32Date  %Subject\n"> >>
 
 =item B<-d>, B<--date-format>=I<FMT>
 
@@ -3713,6 +3794,23 @@ Make searches case-sensitive.  This is the default.
 
 Header names are always case-insensitive per RFC2822, so this does not
 affect B<--match-header-regexp> or B<--match-header>.
+
+=item B<--if>, B<--imap-folders>
+
+Instead of printing a summary of the specified folders, print a list of all
+the IMAP folders available to the user on the server.  For each folder, a
+complete URI based on the current connection parameters is presented.
+
+This option has no effect for non-IMAP folders and is mutually exclusive
+with B<--imap-subscriptions>.
+
+=item B<--is>, B<--imap-subscriptions>
+
+Like B<--imap-folders>, but only print the folder URIs to which the user is
+subscribed.
+
+This option has no effect for non-IMAP folders and is mutually exclusive
+with B<--imap-folders>.
 
 =back
 
@@ -4256,8 +4354,12 @@ Stunnel usually seems to be faster.
 
 Only plaintext authentication schemes are currently supported.
 
+No integration with any password managers.
+
 Search support is fairly primitive; you cannot build boolean
 queries with different patterns for different headers.
+
+The pseudoheaders ({ENVDATE}, etc) do not work with IMAP search queries.
 
 No option for threaded display of summaries.
 
