@@ -1,0 +1,14 @@
+#!/bin/sh
+# $Id$
+
+# Useful output formats: -o [text|ps|links|html|dump]
+# -d disable content
+
+# Many websites block requests made by lwp-request with default user agent
+user_agent="Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0"
+
+exec lwp-request -m GET -uUsSeE \
+     -H "User-Agent: $user_agent" \
+     "$@"
+
+# eof
