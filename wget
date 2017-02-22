@@ -1,12 +1,13 @@
 #!/bin/sh
 
-# $Id: wget,v 1.10 2015/09/30 18:14:50 friedman Exp $
+# $Id: wget,v 1.11 2016/07/06 02:12:30 friedman Exp $
 
 wget=`run-next -p "$0" || echo :`
 
 # Many websites block wget based on user agent.  So fabricate a different one.
 #user_agent='Mozilla/5.0 (Windows; U; Windows NT 5.2; en-US; rv:1.8.1) Gecko/20061010 Firefox/2.0'
-user_agent="Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.0.10) Gecko/2009042708 Firefox/3.0.10"
+#user_agent="Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.0.10) Gecko/2009042708 Firefox/3.0.10"
+user_agent="Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0"
 
 cookies=$HOME/etc/misc/.wget/cookies.txt
 
