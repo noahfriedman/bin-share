@@ -1,0 +1,93 @@
+#!/usr/bin/env perl
+# askpass --- prompt for passphrase on stderr, echo result to stdout
+# Author: Noah Friedman <friedman@splode.com>
+# Public domain
+
+# $Id$
+
+# Commentary:
+
+# Work in progress.  Doesn't do the actual assuan backend yet.
+
+# Code:
+
+use strict;
+use Getopt::Long;
+use POSIX;
+
+$^W = 1;  # enable warnings
+
+sub input_noecho
+{
+  my ($prompt) = @_;
+  my $tty;
+  my $c_lflag;
+  my %trap_sigs = ( HUP  =>  1,
+                    INT  =>  2,
+                    QUIT =>  3,
+                    TERM => 15);
+  my %sig_orig;
+  my $fd = fileno (STDIN);
+
+  my $interactivep = -t $fd;
+
+  # If stdin is a tty, disable echo while reading password.
+  if ($interactivep)
+    {
+      $tty = POSIX::Termios->new;
+      $tty->getattr ($fd);
+      $c_lflag = $tty->getlflag;
+
+      # Set up handlers to restore tty on typical signals
+      my $restore = sub {
+        $tty->setlflag ($c_lflag);
+        $tty->setattr ($fd);
+        my $signum = $trap_sigs{$_[0]};
+
+        (my $p = $0) =~ s=.*/==;
+        print STDERR "\n$p: Aborting on signal $signum (SIG$_[0])\n";
+        # 7th bit set indicates lower 6 bits represent a
+        # signal number (0x80 == 2**7)
+        exit (0x80 | $signum);
+      };
+      map { $sig_orig{$_} = $SIG{$_} || 'DEFAULT';
+            $SIG{$_} = $restore
+          } keys %trap_sigs;
+
+      $tty->setlflag ($c_lflag & ~&POSIX::ECHO);
+      $tty->setattr ($fd);
+    }
+
+  # Temporarily disable buffering on stderr, which is where prompt is printed.
+  my $fh_orig = select (STDERR);
+  my $stderr_bufp = $|;
+  $| = 1;
+  $prompt = "Password:" unless defined $prompt;
+  print $prompt;
+  my $input = <STDIN>;
+  chomp $input if defined $input;
+  $| = $stderr_bufp;
+  select ($fh_orig);
+
+  # Restore echo afterward, if it was originally on;
+  # and restore signal handlers
+  print STDERR "\n" if $interactivep;
+  if ($tty)
+    {
+      $tty->setlflag ($c_lflag);
+      $tty->setattr ($fd);
+      map { $SIG{$_} = $sig_orig{$_} } keys %trap_sigs;
+    }
+
+  return $input;
+}
+
+sub main
+{
+  my $pass = input_noecho ($_[0] || "Password:");
+  print $pass, "\n";
+}
+
+main (@ARGV);
+
+# askpass ends here
