@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.41 2016/08/07 02:52:06 friedman Exp $
+# $Id: rpm-pkg-list,v 1.42 2016/12/09 02:52:42 friedman Exp $
 
 # Commentary:
 # Code:
@@ -496,6 +496,7 @@ e74f0522	rpmfusion-free-el5
 5568bbb2	rpmfusion-nonfree-el6
 ab194290	rpmfusion-nonfree-el5
 
+f4a80eb5	centos-7
 c105b9de	centos-6
 e8562897	centos-5
 443e1821	centos-4
