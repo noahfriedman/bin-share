@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: stty-canon,v 1.5 2016/07/18 05:46:51 friedman Exp $
+# $Id: stty-canon,v 1.6 2017/06/07 00:04:13 friedman Exp $
 # Public domain.
 
 #stty_canon()
@@ -20,16 +20,15 @@
         *     ) stty cs8 -istrip -iexten -parenb ;;
     esac
 
-    case ${INSIDE_EMACS-$EMACS}:$TERM in
-        *:xterm* )
+    case ${INSIDE_EMACS+t}:${EMACS+t}:$TERM in
+        *:*:xterm* )
             stty erase '^?'
             stty opost 2> /dev/null ;;
-        *:emacs* )
-            stty -icrnl -inlcr -onlcr -echo ;;
-        *:eterm* ) # M-x term, M-x ansi-term
+
+        *:*:eterm* ) # M-x term, M-x ansi-term
             stty -icrnl -inlcr  onlcr  echo ;;
-         :* ) : ;;
-        *:* )
+
+        *:*:emacs* | t:*:* | *:t:* )
             stty -icrnl -inlcr -onlcr -echo ;;
     esac
 
