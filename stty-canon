@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: stty-canon,v 1.4 2016/07/03 21:10:01 friedman Exp $
+# $Id: stty-canon,v 1.5 2016/07/18 05:46:51 friedman Exp $
 # Public domain.
 
 #stty_canon()
@@ -26,9 +26,11 @@
             stty opost 2> /dev/null ;;
         *:emacs* )
             stty -icrnl -inlcr -onlcr -echo ;;
+        *:eterm* ) # M-x term, M-x ansi-term
+            stty -icrnl -inlcr  onlcr  echo ;;
          :* ) : ;;
         *:* )
-             stty -icrnl -inlcr -onlcr -echo ;;
+            stty -icrnl -inlcr -onlcr -echo ;;
     esac
 
     case $# in
