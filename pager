@@ -1,71 +1,72 @@
 #!/bin/sh
-# $Id$
+# $Id: pager,v 1.1 2006/08/14 00:10:03 friedman Exp $
 
 # args: var, prog
 find_pager()
 {
-  for p in $pathlist; do
-    if [ -f "$p/$2" ] && [ -x "$p/$2" ]; then
-      eval $1="'$p/$2'"
-      return 0
-    fi
-  done
-  return 1
+    for p in $pathlist; do
+        if [ -f "$p/$2" ] && [ -x "$p/$2" ]; then
+            eval $1="'$p/$2'"
+            return 0
+        fi
+    done
+    return 1
 }
 
 setv()
 {
-  _var=$1
-  shift
-  eval "$_var"="'$*'"
+    _var=$1
+    shift
+    eval "$_var"="'$*'"
 }
 
 ###
 
 setenv_less()
 {
-  setv LESS -adefFgiqRsX -j4 -z-4 -h10 --no-keypad -m \
-            "-Pm--Less--?pB(%pB\%).%t$" \
-            "-PM--Less--?pB(%pB\%  P=%dB/%D  L=%lB/%L  B=%bB/%B).%t$"
-  LESSHISTFILE=-
-  export LESS LESSHISTFILE
+    setv LESS -adefFgiqRsX -j4 -z-4 -h10 --no-keypad -m \
+         "-Pm--Less--?pB(%pB\%).%t$" \
+         "-PM--Less--?pB(%pB\%  P=%dB/%D  L=%lB/%L  B=%bB/%B).%t$"
+    LESSHISTFILE=-
+    export LESS LESSHISTFILE
 }
 
 setenv_more()
 {
-  MORE=-s
-  export MORE
+    MORE=-s
+    export MORE
 }
 
 setenv_most()
 {
-  MOST_SWITCHES=-Cs
-  export MOST_SWITCHES
+    MOST_SWITCHES=-Cs
+    export MOST_SWITCHES
 }
 
 ###
 
 main()
 {
-  case $TERM:$EMACS in
-    *:t | emacs:* | EMACS:* ) exec cat ${1+"$@"} ;;
-  esac
+    case ${INSIDE_EMACS+t}:${EMACS+t}:$TERM in
+        *:*:eterm* ) : ;;
+        *:*:emacs* | t:*:* | *:t:* ) exec ${CAT-cat} "$@" ;;
+    esac
 
-  pathlist=`IFS=:; echo $PATH`
+    pathlist=`IFS=:; echo $PATH`
 
-  case ${PAGER_PROG+isset} in
-    isset ) "setenv_$PAGER_PROG" 2> /dev/null
-            exec "$PAGER_PROG" ${1+"$@"} ;;
-  esac
+    case ${PAGER_PROG+isset} in
+        isset ) "setenv_$PAGER_PROG" 2> /dev/null
+                exec "$PAGER_PROG" "$@" ;;
+    esac
 
-  for pg in less more most cat; do
-    if find_pager pager $pg ; then
-      setenv_$pg
-      exec "$pager" ${1+"$@"}
-    fi
-  done
+    for pg in less more most cat; do
+        if find_pager pager $pg ; then
+            setenv_$pg 2> /dev/null
+            exec "$pager" "$@"
+        fi
+    done
 }
 
-main ${1+"$@"}
+main "$@"
 
 # eof
