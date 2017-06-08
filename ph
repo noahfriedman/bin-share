@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: ph,v 1.4 2013/04/09 00:55:55 friedman Exp $
+# $Id: ph,v 1.5 2015/10/15 18:01:17 friedman Exp $
 
 use Net::LDAP;
 use Getopt::Long;
@@ -13,11 +13,11 @@ use strict;
 
 $^W = 1;
 
-my %opt =
-  ( host    => "ldap",
-    scope   => 'sub',
-    onerror => 'die',
-  );
+our %opt = ( host    => "ldap",
+             scope   => 'sub',
+             onerror => 'die',
+             verify  => 'none',
+           );
 
 # Display ldap attributes with optional different label.
 # This also controls the order in which fields are displayed.
@@ -194,6 +194,10 @@ sub result_print
 sub parse_options
 {
   local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+
+  # Precedence for defs (highest->lowest): options, rc file, default
+  my $rc = $ENV{MLDAPSEARCHRC} || "$ENV{HOME}/.mldapsearchrc";
+  do $rc if -f $rc;
 
   my $parser = Getopt::Long::Parser->new;
   $parser->configure (qw(bundling autoabbrev));
