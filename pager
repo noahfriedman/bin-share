@@ -1,5 +1,5 @@
 #!/bin/sh
-# $Id: pager,v 1.1 2006/08/14 00:10:03 friedman Exp $
+# $Id: pager,v 1.2 2017/06/07 00:43:13 friedman Exp $
 
 # args: var, prog
 find_pager()
@@ -47,9 +47,9 @@ setenv_most()
 
 main()
 {
-    case ${INSIDE_EMACS+t}:${EMACS+t}:$TERM in
-        *:*:eterm* ) : ;;
-        *:*:emacs* | t:*:* | *:t:* ) exec ${CAT-cat} "$@" ;;
+    case ${INSIDE_EMACS+t}${EMACS+t}:$TERM in
+        *:eterm* ) : ;;
+        t*:* | *:emacs* ) ${CAT-cat} "$@" ;;
     esac
 
     pathlist=`IFS=:; echo $PATH`
