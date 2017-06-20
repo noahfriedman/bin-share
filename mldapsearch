@@ -5,20 +5,30 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.4 2015/12/09 21:09:36 friedman Exp $
+# $Id: mldapsearch,v 1.5 2017/06/08 18:48:17 friedman Exp $
 
 use strict;
 use warnings qw(all);
+
+use FindBin;
+use lib "$FindBin::Bin/../../lib/perl";
+use lib "$ENV{HOME}/lib/perl";
+
+use NF::PrintObject qw(:all);
+$object_pp_verbose = 2; # multi-line
+$object_pp_maxlen  = 0; # unlimited
 
 use Net::LDAP;
 use Net::LDAP::LDIF;
 use Getopt::Long;
 
-our %opt = ( host    => 'ldap',
-             scope   => 'sub',
-             onerror => 'die',
-             verify  => 'none',
-             exclude => [],
+our %opt = ( host      => 'ldap',
+             scope     => 'sub',  # base, one|single, sub|subtree, children
+             onerror   => undef,  # undef, die, warn
+             verify    => 'none',
+             exclude   => [],
+             metaquery => '',
+             deref     => 'never',  # never, search, find, always
            );
 
 sub parse_options
@@ -33,6 +43,9 @@ sub parse_options
   $parser->configure (qw(bundling autoabbrev));
   my $succ = $parser->getoptions
     ( "debug:i"                => \$opt{debug},
+      "dump-result"            => sub { $opt{dump}++ },
+
+      "a|deref-aliases=s"      => \$opt{deref},
       "b|root|base=s"          => \$opt{base},
       "h|host=s",              => \$opt{host},
       "D|bind=s",              => \$opt{bind},
@@ -41,15 +54,22 @@ sub parse_options
       "s|scope=s",             => \$opt{scope},
       "P|cert=s"               => \$opt{cafile},
 
+      "n|sizelimit=i"          => \$opt{sizelimit},
       "E|exclude-attribute=s@" => \$opt{exclude},
       "wrap=i"                 => \$opt{wrap},
       "lowercase|lcase"        => \$opt{lcase},
       "sort"                   => \$opt{sort},
+      "types-only"             => \$opt{typesonly},
+
+      "root-dse" => sub { $opt{metaquery} = 'rootdse' },
+      "schema"   => sub { $opt{metaquery} = 'schema' },
     );
 
   $opt{debug} = 1 if defined $opt{debug} && $opt{debug} == 0;
   if ($opt{debug})
     {
+      $^W = 1;
+
       my $n = 0;
       map { $n = ($n << 1) | $_ } split //, $opt{debug};
       $opt{debug} = $n;
@@ -62,7 +82,15 @@ sub parse_options
 # than one, use hostname's fqdn to guess most likely relevant one.
 sub baseDN
 {
-  my @nc = $_[0]->root_dse->get_value ("namingContexts");
+  my $ldap = shift;
+  my $root_dse = get_root_dse ($ldap);
+
+  # Try these first.  Active Directory specific?
+  map { my @nc = $root_dse->get_value ($_);
+        return $nc[0] if @nc;
+      } (qw(defaultNamingContext rootDomainNamingContext));
+
+  my @nc = $root_dse->get_value ("namingContexts");
   map { return $_ unless lc $_ eq "o=netscaperoot" } @nc if @nc <= 2;
 
   use POSIX qw(uname);
@@ -104,35 +132,108 @@ sub LDIF
   return $buffer;
 }
 
+sub get_root_dse
+{
+  my $ldap = shift;
+
+  return $ldap->{m_rootdse} if defined $ldap->{m_rootdse};
+
+  # Load root dse, including operational attributes.
+  # Some servers support a '+' glob to return OAs, but others (like redhat
+  # directory server) require them to be enumerated explicitly.
+  @_ = (qw(* +
+           altServer
+           namingContexts
+           subschemaSubentry
+           supportedControl
+           supportedExtension
+           supportedFeatures
+           supportedLDAPVersion
+           supportedSASLMechanisms
+           vendorName
+           vendorVersion))
+    unless @_;
+
+  $ldap->{m_rootdse} = $ldap->root_dse (attrs => \@_);
+}
+
+sub do_search
+{
+  my ($ldap, $opt_override) = (shift, {});
+  $opt_override = shift if @_ && ref ($_[0]) eq 'HASH';
+  my %parm = (%opt, %$opt_override);
+
+  @_ = (qw( (objectClass=*) * + )) unless @_;
+  $_[0] = sprintf ("uid=%s", $_[0]) if @_ && $_[0] !~ /=/;
+  my (@srch, @attr);
+  map { my $array = /=/ ? \@srch : \@attr;
+        push @$array, $_
+      } @_;
+
+  # Some non-compliant servers really dislike '(|(foo=bar))' if there is
+  # only one subexpression.
+  my @exprs = map { /^\(/ ? $_ : "($_)" } @srch;
+  $parm{filter} = @exprs > 1 ? sprintf ("(|%s)", join ("", @exprs)) : $exprs[0] ;
+
+  $parm{attrs} = \@attr if @attr;
+  $parm{base} = baseDN ($ldap) unless defined $parm{base};
+
+  # An example of how one might use a control
+  #use Net::LDAP::Control::ManageDsaIT;
+  #my $manage = Net::LDAP::Control::ManageDsaIT->new ( critical => 0 );
+  #push @{$parm{control}}, $manage;
+
+  my $result = $ldap->search (%parm);
+  if ($result->is_error)
+    {
+      printf(STDERR "Error: %s\n%s\n",
+             $result->error_name,
+             $result->error_text);
+      return;
+    }
+
+  return $result;
+}
+
+sub do_print
+{
+  my $result = shift;
+
+  my @lopt   = (change    => undef     );
+  push @lopt,  (sort      => 1         )  if $opt{sort};
+  push @lopt,  (wrap      => $opt{wrap})  if $opt{wrap};
+  push @lopt,  (lowercase => 1         )  if $opt{lcase};
+
+  map { my $entry = $_;
+        map { $entry->delete ($_) } @{$opt{exclude}} if $entry->can ('delete');
+        if ($opt{dump})
+          {
+            my $obj = $opt{dump} > 1 ? $entry : $entry->{attrs};
+            print object_pp ($obj), "\n";
+          }
+        else
+          { print LDIF ($entry, @lopt) }
+      } ($result->can('entries') ? $result->entries : $result);
+}
+
 sub main
 {
   parse_options (\@_);
   my $ldap = Net::LDAP->new ($opt{host}, %opt) || die "$@\n";
   $ldap->bind ($opt{bind}, %opt) if defined $opt{bind};
 
-  $_[0] = sprintf ("uid=%s", $_[0]) unless $_[0] =~ /=/;
-  my (@srch, @attr);
-  map { my $array = /=/ ? \@srch : \@attr;
-        push @$array, $_
-      } @_;
-
-  my $filter = sprintf ("(|%s)", join ("", map { /^\(/ ? $_ : "($_)" } @srch));
-  $opt{filter} = $filter;
-
-  $opt{attrs} = \@attr if @attr;
-  $opt{base} = baseDN ($ldap) unless defined $opt{base};
-
-  my @excl   = map { $_ => undef } @{$opt{exclude}};
-  my @lopt   = (change    => undef     );
-  push @lopt,  (sort      => 1         ) if $opt{sort};
-  push @lopt,  (wrap      => $opt{wrap}) if $opt{wrap};
-  push @lopt,  (lowercase => 1         ) if $opt{lcase};
-
-  my $result = $ldap->search (%opt);
-  while ($_ = $result->shift_entry)
+  if ($opt{metaquery} eq 'rootdse')
     {
-      $_->delete (@excl) if @excl;
-      print LDIF ($_, @lopt);
+      do_print (get_root_dse ($ldap, @_));
+    }
+  elsif ($opt{metaquery} eq 'schema')
+    {
+      print object_pp ($ldap->schema), "\n";
+    }
+  else
+    {
+      my $result = do_search ($ldap, @_);
+      do_print ($result) if $result;
     }
 }
 
