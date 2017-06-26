@@ -4,7 +4,7 @@
 # Created: 2015-10-04
 # Public domain
 
-# $Id: describe-ssl-cert,v 1.6 2016/06/17 19:03:38 friedman Exp $
+# $Id: describe-ssl-cert,v 1.7 2016/06/22 00:03:22 friedman Exp $
 
 $^W = 1;
 
@@ -53,12 +53,16 @@ sub bt
 
 my $alts_re = qr/(X509v3 Subject Alternative Name:\s*\n)(\s*)(.*?\n)/i;
 
+my $nameopt = $ENV{NAMEOPT} || 'RFC2253';
+my $certopt = $ENV{CERTOPT} || 'ext_parse';
+my $reqopt  = $ENV{REQOPT}  || $ENV{CERTOPT} || 'ext_parse';
+
 sub describe
 {
   my $file = shift;
   my @cmd = ($openssl, qw(x509 -noout -in), $file, @_);
 
-  local $_ = bt (@cmd, qw(-text -nameopt RFC2253 -certopt ext_parse));
+  local $_ = bt (@cmd, '-text', '-nameopt', $nameopt, '-certopt', $certopt);
   if (/$alts_re/)
     {
       my $indent = $2;
@@ -93,7 +97,7 @@ sub describe_csr
   my $file = shift;
   my @cmd = ($openssl, qw(req -noout -in), $file, @_);
 
-  local $_ = bt (@cmd, qw(-text -nameopt RFC2253 -reqopt ext_parse));
+  local $_ = bt (@cmd, '-text', '-nameopt', $nameopt, '-reqopt', $reqopt);
   if (/$alts_re/)
     {
       my $indent = $2;
