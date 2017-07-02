@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.5 2017/06/08 18:48:17 friedman Exp $
+# $Id: mldapsearch,v 1.6 2017/06/20 00:45:01 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -27,6 +27,7 @@ our %opt = ( host      => 'ldap',
              onerror   => undef,  # undef, die, warn
              verify    => 'none',
              exclude   => [],
+             oc_attrs  => [],     # only attrs from these object classes
              metaquery => '',
              deref     => 'never',  # never, search, find, always
            );
@@ -40,7 +41,7 @@ sub parse_options
   do $rc if -f $rc;
 
   my $parser = Getopt::Long::Parser->new;
-  $parser->configure (qw(bundling autoabbrev));
+  $parser->configure (qw(bundling autoabbrev no_getopt_compat));
   my $succ = $parser->getoptions
     ( "debug:i"                => \$opt{debug},
       "dump-result"            => sub { $opt{dump}++ },
@@ -56,6 +57,7 @@ sub parse_options
 
       "n|sizelimit=i"          => \$opt{sizelimit},
       "E|exclude-attribute=s@" => \$opt{exclude},
+      "O|oc|objectclass=s@"    => \$opt{oc_attrs},
       "wrap=i"                 => \$opt{wrap},
       "lowercase|lcase"        => \$opt{lcase},
       "sort"                   => \$opt{sort},
@@ -75,7 +77,8 @@ sub parse_options
       $opt{debug} = $n;
     }
 
-  $opt{exclude} = [map { split (/(?:\s*,\s*)|\s+/, $_) } @{$opt{exclude}}];
+  map { $opt{$_} = [map { split (/(?:\s*,\s*)|\s+/, $_) } @{$opt{$_}}]
+      } (qw(exclude oc_attrs));
 }
 
 # Query server to find out what directory roots are available, and if more
@@ -208,12 +211,30 @@ sub do_print
         map { $entry->delete ($_) } @{$opt{exclude}} if $entry->can ('delete');
         if ($opt{dump})
           {
-            my $obj = $opt{dump} > 1 ? $entry : $entry->{attrs};
+            my $obj = ($opt{dump} > 1
+                       ? $entry
+                       : ($entry->{attrs}
+                          ? $entry->{attrs}
+                          : $entry->{asn}->{attributes}));
             print object_pp ($obj), "\n";
           }
         else
-          { print LDIF ($entry, @lopt) }
+          { print LDIF ($entry, @lopt); }
       } ($result->can('entries') ? $result->entries : $result);
+}
+
+sub objectclass_attrs
+{
+  my $ldap = shift;
+
+  my $ocs = $ldap->schema->{oc};
+  map { my $elt = $ocs->{lc $_};
+        map { if (ref ($elt->{$_}) eq 'ARRAY')
+                { @{$elt->{$_}} }
+              else
+                { () }
+            } (qw(must may));
+      } @_;
 }
 
 sub main
@@ -232,6 +253,7 @@ sub main
     }
   else
     {
+      push @_, objectclass_attrs ($ldap, @{$opt{oc_attrs}});
       my $result = do_search ($ldap, @_);
       do_print ($result) if $result;
     }
