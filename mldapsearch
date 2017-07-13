@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.6 2017/06/20 00:45:01 friedman Exp $
+# $Id: mldapsearch,v 1.7 2017/07/02 08:33:55 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -70,8 +70,7 @@ sub parse_options
   $opt{debug} = 1 if defined $opt{debug} && $opt{debug} == 0;
   if ($opt{debug})
     {
-      $^W = 1;
-
+      #$^W = 1;
       my $n = 0;
       map { $n = ($n << 1) | $_ } split //, $opt{debug};
       $opt{debug} = $n;
@@ -227,6 +226,7 @@ sub objectclass_attrs
 {
   my $ldap = shift;
 
+  #return unless @_;
   my $ocs = $ldap->schema->{oc};
   map { my $elt = $ocs->{lc $_};
         map { if (ref ($elt->{$_}) eq 'ARRAY')
