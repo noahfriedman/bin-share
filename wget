@@ -1,6 +1,8 @@
 #!/bin/sh
+# $Id: wget,v 1.12 2017/02/22 20:19:02 friedman Exp $
 
-# $Id: wget,v 1.11 2016/07/06 02:12:30 friedman Exp $
+# This is a wrapper because a static .wgetrc file might try to use options
+# which older versions do not support.
 
 wget=`run-next -p "$0" || echo :`
 
@@ -9,7 +11,11 @@ wget=`run-next -p "$0" || echo :`
 #user_agent="Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.0.10) Gecko/2009042708 Firefox/3.0.10"
 user_agent="Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0"
 
-cookies=$HOME/etc/misc/.wget/cookies.txt
+XDG_CONFIG_HOME=${XDG_CONFIG_HOME-$HOME/.config}
+XDG_DATA_HOME=${XDG_DATA_HOME-$HOME/.local/share}
+
+cookies=$XDG_DATA_HOME/wget/cookies.txt
+   hsts=$XDG_DATA_HOME/wget/hsts.txt
 
 # Get major and minor version numbers for wget
 eval `$wget --version \
@@ -56,7 +62,10 @@ if atleast 1 7 && [ -f "$cookies" ]; then
           --load-cookies=$cookies
          "
     if [ -w "$cookies" ] && [ ! -h "$cookies" ]; then
-        opts="$opts --save-cookies=$cookies"
+        opts="$opts
+              --save-cookies=$cookies
+              --keep-session-cookies
+             "
     fi
 fi
 
@@ -77,16 +86,29 @@ if atleast 1 9; then
          #--dns-cache=off
 fi
 
-if atleast 1 13; then
-    # use the name specified by the redirection url's last component
+#if atleast 1 13; then
+#    # use the name specified by the redirection url's last component
+#    opts="$opts --trust-server-names"
+#fi
+
+if atleast 1 17; then
     opts="$opts
-          --trust-server-names
+          --hsts
+          --hsts-file=$hsts
          "
 fi
+
+conf=$XDG_CONFIG_HOME/wget/wgetrc
+case ${WGETRC+isset} in
+    isset ) : ;;
+    * ) if [ -f "$conf" ] && ! [ -f "$HOME/.wgetrc" ]; then
+            opts="$opts --config=$conf"
+        fi ;;
+esac
 
 exec $wget \
      --user-agent="$user_agent" \
      --execute 'robots = off' \
-     $opts ${1+"$@"}
+     $opts "$@"
 
 # wget ends here
