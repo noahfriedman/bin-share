@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.7 2017/07/02 08:33:55 friedman Exp $
+# $Id: mldapsearch,v 1.8 2017/07/13 22:13:21 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -31,6 +31,8 @@ our %opt = ( host      => 'ldap',
              metaquery => '',
              deref     => 'never',  # never, search, find, always
            );
+
+our @default_search_attrs = (qw(uid cn));
 
 sub parse_options
 {
@@ -166,7 +168,11 @@ sub do_search
   my %parm = (%opt, %$opt_override);
 
   @_ = (qw( (objectClass=*) * + )) unless @_;
-  $_[0] = sprintf ("uid=%s", $_[0]) if @_ && $_[0] !~ /=/;
+  if (@_ && $_[0] !~ /=/)
+    {
+      my $val = shift;
+      unshift @_, map { sprintf ("%s=%s", $_, $val) } @default_search_attrs;
+    }
   my (@srch, @attr);
   map { my $array = /=/ ? \@srch : \@attr;
         push @$array, $_
