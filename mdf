@@ -4,7 +4,7 @@
 # Created: 2001-01-11
 # Public domain.
 
-# $Id: mdf,v 1.19 2015/11/21 00:02:07 friedman Exp $
+# $Id: mdf,v 1.20 2015/11/30 01:58:57 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -270,7 +270,7 @@ sub duplicate_binds
                   {
                     if (exists $mdev{$this})
                       {
-                        $dup{$this} = undef;
+                        $dup{$this} = $_->[MI_RT];
                         last;
                       }
                     $this =~ s=/[^/]*$==;
@@ -280,7 +280,7 @@ sub duplicate_binds
           }
       } @_;
 
-  map { print STDERR "dup: $_\n" } keys %dup;
+  map { printf STDERR "dup: %s => %s\n", $_, $dup{$_} } sort keys %dup;
 
   return %dup;
 }
