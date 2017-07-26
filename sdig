@@ -1,24 +1,58 @@
 #!/bin/sh
-# $Id: sdig,v 1.2 2015/10/07 05:40:57 friedman Exp $
+# $Id: sdig,v 1.3 2015/10/26 19:50:41 friedman Exp $
+
+# DNS servers are starting to deprecate 'any' responses.  So we have to try
+# every known record type explicitly in those cases.
+#
+# Pseudo types:
+#
+# 'all' will perform an ANY query against an authoritative nameserver.
+# 'any' will use whatever default servers are in resolv.conf.
+#
+# 'mall' and 'many' will explicitly ask for every known record type, using
+# nameservers as 'all' and 'any' do, respectively.
+#
+# 'fall' and 'fany' are like 'mall' and 'many', but will search for all
+# types even if a cname record is found.  A host with a cname record
+# shouldn't have any others, but misconfigured domains might do so anyway.
+
+alltypes='
+    soa a aaaa mx ns ptr srv txt hinfo cname
+    cdnskey cds dlv dnskey ds nsec nsec3 nsec3param rrsig ta
+    caa cert ipseckey key kx openpgpkey sig sshfp tkey tlsa tsig
+    dhcid dname hip rp afsdb apl uri loc
+    avc csync dlv dname eui48 eui64 keydata l32 l64 lp nid ninfo rkey smimea talink
+    a6 gpos isdn maila mailb mb md mf mg minfo mr naptr
+    nsap nsap-ptr null nxt px rt sink spf unspec wks x25
+'
+# Unrecognized by dig: 	atma eid gid nb nbstat nimloc uid uinfo
 
 idig()
 {
-    dig +nocmd +noall +nocl +nottlid +answer -f - "$@"
+    dig +nocmd +noall +nocl +nottlid +answer +keepopen -f - "$@"
 }
 
 ns()
 {
-    ns=`echo "$1" ns +short | idig`
-    case $#:$ns in
-        1: ) set x `echo "$1" soa +authority | idig`
-             case $# in
-                 1 ) return ;;
-                 * ) ns "$2" norepeat ;;
-             esac ;;
-        2: ) return ;;
-        * ) set x $ns
-            echo $2 ;;
-    esac
+    # If the address is a cname, we won't get any ns or soa info.
+    echo "$1" ns | idig |
+        { while read key ctype ans; do
+              #echo NS: key=$key ctype=$ctype ans=$ans 1>&2
+              case $ctype in
+                  NS    ) echo $ans; return 0  ;;
+                  CNAME ) ns   $ans; return $? ;;
+              esac
+          done
+          return 1
+        } && return $?
+
+    echo "$1" soa +authority | idig |
+        while read key ctype ans; do
+            #echo SOA: key=$key ctype=$ctype ans=$ans 1>&2
+            case $ctype in
+                SOA ) ns $key; return 0 ;;
+            esac
+        done
 }
 
 # An 'any' query will only return what's already cached (if anything is),
@@ -48,7 +82,14 @@ main()
         addr=$1; shift
 
         if ip "$addr" > /dev/null ; then
-            echo $server -x "$addr"
+            options=
+            while [ $# -gt 0 ]; do
+                case $1 in
+                    +* ) options="$options $1"; shift ;;
+                    *  ) break ;;
+                esac
+            done
+            echo $server -x "$addr" $options
         elif [ $# -eq 0 ]; then
             echo $server "$addr" any
         else
@@ -65,7 +106,32 @@ main()
             for type in $types; do
                 case $type in
                     all ) adig "$addr" $options ;;
-                    *   ) echo $server "$addr" $type $options ;;
+
+                    mall | many )
+                        cname=`echo "$addr" cname | idig`
+                        if [ ".$cname" != "." ]; then
+                            # Our probe didn't honor cmdline options,
+                            # so re-query with options.
+                            echo "$addr" cname $options
+                            continue # don't look for anything else.
+                        fi
+
+                        case $type:$server in
+                            mall: ) server=@`ns "$addr"` ;;
+                        esac
+                        for t in $alltypes; do
+                            echo $server "$addr" $t $options
+                        done ;;
+
+                    fall | fany ) # force lookup, even for cnames
+                        case $type:$server in
+                            fall: ) server=@`ns "$addr"` ;;
+                        esac
+                        for t in $alltypes; do
+                            echo $server "$addr" $t $options
+                        done ;;
+
+                    * ) echo $server "$addr" $type $options ;;
                 esac
             done
         fi
