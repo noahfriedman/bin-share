@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.8 2017/07/13 22:13:21 friedman Exp $
+# $Id: mldapsearch,v 1.9 2017/07/21 23:19:49 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -30,9 +30,15 @@ our %opt = ( host      => 'ldap',
              oc_attrs  => [],     # only attrs from these object classes
              metaquery => '',
              deref     => 'never',  # never, search, find, always
+             andor     => '&',
            );
 
 our @default_search_attrs = (qw(uid cn));
+
+our %andor_map = ( '&'   => '&',   '|'  => '|',
+                   'a'   => '&',   'o'  => '|',
+                   'and' => '&',   'or' => '|',
+                 );
 
 sub parse_options
 {
@@ -64,6 +70,7 @@ sub parse_options
       "lowercase|lcase"        => \$opt{lcase},
       "sort"                   => \$opt{sort},
       "types-only"             => \$opt{typesonly},
+      "andor=s"                => \$opt{cmd_andor},
 
       "root-dse" => sub { $opt{metaquery} = 'rootdse' },
       "schema"   => sub { $opt{metaquery} = 'schema' },
@@ -76,6 +83,12 @@ sub parse_options
       my $n = 0;
       map { $n = ($n << 1) | $_ } split //, $opt{debug};
       $opt{debug} = $n;
+    }
+
+  if ($opt{cmd_andor})
+    {
+      my $key = lc $opt{cmd_andor};
+      $opt{andor} = $andor_map{$key} if exists $andor_map{$key};
     }
 
   map { $opt{$_} = [map { split (/(?:\s*,\s*)|\s+/, $_) } @{$opt{$_}}]
@@ -174,14 +187,14 @@ sub do_search
       unshift @_, map { sprintf ("%s=%s", $_, $val) } @default_search_attrs;
     }
   my (@srch, @attr);
-  map { my $array = /=/ ? \@srch : \@attr;
+  map { my $array = /[<=>~]/ ? \@srch : \@attr;
         push @$array, $_
       } @_;
 
   # Some non-compliant servers really dislike '(|(foo=bar))' if there is
   # only one subexpression.
   my @exprs = map { /^\(/ ? $_ : "($_)" } @srch;
-  $parm{filter} = @exprs > 1 ? sprintf ("(|%s)", join ("", @exprs)) : $exprs[0] ;
+  $parm{filter} = @exprs > 1 ? sprintf ("(%s%s)", $parm{andor}, join ("", @exprs)) : $exprs[0] ;
 
   $parm{attrs} = \@attr if @attr;
   $parm{base} = baseDN ($ldap) unless defined $parm{base};
