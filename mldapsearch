@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.9 2017/07/21 23:19:49 friedman Exp $
+# $Id: mldapsearch,v 1.10 2017/07/26 04:45:04 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -15,8 +15,9 @@ use lib "$FindBin::Bin/../../lib/perl";
 use lib "$ENV{HOME}/lib/perl";
 
 use NF::PrintObject qw(:all);
-$object_pp_verbose = 2; # multi-line
-$object_pp_maxlen  = 0; # unlimited
+$object_pp_verbose  =  2; # multi-line
+$object_pp_maxlen   =  0; # unlimited
+$object_pp_maxwidth = 78;
 
 use Net::LDAP;
 use Net::LDAP::LDIF;
@@ -70,13 +71,14 @@ sub parse_options
       "lowercase|lcase"        => \$opt{lcase},
       "sort"                   => \$opt{sort},
       "types-only"             => \$opt{typesonly},
-      "andor=s"                => \$opt{cmd_andor},
+      "j|andor=s"              => \$opt{cmd_andor}, # j=join
 
       "root-dse" => sub { $opt{metaquery} = 'rootdse' },
       "schema"   => sub { $opt{metaquery} = 'schema' },
     );
 
-  $opt{debug} = 1 if defined $opt{debug} && $opt{debug} == 0;
+  # Let debug=0 indicate other debug output but not Net::LDAP class diags
+  #$opt{debug} = 1 if defined $opt{debug} && $opt{debug} == 0;
   if ($opt{debug})
     {
       #$^W = 1;
@@ -184,11 +186,12 @@ sub do_search
   if (@_ && $_[0] !~ /=/)
     {
       my $val = shift;
+      $parm{andor} = '|';
       unshift @_, map { sprintf ("%s=%s", $_, $val) } @default_search_attrs;
     }
   my (@srch, @attr);
-  map { my $array = /[<=>~]/ ? \@srch : \@attr;
-        push @$array, $_
+  map { my $array = (/[<=>~]/ ? \@srch : \@attr);
+        push @$array, $_;
       } @_;
 
   # Some non-compliant servers really dislike '(|(foo=bar))' if there is
@@ -203,6 +206,18 @@ sub do_search
   #use Net::LDAP::Control::ManageDsaIT;
   #my $manage = Net::LDAP::Control::ManageDsaIT->new ( critical => 0 );
   #push @{$parm{control}}, $manage;
+
+  if (defined $parm{debug})
+    {
+      print STDERR "Search parameters:\n";
+      my %dparm = map { $_ => $parm{$_}
+                      } (qw(host bind
+                            base scope deref
+                            filter attrs exclude
+                          ));
+
+      print STDERR object_pp (\%dparm), "\n";
+    }
 
   my $result = $ldap->search (%parm);
   if ($result->is_error)
@@ -245,7 +260,7 @@ sub objectclass_attrs
 {
   my $ldap = shift;
 
-  #return unless @_;
+  return unless @_;
   my $ocs = $ldap->schema->{oc};
   map { my $elt = $ocs->{lc $_};
         map { if (ref ($elt->{$_}) eq 'ARRAY')
