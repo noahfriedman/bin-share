@@ -5,10 +5,13 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.10 2017/07/26 04:45:04 friedman Exp $
+# $Id: mldapsearch,v 1.11 2017/07/28 22:26:08 friedman Exp $
 
 use strict;
 use warnings qw(all);
+
+use Net::LDAP;
+use Getopt::Long;
 
 use FindBin;
 use lib "$FindBin::Bin/../../lib/perl";
@@ -19,10 +22,6 @@ $object_pp_verbose  =  2; # multi-line
 $object_pp_maxlen   =  0; # unlimited
 $object_pp_maxwidth = 78;
 
-use Net::LDAP;
-use Net::LDAP::LDIF;
-use Getopt::Long;
-
 our %opt = ( host      => 'ldap',
              scope     => 'sub',  # base, one|single, sub|subtree, children
              onerror   => undef,  # undef, die, warn
@@ -32,6 +31,7 @@ our %opt = ( host      => 'ldap',
              metaquery => '',
              deref     => 'never',  # never, search, find, always
              andor     => '&',
+             ldifclass => 'Net::LDAP::LDIF',
            );
 
 our @default_search_attrs = (qw(uid cn));
@@ -46,8 +46,15 @@ sub parse_options
   local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
 
   # Precedence for defs (highest->lowest): options, rc file, default
-  my $rc = $ENV{MLDAPSEARCHRC} || "$ENV{HOME}/.mldapsearchrc";
-  do $rc if -f $rc;
+  my @rc = ($ENV{MLDAPSEARCHRC},
+            (defined $ENV{XDG_CONFIG_HOME}
+             ? "$ENV{XDG_CONFIG_HOME}/mldapsearch.conf"
+             : ()),
+            "$ENV{HOME}/.mldapsearchrc");
+  # The reason for these machinations is to avoid creating a new scoping
+  # block in which the rc file is read.
+  map { (do $_, goto readrc) if defined $_ && -f $_ } @rc;
+ readrc:
 
   my $parser = Getopt::Long::Parser->new;
   $parser->configure (qw(bundling autoabbrev no_getopt_compat));
@@ -65,13 +72,15 @@ sub parse_options
       "P|cert=s"               => \$opt{cafile},
 
       "n|sizelimit=i"          => \$opt{sizelimit},
+      "wrap=i"                 => \$opt{wrap},
+      "l|lowercase|lcase"      => \$opt{lcase},
+      "sort!"                  => \$opt{sort},
+      "types-only"             => \$opt{typesonly},
+
       "E|exclude-attribute=s@" => \$opt{exclude},
       "O|oc|objectclass=s@"    => \$opt{oc_attrs},
-      "wrap=i"                 => \$opt{wrap},
-      "lowercase|lcase"        => \$opt{lcase},
-      "sort"                   => \$opt{sort},
-      "types-only"             => \$opt{typesonly},
       "j|andor=s"              => \$opt{cmd_andor}, # j=join
+      "ldifclass=s"            => \$opt{ldifclass},
 
       "root-dse" => sub { $opt{metaquery} = 'rootdse' },
       "schema"   => sub { $opt{metaquery} = 'schema' },
@@ -95,6 +104,9 @@ sub parse_options
 
   map { $opt{$_} = [map { split (/(?:\s*,\s*)|\s+/, $_) } @{$opt{$_}}]
       } (qw(exclude oc_attrs));
+
+  eval "require $opt{ldifclass}";
+  die "$@" if $@;
 }
 
 # Query server to find out what directory roots are available, and if more
@@ -146,7 +158,7 @@ sub LDIF
   my $data = shift;
 
   open (my $fh, '>', \my $buffer);
-  my $ldif = Net::LDAP::LDIF->new ($fh, 'w', @_);
+  my $ldif = $opt{ldifclass}->new ($fh, 'w', @_);
   $ldif->write_entry ($data);
   return $buffer;
 }
@@ -233,12 +245,13 @@ sub do_search
 
 sub do_print
 {
-  my $result = shift;
+  my ($result, $ldap) = (shift, shift);
 
   my @lopt   = (change    => undef     );
   push @lopt,  (sort      => 1         )  if $opt{sort};
   push @lopt,  (wrap      => $opt{wrap})  if $opt{wrap};
   push @lopt,  (lowercase => 1         )  if $opt{lcase};
+  push @lopt,  (schema => $ldap->schema)  if $ldap && $ldap->can('schema');
 
   map { my $entry = $_;
         map { $entry->delete ($_) } @{$opt{exclude}} if $entry->can ('delete');
@@ -279,7 +292,7 @@ sub main
 
   if ($opt{metaquery} eq 'rootdse')
     {
-      do_print (get_root_dse ($ldap, @_));
+      do_print (get_root_dse ($ldap, @_), $ldap);
     }
   elsif ($opt{metaquery} eq 'schema')
     {
@@ -289,7 +302,7 @@ sub main
     {
       push @_, objectclass_attrs ($ldap, @{$opt{oc_attrs}});
       my $result = do_search ($ldap, @_);
-      do_print ($result) if $result;
+      do_print ($result, $ldap) if $result;
     }
 }
 
