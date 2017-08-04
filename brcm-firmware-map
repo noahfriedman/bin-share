@@ -1,11 +1,96 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 # brcm-firmware-map -- map hex firmware files to linux hcd file names
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2016-05-21
 # Public domain
 
+# $Id$
+
+# Commentary:
+
+# Usage: brcm-firmware-map /path/to/bcbtums.inf another.inf ...
+
+# Debugging output can be enabled/dissabled per function and/or line number, e.g.
+# 	DEBUG=all,!parse:108 brcm-firmware-map ...
+#	DEBUG=bcm_devmap brcm-firmware-map ...
+#
+# Suggested conversion script:
+#
+#       #!/bin/sh
+# 	mkdir -p hcd;
+#
+# 	brcm-firmware-map "$@" |
+# 	    while read hex hcd; do
+# 	        hex2hcd -o hcd/$hcd hex/$hex &&
+# 	            touch -r hex/$hex hcd/$hcd
+# 	    done
+
+# Most recent firmware files can be found via
+# 	http://www.catalog.update.microsoft.com/Search.aspx?q=Broadcom+bluetooth
+
+# Code:
+
 use strict;
 use warnings qw(all);
+
+use Regexp::Grammars;
+
+use FindBin;
+use lib "$FindBin::Bin/../../lib/perl";
+use lib "$ENV{HOME}/lib/perl";
+
+use NF::PrintObject qw(:all);
+$object_pp_verbose  =  3;
+$object_pp_maxwidth = 80;
+
+# Assumes comments have been completely stripped
+my $ini_grammar
+  = qr{ <nocontext:> <ini>
+
+        <rule:  ini>        <[section]>*
+        <rule:  section>    \[ <name> \] <[data]>*
+
+        <token: name>        .+
+        <rule:  data>       <key> \= <val> | <val>
+        <rule:  key>        [^][\s]+
+        <rule:  val>        [^][\r\n]+
+      }mx;
+
+my %DEBUG      = _dbgmap ('DEBUG');
+my %DEBUG_STOP = _dbgmap ('DEBUG_STOP');
+sub _dbgmap { map { $_ => 1 } split (/[\s,]+/, $ENV{$_[0]} || return) }
+sub _dbgskip
+{
+  my ($p, $var) = (1, shift);
+  map { $p = 0 if $var->{$_} } @_;
+  map { $p = 1 if $var->{'!' . $_} } @_;
+  return $p;
+}
+sub _pp
+{
+  return unless @_ && %DEBUG;
+
+  my @c0 = caller(0);
+  my @c1 = caller(1);
+  (my $fn = $c1[3]) =~ s/^main:://;
+  my $lineno = $c0[2];
+  my $label = sprintf ("%s:%s", $fn, $lineno); #print STDERR "label = $label\n";
+
+  return if _dbgskip (\%DEBUG, "all", $fn, $lineno, $label);
+  if (@_ > 1)
+    {
+      my $i = 0;
+      map { print_object ("$label [$i]", $_); $i++ } @_;
+      print STDERR "\n";
+    }
+  else
+    {
+      print_object ("$label", $_[0]);
+    }
+
+  exit(1) if %DEBUG_STOP
+    && !_dbgskip (\%DEBUG_STOP, "first", "any", "all", $fn, $lineno, $label);
+}
 
 sub file_contents
 {
@@ -14,46 +99,124 @@ sub file_contents
   scalar <$fh>;
 }
 
-sub bcm_devlist
+sub parse
 {
-  my $bcm = $1 if $_[0] =~ /\[\s*Broadcom\s*\]\s*\n(.*?)\n\[/is;
-  $bcm =~ s/\s*;.*//g;
-  $bcm =~ s/^.*driverinstall.*\n//img;
-  $bcm =~ s/.*?=//g;
-  $bcm =~ s/[ \t,]+/ /g;
-  $bcm =~ s/usb.vid_([0-9a-z]+).pid_([0-9a-z]+)/$1 $2/ig;
-  $bcm =~ s/\n\n//mg;
+  my $text = file_contents (shift);
+  $text =~ s/\s*\r//g;
+  $text =~ s/\s*;.*//g;
 
-  my %dev = map { my @e = split (/\s+/, $_);
-                  $e[0] => sprintf ("%s-%s.hcd", lc ($e[1]), lc ($e[2]));
-                } split (/\n+/, $bcm);
-  return \%dev;
+  return unless $text =~ $ini_grammar;
+  _pp (\%/);
+
+  my %inf;
+  for my $section (@{$/{ini}->{section}})
+    {
+      my ($name, $data) = ($section->{name}, $section->{data});
+      if (exists $data->[0]->{key})
+        {
+          for my $elt (@$data)
+            {
+              my $key = $elt->{key};
+              my $val = $inf{$name}->{$key} ||= [];
+
+              my @new = split (/\s*,\s*/, $elt->{val}, -1);
+              _pp (@new);
+              if (@new > 1) { push @$val, \@new; }
+              else { push @$val, @new; }
+              _pp ($val);
+            }
+        }
+      else
+        {
+          $inf{$name} = [ map { my @l = split (/\s*,\s*/, $_->{val}, -1);
+                                @l > 1 ? \@l : @l;
+                              } @$data ];
+        }
+    }
+  _pp (\%inf);
+
+  return \%inf;
+}
+
+sub get
+{
+  my ($obj, $section) = (shift, shift);
+
+  my $data = $obj->{$section};
+  return unless $data;
+  _pp ($data, @_);
+  unless (@_)
+    {
+      if (ref $data eq 'HASH')
+           { return wantarray ? %$data : $data; }
+      else { return wantarray ? @$data : $data; }
+    }
+
+  my @result = (ref $data eq 'HASH'
+                ? map { @{$data->{$_}} } @_
+                : map { @{$data->[$_]} } @_);
+  _pp (@result);
+  return unless @result;
+  return wantarray ? @result : \@result;
+}
+
+sub bcm_devmap
+{
+  my $obj = shift;
+
+  my @sections = map { my $prefix = shift @$_;
+                       map { $prefix.'.'.$_ } @$_;
+                     } get ($obj, 'Manufacturer', '%MfgName%', '%MfgName64%');
+  _pp (\@sections);
+
+  my %devmap;
+  map { my $section = get ($obj, $_);
+        _pp ($_, $section);
+        for my $elt (values %$section)
+          {
+            _pp ($elt);
+            for my $row (@$elt)
+              {
+                _pp ($row);
+                my ($key, $val) = @$row;
+                $devmap{$key} = sprintf ("%s-%s.hcd", lc $1, lc $2)
+                  if $val && $val =~ /USB.VID_([\da-f]+).PID_([\da-f]+)/i;
+              }
+          }
+      } @sections;
+  _pp (\%devmap);
+  return \%devmap;
 }
 
 sub bcm_hexfile
 {
-  my $key = quotemeta ("$_[0].CopyList");
-  my $re = qr/\[\s*$key\s*\]\s*(.*?)\s*\[/is;
-
-  my $text = $1 if $_[1] =~ /$re/;
-  my @l = split (/\n+/, $text);
-
-  return $l[1];
+  my ($obj, $dev) = @_;
+  grep { /\.hex$/
+       } map { get ($obj, $_)
+             } get ($obj, "$dev.NT", "CopyFiles");
 }
 
 sub main
 {
-  my $cft = file_contents ($_[0]);
-  $cft =~ s/\r//g;
+  my @list;
+  for my $file (@_)
+    {
+      my $obj = parse ($file);
+      next unless $obj;
 
-  my $dev = bcm_devlist ($cft);
-  map { my $hf = bcm_hexfile ($_, $cft);
-        my $prefix = $1 if $hf =~ /^(.*?)_/;
-
-        printf "%s\t%s-%s\n", $hf, $prefix, $dev->{$_};
-      } keys %$dev;
+      my $devmap = bcm_devmap ($obj);
+      push @list, map
+        { my ($hf) = bcm_hexfile ($obj, $_);
+          if (defined $hf)
+            {
+              my $prefix = $1 if $hf =~ /^(.*?)_/;
+              sprintf "%s\t%s-%s\n", $hf, $prefix, $devmap->{$_};
+            }
+        } keys %$devmap;
+    }
+  print sort @list;
 }
 
-main (@ARGV || 'bcbtums-win7x86-brcm.inf');
+main (@ARGV);
 
 # eof
