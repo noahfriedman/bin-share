@@ -1,68 +1,61 @@
 #!/bin/sh
-# $Id: pager,v 1.2 2017/06/07 00:43:13 friedman Exp $
+# $Id: pager,v 1.3 2017/06/12 20:25:53 friedman Exp $
 
-# args: var, prog
-find_pager()
-{
-    for p in $pathlist; do
-        if [ -f "$p/$2" ] && [ -x "$p/$2" ]; then
-            eval $1="'$p/$2'"
-            return 0
-        fi
-    done
-    return 1
-}
+have() { type "$1" > /dev/null 2>&1; }
 
 setv()
 {
+    eval _var=\${$1+isset}
+    case $_var in isset ) return ;; esac
+
     _var=$1
     shift
-    eval "$_var"="'$*'"
+    eval   $_var="'$*'"
+    export $_var
 }
-
-###
 
 setenv_less()
 {
     setv LESS -adefFgiqRsX -j4 -z-4 -h10 --no-keypad -m \
-         "-Pm--Less--?pB(%pB\%).%t$" \
-         "-PM--Less--?pB(%pB\%  P=%dB/%D  L=%lB/%L  B=%bB/%B).%t$"
-    LESSHISTFILE=-
-    export LESS LESSHISTFILE
+         '-Pm--Less--?pB(%pB\%).%t$' \
+         '-PM--Less--?pB(%pB\%  P=%dB/%D  L=%lB/%L  B=%bB/%B).%t$'
+    setv LESSHISTFILE -
+
+    if have lesspipe.sh; then
+        setv LESSOPEN "|lesspipe.sh %s"
+    fi
 }
 
-setenv_more()
+setenv_more() { setv MORE -s; }
+setenv_most() { setv MOST_SWITCHES -Cs; }
+
+
+# lesspipe.sh has the possibly convenient property that it will
+# automatically deal with compressed files and/or archive files to show
+# their archive members.
+lesspipe_or_cat()
 {
-    MORE=-s
-    export MORE
+    if have lesspipe.sh; then
+        for f in "$@"; do
+            lesspipe.sh "$f" || ${CAT-cat} "$f"
+        done
+        exit $?
+    else
+        exec ${CAT-cat} "$@"
+    fi
 }
-
-setenv_most()
-{
-    MOST_SWITCHES=-Cs
-    export MOST_SWITCHES
-}
-
-###
 
 main()
 {
     case ${INSIDE_EMACS+t}${EMACS+t}:$TERM in
         *:eterm* ) : ;;
-        t*:* | *:emacs* ) ${CAT-cat} "$@" ;;
+        t*:* | *:emacs* ) lesspipe_or_cat "$@" ;;
     esac
 
-    pathlist=`IFS=:; echo $PATH`
-
-    case ${PAGER_PROG+isset} in
-        isset ) "setenv_$PAGER_PROG" 2> /dev/null
-                exec "$PAGER_PROG" "$@" ;;
-    esac
-
-    for pg in less more most cat; do
-        if find_pager pager $pg ; then
-            setenv_$pg 2> /dev/null
-            exec "$pager" "$@"
+    for pg in ${PAGER_PROG+"$PAGER_PROG"} less more most cat; do
+        if have "$pg"; then
+            if have "setenv_$pg"; then "setenv_$pg"; fi
+            exec "$pg" "$@"
         fi
     done
 }
