@@ -3,7 +3,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Public domain.
 
-# $Id: start-xvnc-server,v 1.7 2016/07/18 19:52:48 friedman Exp $
+# $Id: start-xvnc-server,v 1.8 2017/08/06 07:07:29 friedman Exp $
 
 # Commentary:
 # Code:
@@ -175,6 +175,10 @@ for dir in "${homedirs[@]}"; do
         break
     fi
 done
+
+case ${DISPLAY:+isset} in
+    isset ) PARENTDISPLAY=$DISPLAY; export PARENTDISPLAY ;;
+esac
 
 # The vncserver script will background itself
 set -x
