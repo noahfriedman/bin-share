@@ -4,7 +4,7 @@
 # Created: 2016-05-21
 # Public domain
 
-# $Id$
+# $Id: brcm-firmware-map,v 1.2 2017/08/04 02:30:01 noah Exp $
 
 # Commentary:
 
@@ -39,7 +39,7 @@ use FindBin;
 use lib "$FindBin::Bin/../../lib/perl";
 use lib "$ENV{HOME}/lib/perl";
 
-use NF::PrintObject qw(:all);
+use NF::PrintObject qw(debug_pp :vars);
 $object_pp_verbose  =  3;
 $object_pp_maxwidth = 80;
 
@@ -47,7 +47,7 @@ $object_pp_maxwidth = 80;
 my $ini_grammar
   = qr{ <nocontext:> <ini>
 
-        <rule:  ini>        <[section]>*
+        <rule:  ini>        <[section]>+
         <rule:  section>    \[ <name> \] <[data]>*
 
         <token: name>        .+
@@ -55,42 +55,6 @@ my $ini_grammar
         <rule:  key>        [^][\s]+
         <rule:  val>        [^][\r\n]+
       }mx;
-
-my %DEBUG      = _dbgmap ('DEBUG');
-my %DEBUG_STOP = _dbgmap ('DEBUG_STOP');
-sub _dbgmap { map { $_ => 1 } split (/[\s,]+/, $ENV{$_[0]} || return) }
-sub _dbgskip
-{
-  my ($p, $var) = (1, shift);
-  map { $p = 0 if $var->{$_} } @_;
-  map { $p = 1 if $var->{'!' . $_} } @_;
-  return $p;
-}
-sub _pp
-{
-  return unless @_ && %DEBUG;
-
-  my @c0 = caller(0);
-  my @c1 = caller(1);
-  (my $fn = $c1[3]) =~ s/^main:://;
-  my $lineno = $c0[2];
-  my $label = sprintf ("%s:%s", $fn, $lineno); #print STDERR "label = $label\n";
-
-  return if _dbgskip (\%DEBUG, "all", $fn, $lineno, $label);
-  if (@_ > 1)
-    {
-      my $i = 0;
-      map { print_object ("$label [$i]", $_); $i++ } @_;
-      print STDERR "\n";
-    }
-  else
-    {
-      print_object ("$label", $_[0]);
-    }
-
-  exit(1) if %DEBUG_STOP
-    && !_dbgskip (\%DEBUG_STOP, "first", "any", "all", $fn, $lineno, $label);
-}
 
 sub file_contents
 {
@@ -105,8 +69,8 @@ sub parse
   $text =~ s/\s*\r//g;
   $text =~ s/\s*;.*//g;
 
+  debug_pp (\%/);
   return unless $text =~ $ini_grammar;
-  _pp (\%/);
 
   my %inf;
   for my $section (@{$/{ini}->{section}})
@@ -120,10 +84,10 @@ sub parse
               my $val = $inf{$name}->{$key} ||= [];
 
               my @new = split (/\s*,\s*/, $elt->{val}, -1);
-              _pp (@new);
+              debug_pp (@new);
               if (@new > 1) { push @$val, \@new; }
               else { push @$val, @new; }
-              _pp ($val);
+              debug_pp ($val);
             }
         }
       else
@@ -133,7 +97,7 @@ sub parse
                               } @$data ];
         }
     }
-  _pp (\%inf);
+  debug_pp (\%inf);
 
   return \%inf;
 }
@@ -144,7 +108,7 @@ sub get
 
   my $data = $obj->{$section};
   return unless $data;
-  _pp ($data, @_);
+  debug_pp ($data, @_);
   unless (@_)
     {
       if (ref $data eq 'HASH')
@@ -155,7 +119,7 @@ sub get
   my @result = (ref $data eq 'HASH'
                 ? map { @{$data->{$_}} } @_
                 : map { @{$data->[$_]} } @_);
-  _pp (@result);
+  debug_pp (@result);
   return unless @result;
   return wantarray ? @result : \@result;
 }
@@ -167,24 +131,24 @@ sub bcm_devmap
   my @sections = map { my $prefix = shift @$_;
                        map { $prefix.'.'.$_ } @$_;
                      } get ($obj, 'Manufacturer', '%MfgName%', '%MfgName64%');
-  _pp (\@sections);
+  debug_pp (\@sections);
 
   my %devmap;
   map { my $section = get ($obj, $_);
-        _pp ($_, $section);
+        debug_pp ($_, $section);
         for my $elt (values %$section)
           {
-            _pp ($elt);
+            debug_pp ($elt);
             for my $row (@$elt)
               {
-                _pp ($row);
+                debug_pp ($row);
                 my ($key, $val) = @$row;
                 $devmap{$key} = sprintf ("%s-%s.hcd", lc $1, lc $2)
                   if $val && $val =~ /USB.VID_([\da-f]+).PID_([\da-f]+)/i;
               }
           }
       } @sections;
-  _pp (\%devmap);
+  debug_pp (\%devmap);
   return \%devmap;
 }
 
