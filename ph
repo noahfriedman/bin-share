@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: ph,v 1.5 2015/10/15 18:01:17 friedman Exp $
+# $Id: ph,v 1.6 2017/06/08 18:51:54 friedman Exp $
 
 use Net::LDAP;
 use Getopt::Long;
@@ -196,8 +196,15 @@ sub parse_options
   local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
 
   # Precedence for defs (highest->lowest): options, rc file, default
-  my $rc = $ENV{MLDAPSEARCHRC} || "$ENV{HOME}/.mldapsearchrc";
-  do $rc if -f $rc;
+  my @rc = ($ENV{MLDAPSEARCHRC},
+            (defined $ENV{XDG_CONFIG_HOME}
+             ? "$ENV{XDG_CONFIG_HOME}/mldapsearch.conf"
+             : ()),
+            "$ENV{HOME}/.mldapsearchrc");
+  # The reason for these machinations is to avoid creating a new scoping
+  # block in which the rc file is read.
+  map { (do $_, goto readrc) if defined $_ && -f $_ } @rc;
+ readrc:
 
   my $parser = Getopt::Long::Parser->new;
   $parser->configure (qw(bundling autoabbrev));
