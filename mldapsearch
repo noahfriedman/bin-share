@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.14 2017/08/12 00:21:32 friedman Exp $
+# $Id: mldapsearch,v 1.15 2017/08/12 01:07:05 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -489,3 +489,59 @@ changeType		dSAOperation		ApacheDS 	Type of change operation
 eventId			dSAOperation		ApacheDS 	The unique sequential id for the event (a.k.a revision number)
 committer		dSAOperation		ApacheDS 	The principal committing the change
 changeLogContext	dSAOperation		ApacheDS 	Tells about the changelog context suffix
+
+######
+# 389ds operational attributes
+# These need proper categorization
+######
+
+accountUnlockTime		-			389ds		Time before user lockout expires and user can bind again
+aci				directoryOperation	389ds		Access control
+copiedFrom			distributedOperation	389ds		Legacy; Reference to master server for non-multimaster replication
+copyingFrom			distributedOperation	389ds		Legacy; Reference to master server during replication in progress
+entryUSN			-			389ds		Update sequence number for every client write operation
+nsAccountLock			-			389ds		Whether the account is active or inactive
+
+nsBackendSuffix			-			389ds		Suffix used by the backend
+nsDS5ReplConflict		distributedOperation	389ds		Entry has unresolvable change conflict for replication
+nsIdleTimeout			-			389ds		Bind connection idle timeout in seconds
+nsLookThroughLimit		-			389ds		Max num of entries user can search per query
+nsParentUniqueId		distributedOperation	389ds		DN or entry ID for the parent of the original entry for tombstones stored in replication
+nsRole				-			389ds		Computed attribute (not stored) which identifies which roles an entry belongs
+nsRoleDn			-			389ds		DN of all roles that apply to an entry
+nsRoleFilter			-			Standard	RFC2252: Sets the filter identifies entries which belong to the role
+nsSchemaCSN			-			389ds		subschema DSE attribute type
+nsSizeLimit			-			389ds		Default size limit for a database or database link in bytes
+nsTimeLimit			-			389ds		Default search time limit for a database or database link
+nsUniqueId			-			389ds		Identifies or assigns a unique ID to a server entry
+nscpEntryDN			-			389ds		Obsolete; used to be entry DN for a tombstone entry
+nscpEntryDN			-			389ds		Orignal entry DN in a tombstone entry
+numSubordinates			-			Standard	Indicates now many immediate subordinates an entry has.
+passwordGraceUserTime		-			389ds		Number of attempts the user has made with the expired password.
+passwordRetryCount		-			389ds		number Of consecutive failed attempts at entering the correct password
+pwdpolicysubentry		-			389ds		Points to the entry DN of the new password policy
+
+glue				objectClass		389ds		Entry is resurrected due to a replication conflict
+ldapSubEntry			objectClass		Standard	Operational data
+nsTombstone			objectClass		389ds		Entries which have been deleted
+
+passwordObject			objectClass		389ds		Used for entries which store password information for a user
+accountUnlockTime		passwordObject		389ds		Time that must pass after an account lockout before the user can bind
+passwordAllowChangeTime		passwordObject		389ds		Time that must pass before users are allowed to change their passwords
+passwordExpirationTime		passwordObject		389ds		Time that passes before the user password expires
+passwordExpWarned		passwordObject		389ds		A password expiration warning has been sent to the user
+passwordGraceUserTime		passwordObject		389ds		Number of allowed login attempts after the password has expired
+passwordHistory			passwordObject		389ds		History of the user previous passwords
+passwordRetryCount		passwordObject		389ds		Number of consecutive failed attempts entering correct password
+pwdpolicysubentry		passwordObject		389ds		Entry DN of the new password policy
+retryCountResetTime		passwordObject		389ds		Time that passes before the passwordRetryCount attribute is reset
+
+nsAIMStatusGraphic		userApplications	389ds		Path to AIM user current status graphic
+nsICQStatusGraphic		userApplications	389ds		Path to ICQ user current status graphic
+nsYIMStatusGraphic		userApplications	389ds		Path to Yahoo IM user current status graphic
+
+nsAIMStatusText			userApplications	389ds		Text of AIM user current status
+nsICQStatusText			userApplications	389ds		Text of ICQ user current status
+nsYIMStatusText			userApplications	389ds		Text of Yahoo IM user current status
+
+# eof
