@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.12 2017/08/02 03:20:45 friedman Exp $
+# $Id: mldapsearch,v 1.13 2017/08/05 03:44:13 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -17,10 +17,7 @@ use FindBin;
 use lib "$FindBin::Bin/../../lib/perl";
 use lib "$ENV{HOME}/lib/perl";
 
-use NF::PrintObject qw(:all);
-$object_pp_verbose  =  2; # multi-line
-$object_pp_maxlen   =  0; # unlimited
-$object_pp_maxwidth = 78;
+use NF::PrintObject;
 
 our %opt = ( host      => 'ldap',
              scope     => 'sub',  # base, one|single, sub|subtree, children
@@ -79,6 +76,7 @@ sub parse_options
 
       "E|exclude-attribute=s@" => \$opt{exclude},
       "O|oc|objectclass=s@"    => \$opt{oc_attrs},
+      #"o|oa|operationalattr"  => \$opt{op_attrs},
       "j|andor=s"              => \$opt{cmd_andor}, # j=join
       "ldifclass=s"            => \$opt{ldifclass},
 
@@ -188,6 +186,27 @@ sub get_root_dse
   $ldap->{m_rootdse} = $ldap->root_dse (attrs => \@_);
 }
 
+# Useful schema attributes to query:
+#	objectClasses
+#	attributeTypes
+#	matchingRules
+#	matchingRuleUse
+#	dITStructureRules
+#	dITContentRules
+#	nameForms
+#	ldapSyntaxes
+#	extendedAttributeInfo
+sub do_schema_search
+{
+  my $ldap = shift;
+
+  my $root = get_root_dse ($ldap);
+  my $base = $root->get_value ('subschemaSubentry') || 'cn=schema';
+
+  do_search ($ldap, { base => $base, scope  => 'base', },
+             '(objectClass=subSchema)', @_);
+}
+
 sub do_search
 {
   my ($ldap, $opt_override) = (shift, {});
@@ -251,7 +270,10 @@ sub do_print
   push @lopt,  (sort      => 1         )  if $opt{sort};
   push @lopt,  (wrap      => $opt{wrap})  if $opt{wrap};
   push @lopt,  (lowercase => 1         )  if $opt{lcase};
-  push @lopt,  (schema => $ldap->schema)  if $ldap && $ldap->can('schema');
+
+  # The default class doesn't do anything useful with schema.
+  push @lopt,  (schema => $ldap->schema)
+    if $opt{ldifclass} ne 'Net::LDAP::LDIF' && $ldap && $ldap->can('schema');
 
   map { my $entry = $_;
         map { $entry->delete ($_) } @{$opt{exclude}} if $entry->can ('delete');
@@ -296,7 +318,15 @@ sub main
     }
   elsif ($opt{metaquery} eq 'schema')
     {
-      print object_pp ($ldap->schema), "\n";
+      if (@_)
+        {
+          my $result = do_schema_search ($ldap, @_);
+          do_print ($result, $ldap) if $result;
+        }
+      else
+        {
+          print object_pp ($ldap->schema), "\n";
+        }
     }
   else
     {
@@ -309,3 +339,152 @@ sub main
 main (@ARGV);
 
 1;
+
+__DATA__
+
+__OperationalAttributes__
+
+# Operational attributes are attributes that are used internally by the server.
+# They generally can't be modified by a user, although one can read them.
+#
+# In order to retrieve an operational attribute, you have to require it
+# explicitely, or request all of them using the special attribute '+'.
+#
+# RFC4512 defines four different flavors of AttributeType :
+#
+#     userApplications     : User attributes
+#     directoryOperation   : Server attributes
+#     dSAOperation         : Server attributes that are not meant to be distributed
+#     distributedOperation : Server attributes that are used in a distributed environment
+
+######
+# Global operational attributes
+# Operational attributes stored in the RootDSE, and global to the server.
+######
+
+# ATTRIBUTE		TYPE			CATEGORY 	DESCRIPTION
+vendorName 		dSAOperation	 	Standard 	RFC3045: name of implementation vendor
+vendorVersion		dSAOperation 		Standard 	RFC3045: version of implementation
+entryTtl		dSAOperation 		Standard 	RFC2589: entry time-to-live
+dynamicSubtrees		dSAOperation 		Standard 	RFC2589: dynamic subtrees
+supportedFeatures	dSAOperation 		Standard 	RFC3674: features supported by the server
+supportedControl	dSAOperation 		Standard 	RFC2252: supported controls
+supportedSASLMechanisms	dSAOperation 		Standard 	RFC2252: supported SASL mechanisms
+supportedLDAPVersion	dSAOperation 		Standard 	RFC2252: supported LDAP versions
+namingContexts		dSAOperation 		Standard 	RFC2252: naming contexts
+altServer		dSAOperation 		Standard 	RFC2252: alternative servers
+supportedExtension	dSAOperation 		Standard 	RFC2252: supported extended operations
+
+######
+# Entry operational attributes
+# Attributes related to an entry, carrying some additional information about it
+######
+
+# ATTRIBUTE	 	  TYPE 			CATEGORY 	DESCRIPTION
+createTimestamp		directoryOperation 	Standard 	RFC2252: time which object was created
+modifyTimestamp		directoryOperation 	Standard 	RFC2252: time which object was last modified
+creatorsName		directoryOperation 	Standard 	RFC2252: name of creator
+modifiersName		directoryOperation 	Standard 	RFC2252: name of last modifier
+hasSubordinates		directoryOperation 	Standard 	X.501: entry has children
+ref		 	distributedOperation 	Standard 	RFC3296: named reference - a labeledURI
+
+entryUUID		directoryOperation 	ApacheDS 	UUID of the entry
+entryDN			directoryOperation 	ApacheDS 	DN of the entry
+entryCSN		directoryOperation 	ApacheDS 	Change sequence number of the entry
+nbChildren		directoryOperation 	ApacheDS 	The number of children for this entry
+nbSubordinates		directoryOperation 	ApacheDS 	The number of subordinates for this entry
+entryParentId		directoryOperation 	ApacheDS 	Attribute holding the id of parent entry
+
+
+######
+# Schema-related operational attributes
+# Attributes containing the schema elements handled by the server. They are stored in the RootDSE
+######
+
+# ATTRIBUTE	 	  TYPE			CATEGORY 	DESCRIPTION
+ldapSyntaxes		directoryOperation 	Standard 	RFC2252: LDAP syntaxes
+subschemaSubentry	directoryOperation 	Standard 	RFC2252: name of controlling subschema entry
+dITStructureRules	directoryOperation 	Standard 	RFC2252: DIT structure rules
+dITContentRules		directoryOperation 	Standard 	RFC2252: DIT content rules
+matchingRules		directoryOperation 	Standard 	RFC2252: matching rules
+attributeTypes		directoryOperation 	Standard 	RFC2252: attribute types
+objectClasses		directoryOperation 	Standard 	RFC2252: object classes
+nameForms		directoryOperation 	Standard 	RFC2252: Name Forms
+matchingRuleUse		directoryOperation 	Standard 	RFC2252: matching rule uses
+structuralObjectClass	directoryOperation 	Standard 	X.500(93): structural object class of entry
+
+comparators		directoryOperation 	ApacheDS 	A multivalued comparator description attribute
+normalizers		directoryOperation 	ApacheDS 	A multivalued normalizer description attribute
+syntaxCheckers		directoryOperation 	ApacheDS 	A multivalued syntaxCheckers description attribute
+schemaModifyTimestamp	directoryOperation 	ApacheDS 	Time which schema was modified
+schemaModifiersName	directoryOperation 	ApacheDS 	The DN of the modifier of the schema
+
+subordinateCount
+
+######
+# Collective Attributes operational attributes
+######
+
+# ATTRIBUTE			TYPE			CATEGORY 	DESCRIPTION
+collectiveAttributeSubentries	directoryOperation	Standard	RFC3671: identifies all collective attribute subentries that affect the entry
+collectiveExclusions		directoryOperation	Standard 	RFC3671: allows particular collective attributes to be excluded from an entry
+
+
+######
+# Administrative Model Attributes
+######
+
+# ATTRIBUTE		TYPE			CATEGORY 	DESCRIPTION
+administrativeRole 	directoryOperation 	Standard 	RFC3672: indicate that the associated administrative area is concerned withone or more administrative roles
+subtreeSpecification 	directoryOperation 	Standard 	RFC3672: defines a collection of entries within an administrative area
+prescriptiveACI 	directoryOperation 	ApacheDS 	Access control information that applies to a set of entries
+entryACI		directoryOperation	ApacheDS	Access control information that applies to a single entry
+subentryACI		directoryOperation	ApacheDS	Access control information that applies to a single subentry
+autonomousAreaSubentry 	directoryOperation 	ApacheDS 	Used to track a subentry associated with an autonomousArea
+accessControlSubentries	directoryOperation	ApacheDS	Used to track a subentry associated with access control areas
+
+
+######
+# Replication related operational attributes
+######
+
+# ATTRIBUTE		TYPE			CATEGORY 	DESCRIPTION
+contextCSN		directoryOperation 	ApacheDS 	The largest committed CSN of a context
+entryDeleted		directoryOperation 	ApacheDS 	Whether or not an entry has been deleted. (Not anymore used)
+
+
+######
+# Index related operational attributes
+######
+
+# ATTRIBUTE		TYPE			CATEGORY 	DESCRIPTION
+apachePresence		dSAOperation		ApacheDS 	Index attribute used to track the existence of attributes
+apacheOneLevel		dSAOperation		ApacheDS 	Index attribute used to track one level searches
+apacheOneAlias		dSAOperation		ApacheDS 	Index attribute used to track single level aliases
+apacheSubAlias		dSAOperation		ApacheDS 	Index attribute used to track sub level aliases
+apacheAlias		dSAOperation		ApacheDS 	Index attribute used to track aliases
+apacheSubLevel		dSAOperation		ApacheDS 	Index attribute used to track sub level searches
+apacheRdn		dSAOperation		ApacheDS 	Index attribute RDN with values both user provided and normalized based on schema
+
+
+######
+# Trigger interceptor Model Attributes
+######
+
+# ATTRIBUTE				TYPE			CATEGORY 	DESCRIPTION
+prescriptiveTriggerSpecification	directoryOperation	ApacheDS 	Trigger specification that applies to a set of entries
+entryTriggerSpecification		directoryOperation	ApacheDS 	Trigger specification that applies to a single entry
+triggerExecutionSubentries		directoryOperation	ApacheDS 	Used to track subentries associated with a trigger area which an entry falls under
+
+######
+# ChangeLog related operational attributes
+# They are not supposed to be distributed, and they can''t be modified by a user.
+######
+
+# ATTRIBUTE		TYPE			CATEGORY 	DESCRIPTION
+revisions		dSAOperation		ApacheDS 	Revision numbers used in change log
+changeTime		dSAOperation		ApacheDS 	Represents the time when the change event occurred
+changeType		dSAOperation		ApacheDS 	Type of change operation
+eventId			dSAOperation		ApacheDS 	The unique sequential id for the event (a.k.a revision number)
+committer		dSAOperation		ApacheDS 	The principal committing the change
+changeLogContext	dSAOperation		ApacheDS 	Tells about the changelog context suffix
