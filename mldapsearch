@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.13 2017/08/05 03:44:13 friedman Exp $
+# $Id: mldapsearch,v 1.14 2017/08/12 00:21:32 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -320,6 +320,7 @@ sub main
     {
       if (@_)
         {
+          push @_, objectclass_attrs ($ldap, @{$opt{oc_attrs}});
           my $result = do_schema_search ($ldap, @_);
           do_print ($result, $ldap) if $result;
         }
