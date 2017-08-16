@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.15 2017/08/12 01:07:05 friedman Exp $
+# $Id: mldapsearch,v 1.16 2017/08/12 01:10:36 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -20,13 +20,16 @@ use lib "$ENV{HOME}/lib/perl";
 use NF::PrintObject;
 
 our %opt = ( host      => 'ldap',
+             base      => $ENV{LDAP_BASEDN},
              scope     => 'sub',  # base, one|single, sub|subtree, children
+             deref     => 'never',  # never, search, find, always
+
              onerror   => undef,  # undef, die, warn
              verify    => 'none',
+
              exclude   => [],
              oc_attrs  => [],     # only attrs from these object classes
              metaquery => '',
-             deref     => 'never',  # never, search, find, always
              andor     => '&',
              ldifclass => 'Net::LDAP::LDIF',
            );
