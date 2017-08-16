@@ -1,0 +1,19 @@
+#!/bin/sh
+# $Id$
+
+op=-f
+case $1 in
+    -- ) shift ;;
+    -? ) op=$1; shift ;;
+esac
+
+for elt in "$@"; do
+    if test "$op" "$elt"; then
+        echo "$elt"
+        exit 0
+    fi
+done
+
+exit 1
+
+# eof
