@@ -5,7 +5,7 @@
 # Created: 1992-01-19
 # Public domain
 
-# $Id: from,v 1.98 2016/12/06 21:40:38 friedman Exp $
+# $Id: from,v 1.99 2016/12/30 21:05:07 friedman Exp $
 
 # Commentary:
 # Code:
@@ -69,10 +69,21 @@ sub parse_options
   my @interesting_default
     = (qw(From To Apparently-To Cc Newsgroups Subject Date Reply-To));
 
-  # Precedence for defs (highest->lowest): options, ~/.fromrc.pl, default
-  my $fromrc = $ENV{FROMRCPL} || "$ENV{HOME}/.fromrc.pl";
-  do $fromrc if -f $fromrc;
-  _error ($fromrc, $@) if ($@ ne "" && $@ !~ /not return a true value/);
+  # Precedence for defs (highest->lowest):
+  # Try $FROMRCPL and only $FROMRCPL if defined.
+  # Otherwise search $XDG_CONFIG_HOME and $HOME for .fromrc.pl.
+  my @rc = (defined $ENV{FROMRCPL}
+            ? $ENV{FROMRCPL}
+            : map { "$ENV{$_}/.fromrc.pl"
+                  } grep { exists $ENV{$_}
+                         } (qw(XDG_CONFIG_HOME HOME)));
+  for my $fromrc (@rc)
+    {
+      next unless -f $fromrc;
+      do $fromrc;
+      _error ($fromrc, $@) if ($@ ne "" && $@ !~ /not return a true value/);
+      last;
+    }
 
   local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
 
@@ -4265,7 +4276,11 @@ you may wish to use the B<--no-parse> option to avoid any parsing
 =item I<FROMRCPL>
 
 Configuration file to load before parsing options.
-The default is C<~/.fromrc.pl>.
+
+If this variable is defined, that file and I<only> that file will be
+loaded, if it exists.
+When this variable is not defined, load the first file found in the list
+C<$XDG_CONFIG_HOME/.fromrc.pl>, C<$HOME/.fromrc.pl>.
 
 This should be a perl script which sets fields in the global C<%opt>
 variable and/or C<%SSL_options> variable.  The easiest way to figure out
