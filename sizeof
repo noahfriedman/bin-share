@@ -4,7 +4,7 @@
 # Created: 2007-03-23
 # Public domain.
 
-# $Id$
+# $Id: sizeof,v 1.1 2008/01/16 19:30:19 friedman Exp $
 
 # Commentary:
 # Code:
@@ -18,7 +18,7 @@ cat > $file.c <<__EOF__
   #include <stdio.h>
   #include <sys/types.h>
 
-  main ()
+  int main ()
   {
     printf ("%ld\n", sizeof ($*));
     return 0;
