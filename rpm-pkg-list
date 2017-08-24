@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.42 2016/12/09 02:52:42 friedman Exp $
+# $Id: rpm-pkg-list,v 1.43 2017/03/24 18:07:25 friedman Exp $
 
 # Commentary:
 # Code:
@@ -409,7 +409,8 @@ __DATA__
 ## GPG key fingerprints for RPM signatures
 ######
 
-bfb2d6e3	fedora-26
+64dab85d	fedora-26
+bfb2d6e3	fedora-26-neverused
 fdb19c98	fedora-25
 81b46521	fedora-24
 34ec9cba	fedora-23
