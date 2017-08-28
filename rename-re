@@ -5,6 +5,14 @@ no strict qw(subs);
 
 (my $progname = $0) =~ s=.*/==;
 
+sub max
+{
+  shift while @_ && !defined $_[0];
+  my $x = shift;
+  map { $x = $_ if defined $_ && $_ > $x } @_;
+  return $x;
+}
+
 sub err
 {
   printf STDERR "%s: %s\n", $progname, join (": ", @_);
@@ -19,42 +27,58 @@ sub msg
 
 sub xrename_safe
 {
-  my ($from, $to) = @_;
-  return 0 if ($from eq $to);
+  my ($file, $width) = @_;
 
-  return err ("rename", join (" -> ", $from, $to), "file already exists")
-    if (-e $to);
+  my $any_rename = 0;
+  my @w = @$width;
+  for my $fromto (@$file)
+    {
+      my ($src, $dst) = @$fromto;
+      next if $dst eq $src;
+      $any_rename = 1;
 
-  return msg (join (" -> ", $from, $to))
-    if (rename ($from, $to));
+      err ("rename", $dst, "file already exists"), next if -e $dst;
 
-  err ("rename", join (" -> ", $from, $to), $!);
+      if (rename ($src, $dst))
+        { msg (sprintf ("%-*s -> %s", $w[0], $src, $dst)) }
+      else
+        { err ("rename", $src, $!) }
+    }
+  msg ("[no files would change names]") unless $any_rename;
 }
 
 sub main
 {
-  my $actually_do_it = 0;
-  if ($_[0] eq '-y')
-    {
-      $actually_do_it = 1;
-      shift;
-    }
+  my ($actually_do_it, $verbose) = (0, 0);
+  if    ($_[0] eq '-y') { $actually_do_it = 1; shift }
+  elsif ($_[0] eq '-v') { $verbose        = 1; shift }
 
   my $re = shift;
+  #$re =~ s/;/;\n/g;
 
+  my (@f, @w);
   for my $from (@_)
     {
       local $_ = $from;
       eval "$re";
+      die "$@" if $@;
 
-      if ($actually_do_it)
-        {
-          xrename_safe ($from, $_);
-        }
-      else
-        {
-          msg ("PROPOSED", join (" -> ", $from, $_));
-        }
+      push @f, [$from, $_];
+      $w[0] = max ($w[0], length ($from));
+      $w[1] = max ($w[1], length ($_));
+    }
+
+  if ($actually_do_it) { xrename_safe (\@f, \@w) }
+  else
+    {
+      my $output = 0;
+
+      map { $_->[1] = '[no change]' if $verbose && $_->[1] eq $_->[0];
+            msg ("PROPOSED", sprintf ("%-*s -> %s", $w[0], @$_)), $output=1
+              if $verbose || $_->[0] ne $_->[1];
+          } @f;
+
+      msg ("PROPOSED", "[no files would change]") if !($verbose || $output);
     }
 }
 
