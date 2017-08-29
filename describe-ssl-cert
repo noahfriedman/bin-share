@@ -4,11 +4,13 @@
 # Created: 2015-10-04
 # Public domain
 
-# $Id: describe-ssl-cert,v 1.7 2016/06/22 00:03:22 friedman Exp $
+# $Id: describe-ssl-cert,v 1.8 2017/06/26 23:10:28 friedman Exp $
 
 $^W = 1;
 
 use strict;
+
+use Scalar::Util qw(reftype);
 
 my $openssl = $ENV{OPENSSL} || "openssl";
 
@@ -24,7 +26,9 @@ my %starttls = ( smtp => 'smtp',  25   => 'smtp',  587 => 'smtp',
 
 sub xcat
 {
-  open (my $fh, $_[0]) || die "open ro: $_[0]: $!";
+  my $fh;
+  if (ref $_[0] && reftype ($_[0]) eq 'IO'){ $fh = $_[0] }
+  else { open ($fh, $_[0]) || die "open ro: $_[0]: $!\n" }
   local $/ = undef;
   return <$fh>;
 }
@@ -187,6 +191,12 @@ sub fetch
 
 sub main
 {
+  unless (@_ || -t fileno (*STDIN{IO}))
+    {
+      write_file ($tmpfile, xcat (*STDIN{IO}));
+      push @_, $tmpfile;
+    }
+
   for my $file (@_)
     {
       # If file isn't present but arg looks like a local file name rather
