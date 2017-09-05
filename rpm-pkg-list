@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.43 2017/03/24 18:07:25 friedman Exp $
+# $Id: rpm-pkg-list,v 1.44 2017/08/24 01:14:54 friedman Exp $
 
 # Commentary:
 # Code:
@@ -517,6 +517,7 @@ e42d547b	freshrpms
 ff6382fa	kde-redhat
 a109b1ec	livna
 22b2951d	mhensler-suspend2
+be1229cf	microsoft
 f90c0e97	negativo17
 98ab5139	oracle-virtualbox
 a9464aa9	pidgin
