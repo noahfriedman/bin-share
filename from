@@ -5,7 +5,7 @@
 # Created: 1992-01-19
 # Public domain
 
-# $Id: from,v 1.99 2016/12/30 21:05:07 friedman Exp $
+# $Id: from,v 1.100 2017/08/16 01:18:06 friedman Exp $
 
 # Commentary:
 # Code:
@@ -3549,8 +3549,9 @@ from - summarize mailbox folder
      {--prefer-perl-ssl|--no-prefer-stunnel}
      {--prefer-socklib  CLASS1,...}        {--stunnel-program PROGRAM}
 
-     {--connect-timeout SECONDS}           {--batch-size      COUNT}
-                                           {--block-size      BYTES}
+     {--connect-timeout SECONDS}           {-4|--ipv4-only}
+     {--batch-size      COUNT}             {-6|--ipv6-only}
+     {--block-size      BYTES}
 
      [folder ...]
 
