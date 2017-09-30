@@ -1,0 +1,820 @@
+#!/usr/bin/env perl
+
+use 5.10.0;  # Not tested with anything older.  YMMV.
+use strict;
+use Carp;
+use Getopt::Long;
+use Pod::Usage;
+use Socket;
+
+our $version = "1.9999";
+
+our %opt;
+our %SSL_options;
+our ($SOCKLIB, $SOCKLIB_SSL);
+
+sub parse_options
+{
+  my $help = -1;
+
+  %opt =
+    ( c_timeout       => 10,
+      prefer_stunnel  => 1,
+      stunnel_prog    => $ENV{STUNNEL} || "stunnel",
+      addrfamily      => AF_UNSPEC, # use either ipv6 or ipv4
+    );
+
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev no_require_order no_ignore_case));
+
+  my $succ = $parser->getoptions
+    ('h|help|usage+'             =>      \$help,
+     'D|debug+'                  =>      \$::debug,
+     'W|warnings!'               =>      \$^W,
+
+     # don't autovivify SSL_options values; wrap them in a delayed eval thunk
+     'ssl-ca-file=s'             => sub { $SSL_options{SSL_ca_file} = $_[1] },
+     'ssl-ca-path=s'             => sub { $SSL_options{SSL_ca_path} = $_[1] },
+     'ssl-version=s'             => sub { $SSL_options{SSL_version} = $_[1] },
+
+     'S|starttls'                =>      \$opt{starttls},
+     'ssl-verify-hostname'       =>      \$opt{ssl_verify_hostname},
+     'ssl-no-verify'             =>      \$opt{ssl_no_verify},
+     'prefer-perl-ssl!'          => sub { $opt{prefer_stunnel} = ! $_[1] },
+     'prefer-stunnel!'           => sub { $opt{prefer_stunnel} = $_[1] },
+     'stunnel-program=s'         =>      \$opt{stunnel_prog},
+     'connect-timeout|timeout'   =>      \$opt{c_timeout},
+     'prefer-socklib=s'          => sub { $opt{prefer_socklib} .= $_[1] . ' '},
+     '4|ipv4-only'               => sub { $opt{addrfamily} = AF_INET  },
+     '6|ipv6-only'               => sub { $opt{addrfamily} = AF_INET6 },
+
+     'V|version',                =>      \$opt{show_version},
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)     unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
+
+  show_version() if $opt{show_version};
+}
+
+sub show_version
+{
+  print "tcpconnect ", $version, "\n";
+
+  if ($::debug)
+    {
+      $opt{need_net} = $opt{need_ssl} = 1;
+      net_init();
+      $SOCKLIB     ||= "(none loaded)";
+      $SOCKLIB_SSL ||= "(none loaded)";
+
+      printf "\nUsing %s v%vd\n", $^X, $^V;
+      print "\nSocket library:       $SOCKLIB\n";
+      print "Socket library (SSL): $SOCKLIB_SSL\n";
+    }
+  exit (0);
+}
+
+sub net_init
+{
+  @_ = (@ARGV ? @ARGV : default_spool_file()) unless @_;
+  map { $opt{need_net} = 1 if m=^(?:imap|pop3)s?://=;
+        $opt{need_ssl} = 1 if m=^(?:imap|pop3)s://=
+      } @_;
+  From::Socket::__init() if $opt{need_net} || $opt{need_ssl};
+}
+
+sub main
+{
+  parse_options (\@_);
+}
+
+sub _verbose
+{
+  return unless $^W;
+  my $msg = join (": ", $progname, @_);
+  $msg .= "\n" unless substr ($msg, -1, 1) eq "\n";
+  print STDERR $msg;
+  return;
+}
+
+sub _error
+{
+  my $msg = join (": ", $progname, "error", @_);
+  $msg .= "\n" unless substr ($msg, -1, 1) eq "\n";
+
+  if ($errors_fatal)
+    {
+      my $pkg = __PACKAGE__;
+      local $Carp::CarpInternal{$pkg} = 1; # don't show this pkg in backtrace
+      local $Carp::Verbose = $debug;
+      croak $msg;
+    }
+
+  print STDERR $msg;
+  return;
+}
+
+
+package TC::Socket;
+
+use strict;
+use Socket;
+use Symbol;
+
+my $stunnel_class = q(TC::Socket::Stunnel);
+my $ssl_class     = q(IO::Socket::SSL);
+
+our $SSL_ERROR    = ""; # Will be overridden by ssl_class if loaded.
+
+our $SSL_version_default = 'TLSv1.2'; # 2016-07-04
+
+# These only contain mappings for values that need to be adjusted.
+# If not listed here, they will be passed through as-is.
+# The keys are case-insensitive for our purposes.
+our %SSL_version_normalize
+  = ( 'TC::Socket::Stunnel' =>
+      { 'tlsv1_1' => 'TLSv1.1',  'tlsv11' => 'TLSv1.1',
+        'tlsv1_2' => 'TLSv1.2',  'tlsv12' => 'TLSv1.2',
+        'tlsv1_3' => 'TLSv1.3',  'tlsv13' => 'TLSv1.3',
+      },
+
+      'IO::Socket::SSL' =>
+      { 'tlsv1.1' => 'TLSv1_1',  'tlsv11' => 'TLSv1_1',
+        'tlsv1.2' => 'TLSv1_2',  'tlsv12' => 'TLSv1_2',
+        'tlsv1.3' => 'TLSv1_3',  'tlsv13' => 'TLSv1_3',
+      },
+    );
+
+my %socklib = ( inet6 => q(IO::Socket::INET6),      # supports ipv4, ipv6
+                inet4 => q(IO::Socket::INET),       # supports ipv4
+                inet  => q(IO::Socket::INET),       # supports ipv4
+                ip    => q(IO::Socket::IP),         # supports ipv4, ipv6
+              );
+
+sub __init
+{
+  local $errors_fatal = 1;
+
+  if ($opt{need_net})
+    {
+      $opt{prefer_socklib} ||= "inet6 ip inet"; # try ipv6-supporting first
+      unless (ref $opt{prefer_socklib})
+        {
+          my @slibs = map { $socklib{lc $_} || $_
+                          } split (/[,\s]+/, $opt{prefer_socklib});
+          $opt{prefer_socklib} = \@slibs;
+        }
+
+      for my $try (@{$opt{prefer_socklib}})
+        {
+          $SOCKLIB = $try;
+          eval "use $try";
+          last unless $@;
+        }
+    }
+
+  if ($opt{need_ssl} || $opt{starttls})
+    {
+      if ($opt{prefer_stunnel} && $stunnel_class->have_stunnel)
+        {
+          $SOCKLIB_SSL = $stunnel_class;
+        }
+      else
+        {
+          my $ssl_debug = $::debug ? "qw(:DEFAULT debug3)" : "";
+          eval "use $ssl_class $ssl_debug";
+          if ($@)
+            {
+              ::_error ("Cannot find native perl ssl library or $opt{stunnel_prog}")
+                unless $stunnel_class->have_stunnel;
+              $SOCKLIB_SSL = $stunnel_class;
+            }
+          else
+            {
+              $SOCKLIB_SSL = $ssl_class;
+            }
+        }
+    }
+}
+
+sub _connect_internal
+{
+  my $self  = shift;
+  my $class = shift;
+
+  return ::_error ($self->{uri}, "$class does not support IPv6")
+      if ($opt{addrfamily} == AF_INET6 && $class eq $socklib{inet4});
+
+  my $fh;
+  my %p = (Type    => SOCK_STREAM,
+           Domain  => $opt{addrfamily}, # ignored by IO::Socket::INET
+           Timeout => $opt{c_timeout},
+           @_);
+
+  # There is nothing elegant about this at all.
+  if ($class eq $stunnel_class)
+    {
+      my %s = $self->_ssl_args;
+      $fh = $class->new ( self => $self, %s, %p);
+    }
+  else
+    {
+      $fh = $class->new (%p);
+    }
+  unless ($fh)
+    {
+      my $errstr = $@ || $SSL_ERROR;
+      ::_error ($self->{uri}, $errstr);
+      return;
+    }
+
+  $fh->autoflush (1);
+  $fh->blocking (1);
+  return $fh;
+}
+
+sub connect
+{
+  my $self = shift;
+  my $class = ($opt{starttls} && $SOCKLIB_SSL eq $stunnel_class
+               ? $SOCKLIB_SSL
+               : $SOCKLIB);
+
+  $self->_connect_internal ($class, @_);
+}
+
+sub connect_ssl
+{
+  my $self = shift;
+  my $fh = $self->_connect_internal ($SOCKLIB_SSL, $self->_ssl_args, @_);
+  $self->{tls_started} = 1 if $fh;
+  return $fh;
+}
+
+sub starttls
+{
+  my $self = shift;
+  return 1 if $self->{tls_started};
+
+  if ($SOCKLIB_SSL->can ('start_SSL'))
+    {
+      my %sslargs = ($self->_ssl_args);
+      unless ($SOCKLIB_SSL->start_SSL ($self->{fh}, %sslargs))
+        {
+          ::_error ($self->{uri}, $SOCKLIB_SSL->errstr ());
+          $self->disconnect;
+          return 0;
+        }
+      $self->{tls_started} = 1;
+    }
+}
+
+sub mkpipe
+{
+  my @pair = $SOCKLIB->socketpair (AF_UNIX, SOCK_STREAM, PF_UNSPEC);
+  map { $_->autoflush (1) } @pair;
+  return @pair;
+}
+
+sub _ssl_args
+{
+  my $self = shift;
+
+  (my $proto = $self->{proto}) =~ s=s$==;
+
+  my %param = (SSL_version         => $SSL_version_default,
+               SSL_verify_mode     => ($opt{ssl_no_verify} ? 0 : 2|4),
+               SSL_verify_callback => sub { $self->_ssl_verifycb (@_) },
+               %SSL_options,
+              );
+
+  if ($param{SSL_version})
+    {
+      my $ver = lc $param{SSL_version};
+      $param{SSL_version} = $SSL_version_normalize{$SOCKLIB_SSL}->{$ver}
+        if defined $SSL_version_normalize{$SOCKLIB_SSL}->{$ver};
+    }
+
+  # Native SSL class in v5.18 does not permit both SSL_ca_file and
+  # SSL_ca_path to be specified.
+  # If neither is specified, prefer a ca path over a ca file.
+  unless ($SOCKLIB_SSL eq $ssl_class
+          && (defined $param{SSL_ca_file} || defined $param{SSL_ca_path}))
+    {
+      unless (defined $param{SSL_ca_file})
+        {
+          my $cafile = $self->_ssl_cafile;
+          $param{SSL_ca_file} = $cafile if $cafile;
+        }
+
+      unless (defined $param{SSL_ca_path})
+        {
+          if (defined $param{SSL_ca_file})
+            {
+              ($param{SSL_ca_path} = $param{SSL_ca_file}) =~ s=/+[^/]*$=/=;
+              delete $param{SSL_ca_file} if $SOCKLIB_SSL eq $ssl_class;
+            }
+          else
+            {
+              my @cadirs = $self->_ssl_certdirs;
+              $param{SSL_ca_path} = $cadirs[0] if @cadirs;
+            }
+        }
+    }
+  return %param;
+}
+
+sub _ssl_certdirs
+{
+  my $self = shift;
+
+  my @found;
+  map { push @found, $_ if -d $_
+      } qw(/etc/pki/tls/certs
+           /etc/ssl/certs
+           /etc/ssl );
+  return @found;
+}
+
+sub _ssl_cafile
+{
+  my $self = shift;
+
+  map { my $dir = $_;
+        map { return "$dir/$_" if -r "$dir/$_"
+            } qw(ca-bundle.crt
+                 ca-root.crt
+                 cert.pem );
+      } (@_ || $self->_ssl_certdirs);
+  return; # void
+}
+
+# Callback
+sub _ssl_verifycb
+{
+  my $self = shift;
+  my ($valid, $certstore_addr, $attrib_str, $liberrstr, $cert_addr) = @_;
+
+  return 1      if $opt{ssl_no_verify};
+  return $valid if $valid || !$opt{ssl_verify_hostname};
+
+   my $fh    = $self->{fh};
+  (my $proto = $self->{proto}) =~ s=s$==;
+
+  my $vfn = qualify_to_ref (q(verify_hostname_of_cert), ref $fh || $SOCKLIB_SSL);
+  return &{*$vfn{CODE}} ($self->{host}, $cert_addr, $proto);
+}
+
+sub spawn
+{
+  my ($self, $fnchild, $fnparent) = (shift, shift, shift);
+  my %param = @_;
+
+  local $^F = 255;
+  my ($rc, $wc) = $self->mkpipe () if $fnparent;
+  my ($rh, $wh) = $self->mkpipe ();
+
+  $SIG{CHLD} = q(IGNORE);
+  my $pid = fork;
+  unless (defined $pid)
+    {
+      ::_error ('fork', $!);
+      exit (1);
+    }
+  if ($pid) # parent
+    {
+      &$fnparent ($wc) if defined $fnparent;
+      map { close ($_) if $_ } ($rc, $wc, $wh);
+    }
+  else
+    {
+      open (STDIN,  "<&=" . fileno ($wh));
+      open (STDOUT, ">&=" . fileno ($wh));
+      map { close ($_) if $_ } ($rh, $wh, $wc);
+      &$fnchild ($rc) if defined $fnchild;
+    }
+  return $rh;
+}
+
+
+package TC::Socket::Stunnel;
+
+use strict;
+use Socket qw(:all);
+
+use base qw(TC::Socket);
+
+my $have_stunnel_cacheresult;
+my $stunnel_fips_enabled;
+
+*new = *connect; # symbol alias
+
+sub connect
+{
+  my $class = shift;
+  my %param = @_;
+  my $self = $param{self};
+
+  my $re_ipaddr = qr/^(?:[0-9.]+|[0-9a-f:]+)$/i;
+
+  my (@connect, $canon);
+  if ($opt{addrfamily} == AF_UNSPEC || $param{PeerHost} =~ /$re_ipaddr/)
+    {
+      @connect = ($param{PeerHost});
+    }
+  else
+    {
+      # We cannot control whether stunnel uses ipv4 or ipv6, if a host name
+      # has both kinds of address records.  So resolve the corresponding
+      # addresses for the specified address family and direct stunnel to
+      # connect to those instead.
+      ($canon, @connect) = hostaddrs ($param{PeerHost});
+    }
+  unless (@connect)
+    {
+      $@ = "Host not found";
+      return;
+    }
+
+  my $fnparent
+    = sub { my $wc = shift;
+            my @conf = ("foreground     = yes",
+                        "syslog         = no",
+                        "debug          = " . ($::debug ? 'debug' : 'err'),
+
+                        "client         = yes",
+                        (map { "connect        = $_:$param{PeerPort}" } @connect),
+                        "TIMEOUTconnect = $param{Timeout}",
+
+                        "ciphers        = HIGH",
+                        "sslVersion     = $param{SSL_version}",
+                       );
+            push @conf, "fips           = no"                    if $stunnel_fips_enabled;
+            push @conf, "CApath         = $param{SSL_ca_path}"   if $param{SSL_ca_path};
+            push @conf, "CAfile         = $param{SSL_ca_file}"   if $param{SSL_ca_file};
+
+            push @conf, "protocol       = $self->{proto}"
+              if ($opt{starttls} && $self->{proto} !~ /s$/);
+
+            unless ($opt{ssl_no_verify})
+              {
+                push @conf, "verify         = 2";
+                # n.b. stunnel v5.17 won't allow this option in the global
+                # section of a config.  stunnel v5.30 seems to allow it.
+                if ($opt{ssl_verify_hostname})
+                  {
+                    push @conf, "checkHost      = $canon" if defined $canon;
+                    map { push @conf, (/$re_ipaddr/
+                                       ? "checkIP        = $_"
+                                       : "checkHost      = $_")
+                        } @connect;
+                  }
+              }
+
+            map { print $wc $_, "\n" } @conf;
+
+            $self->{tls_started} = 1 if $opt{starttls};
+          };
+
+  my $fnchild = sub { exec ($opt{stunnel_prog}, "-fd", fileno ($_[0]))
+                        || die "$progname: exec $opt{stunnel}: $!\n";
+                    };
+
+  $class->spawn ($fnchild, $fnparent);
+}
+
+sub have_stunnel
+{
+  return $have_stunnel_cacheresult if defined $have_stunnel_cacheresult;
+
+  my $class = shift;
+
+  my $fnchild = sub { open (STDERR, ">&=" . fileno (STDOUT));
+                      exec ($opt{stunnel_prog}, "-version")
+                        || die "$progname: exec $opt{stunnel_prog}: $!\n";
+                    };
+
+  my $fh = $class->spawn ($fnchild);
+  local $/ = undef;
+  local $_ = <$fh>;
+  close ($fh);
+
+  $stunnel_fips_enabled     = $_ && /(?:SSL|TLS):\S*FIPS[ ,]/;
+  $have_stunnel_cacheresult = $_ && /Global options:/;
+}
+
+sub hostaddrs
+{
+  return (defined &getaddrinfo
+          ? ha_getaddrinfo   (@_)
+          : ha_gethostbyname (@_));
+}
+
+sub ha_gethostbyname
+{
+  return ::_error ("Cannot obtain ipv6 addresses without getaddrinfo")
+    if ($opt{addrfamily} == AF_INET6);
+
+  my ($name, $aliases, $addrtype, $length, @addrs ) = gethostbyname ($_[0]);
+
+  return unless @addrs;
+  map { $_ = inet_ntoa ($_) } @addrs;
+  return ($name, @addrs);
+}
+
+sub ha_getaddrinfo
+{
+  my $hints = { family   => $opt{addrfamily},
+                socktype => SOCK_STREAM,
+                flags    => &AI_CANONNAME | &AI_ADDRCONFIG,
+              };
+  my ($err, @result) = getaddrinfo ($_[0], undef, $hints);
+  return if $err;
+
+  my @addr;
+  map { my ($err, $ipaddr) = getnameinfo ($_->{addr}, &NI_NUMERICHOST, &NIx_NOSERV);
+        push @addr, $ipaddr unless $err;
+      } @result;
+
+  return unless @addr;
+  return ($result[0]->{canonname}, @addr);
+}
+
+
+package NetCmd;
+
+use strict;
+
+use base qw(TC::Socket);
+
+sub new
+{
+  my $type = shift;
+  my $class = ref ($type) || $type;
+
+  my $self = {};
+  bless $self, $class;
+
+  my %args = @_;
+  while (my ($key, $val) = each %args) { $self->{$key} = $val }
+  $self->{host} ||= "localhost";
+  return $self;
+}
+
+sub connect
+{
+  my $self = shift;
+
+  $self->disconnect;
+  my $fh = $self->SUPER::connect (PeerHost => $self->{host},
+                                  PeerPort => $self->{port},
+                                  @_);
+  return unless $fh;
+  $self->{fh} = $fh;
+}
+
+sub disconnect
+{
+  my $self = shift;
+  my $fh = $self->{fh};
+  return unless $fh;
+
+  $fh->shutdown (2); # 2 == SHUTDOWN_BOTH
+  $fh->close;
+  delete $self->{fh};
+}
+
+sub command
+{
+  my $self = shift;
+  my $fh = $self->{fh};
+  return unless $fh;
+  $fh->syswrite (join (" ", @_) . "\r\n");
+}
+
+sub response
+{
+  my $self = shift;
+  my $fh = $self->{fh};
+  my $line = <$fh>;
+  return $line;
+}
+
+::main (@ARGV);
+
+1;
+
+__END__
+
+=begin text
+
+=encoding utf8
+
+=end text
+
+=head1 NAME
+
+tcpconnect - make plaintext or ssl tcp connections
+
+=head1 SYNOPSIS
+
+     {-h|--help|--usage}                   {-4|--ipv4-only}
+     {-D|--debug}                          {-6|--ipv6-only}
+     {-W|--warnings}                       {--connect-timeout SECONDS}
+
+     {-S|--starttls}                       {--ssl-ca-file     FILE}
+     {--ssl-verify-hostname}               {--ssl-ca-path     DIR}
+     {--ssl-no-verify}                     {--ssl-version     PROTOCOL}
+
+     {--prefer-stunnel |--no-prefer-perl-ssl}
+     {--prefer-perl-ssl|--no-prefer-stunnel}
+     {--prefer-socklib  CLASS1,...}        {--stunnel-program PROGRAM}
+
+     host [port]
+
+ The -h option may be repeated up to 3 times for increased verbosity.
+
+=head1 OPTIONS
+
+Long-format options may be abbreviated as long as the result is not ambiguous.
+
+=head2 CONNECTION AND SSL OPTIONS
+
+=over 2
+
+=over 4
+
+=item B<--timeout>=I<seconds>, B<--connect-timeout>=I<seconds>    (default: 10)
+
+Abort if connection cannot be established within this many seconds.
+(See the L</"BUGS"> section for caveats about this.)
+
+=item B<-S>, B<--starttls>
+
+Initiate encryption after establishing plain connection but before login.
+This option has no effect if connecting via C<imaps> or C<pops>,
+which establish encryption immediately.
+
+=item B<--ssl-version>=I<SSL protocol>
+
+Use the specified version of SSL.
+The syntax for this follows that used by OpenSSL.
+Recognized names include (but may not be limited to)
+C<TLSv1.2>, C<TLSv1.1>, C<TLSv1>, C<SSLv3>, or C<SSLv2>.
+
+The default is C<TLSv1.2>.
+
+=item B<--ssl-ca-file>=I<certificate_file>
+
+Location of CA (Certificate Authority) bundle.
+If not specified, a few typical locations will be searched.
+
+=item B<--ssl-ca-path>=I<certificate_directory>
+
+Location of certificate files.
+If not specified, a few typical locations will be searched.
+
+=item B<--ssl-verify-hostname>
+
+If server certificate is not signed by a recognized certificate authority,
+compare the subject CN (Common Name) and matching aliases against the
+server name or address, and accept the certificate if they match.
+
+This is less secure than verification via a certificate signature chain.
+Use of this option is not recommended.
+
+=item B<--ssl-no-verify>
+
+Do no certificate verification at all; just encrypt the connection.
+Use of this option is discouraged.
+
+=item B<--prefer-stunnel>, B<--no-prefer-perl-ssl>
+
+Prefer using the stunnel program for encryption instead of the native perl
+SSL library, if it is available.
+This is the default, because it's usually faster.
+
+=item B<--prefer-perl-ssl>, B<--no-prefer-stunnel>
+
+Prefer using the native perl SSL interface (IO::Socket::SSL) instead of the
+stunnel program, if it is available.
+
+B<Note>: The perl SSL interface has been observed to be significantly
+slower than stunnel, especially for large transfers in extraction mode.
+
+=item B<--stunnel-program>=I<program_name>    (default: C<stunnel>)
+
+Name of the stunnel program to call.  This can be a fully-qualified name or
+a relative name that will be searched for in the user's PATH.
+
+=item B<--prefer-socklib>=I<classes>          (default: C<inet6, ip, inet>)
+
+Specify priority of perl classes to use for ordinary sockets.
+The first available class is used.
+This option can be specified multiple times and each argument can be a
+comma or space-separated list of classes to try loading.
+
+Class names should either be fully-qualified names or one of the following
+specially-recognized aliases:
+
+=over 2
+
+=item * B<inet6>
+
+IO::Socket::INET6; supports ipv4 and ipv6.
+
+=item * B<ip>
+
+IO::Socket::IP; supports ipv4 and ipv6.
+
+=item * B<inet4>, B<inet>
+
+IO::Socket::INET; supports ipv4 only.
+
+=back
+
+=item B<-4>, B<--ipv4-only>, B<-6>, B<--ipv6-only>
+
+Use only IPv4 or IPv6 as indicated.
+By default, whichever address family is available will be chosen,
+subject to the whims and availability of the socket class used.
+
+=back
+
+=back
+
+=head2 DEBUGGING AND DIAGNOSTIC OPTIONS
+
+=over 2
+
+=over 4
+
+=item B<-h>, B<--help>
+
+Usage information.
+May be repeated 1-3 times for more verbosity.
+
+=item B<-V>, B<--version>
+
+Display the version number of this program.
+
+Combined with the B<--debug> option, display extra information about SSL
+libraries and optional modules used.
+
+=item B<-W>, B<--warnings>
+
+Enable Perl internal warnings.
+This is mainly for debugging.
+
+=item B<-D>, B<--debug>
+
+Show protocol messages and replies, and some parsing results.  This option
+may be repeated more than once for more verbose diagnostics.
+
+B<Warning>: while passwords are elided from the output at debug level 1,
+it is possible that one may be displayed at higher debug levels.
+
+=back
+
+=back
+
+=head1 DESCRIPTION
+
+Nov shmoz ka pop?
+
+=head1 REQUIREMENTS
+
+Optional system packages that will improve the functionality of this program:
+
+        Fedora/CentOS packages     Debian
+        ----------------------     -------------
+        perl-IO-Socket-INET6       libio-socket-inet6-perl
+        perl-IO-Socket-IP          libio-socket-ip-perl
+
+For SSL, use stunnel 4.x or later, or install:
+
+        IO::Socket::SSL            libio-socket-ssl-perl
+
+Stunnel usually seems to be faster.
+
+=head1 BUGS
+
+The C<IO::Socket::IP> class does not implement connection timeouts as of
+perl v5.14, but does seem to as of v5.20.
+
+=head1 SEE ALSO
+
+stunnel(8)
+
+=head1 AUTHOR
+
+Noah Friedman <friedman@splode.com>
+
+=head1 COPYRIGHT
+
+This program is donated to the public domain.
+
+=cut
