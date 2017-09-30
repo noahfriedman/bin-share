@@ -1,5 +1,5 @@
 #! /bin/sh
-# $Id: dist-tar,v 1.8 2015/08/31 19:53:37 friedman Exp $
+# $Id: dist-tar,v 1.9 2015/09/12 04:46:22 friedman Exp $
 
 LC_COLLATE=C
 export LC_COLLATE
@@ -34,10 +34,10 @@ for dir in ${1+"$@"} ; do
   { case $gnutar in
       t ) find "$dir" -print \
            | sort \
-           | ${TAR-tar} --no-recursion -T - -cvf - \
+           | ${TAR-tar} ${TAROPT} --no-recursion -T - -cvf - \
            | $zip $zargs > "$dir.tar.$z" ;;
 
-      * ) ${TAR-tar} -cvf - "$dir" \
+      * ) ${TAR-tar} ${TAROPT} -cvf - "$dir" \
            | $zip $zargs > "$dir.tar.$z" ;;
     esac
   } && touch -r "$dir" "$dir.tar.$z" \
