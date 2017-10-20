@@ -4,7 +4,7 @@
 # Created: 2015-10-04
 # Public domain
 
-# $Id: describe-ssl-cert,v 1.8 2017/06/26 23:10:28 friedman Exp $
+# $Id: describe-ssl-cert,v 1.9 2017/08/29 00:57:11 friedman Exp $
 
 $^W = 1;
 
@@ -18,10 +18,12 @@ my $tmpdir = $ENV{TMPDIR} || "/tmp";
 my $tmpfile = "$tmpdir/describe-ssl-cert.$$";
 END { unlink ($tmpfile) }
 
-my %starttls = ( smtp => 'smtp',  25   => 'smtp',  587 => 'smtp',
-                 imap => 'imap',  143  => 'imap',
-                 ftp  => 'ftp',
-                 xmpp => 'xmpp',  5222 => 'xmpp',
+my %starttls = ( ftp   => 'ftp',        21 => 'ftp',
+                 imap  => 'imap',      143 => 'imap',
+                 ldap  => 'ldap',      389 => 'ldap',
+                 sieve => 'sieve',    4190 => 'sieve',
+                 smtp  => 'smtp',       25 => 'smtp',     587 => 'smtp',
+                 xmpp  => 'xmpp',     5222 => 'xmpp',
                );
 
 sub xcat
