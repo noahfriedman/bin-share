@@ -1,0 +1,9 @@
+#!/usr/bin/env perl
+# $Id$
+
+use strict;
+
+$/ = undef;
+map { while (/([\x20-\x7e\s]{4,})/g) { print $1, "\n" } } <>;
+
+# eof
