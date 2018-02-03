@@ -1,0 +1,47 @@
+#!/usr/bin/env perl
+# $Id$
+
+use strict;
+use warnings qw(all);
+
+my @opt = (qw(-verify      8
+              -auth_level  1
+              -status
+
+              -check_ss_sig
+              -explicit_policy
+              -extended_crl
+              -policy_check
+              -policy_print
+              -x509_strict
+
+              -no_ticket
+              -state
+              -prexit
+
+              -connect)); # keep this arg last
+
+sub main
+{
+  my $pid = open (my $fh, "-|");
+  die "fork: $!\n" unless defined $pid;
+  if ($pid) # parent
+    {
+      local $/ = undef;
+      $_ = scalar <$fh>;
+      wait;
+    }
+  else
+    {
+      open (STDIN,  "<",  "/dev/null");
+      open (STDERR, ">&", STDOUT);
+      exec (qw(openssl s_client), @opt, @_) or die "exec: $_[0]: $!";
+    }
+
+  s/^-+BEGIN CERT.*^-+END CERT\S+-+$//msg;
+  print;
+}
+
+main (@ARGV);
+
+# eof
