@@ -1,15 +1,14 @@
 #!/usr/bin/env perl
-# $Id$
+# $Id: verify-ssl-conn,v 1.1 2018/02/03 00:22:13 friedman Exp $
 
 use strict;
 use warnings qw(all);
 
 my @opt = (qw(-verify      8
-              -auth_level  1
+              -auth_level  2
               -status
 
               -check_ss_sig
-              -explicit_policy
               -extended_crl
               -policy_check
               -policy_print
@@ -33,9 +32,13 @@ sub main
     }
   else
     {
+      (my $hostname = $_[0]) =~ s/:.*//;
+      unshift @opt, "-verify_hostname", $hostname;
+
       open (STDIN,  "<",  "/dev/null");
       open (STDERR, ">&", STDOUT);
-      exec (qw(openssl s_client), @opt, @_) or die "exec: $_[0]: $!";
+      exec (qw(openssl s_client), @opt, @_)
+        or die "exec: $_[0]: $!";
     }
 
   s/^-+BEGIN CERT.*^-+END CERT\S+-+$//msg;
