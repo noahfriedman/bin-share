@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.45 2017/09/05 19:01:45 friedman Exp $
+# $Id: rpm-pkg-list,v 1.46 2017/09/10 16:29:46 friedman Exp $
 
 # Commentary:
 # Code:
@@ -505,6 +505,9 @@ e8562897	centos-5
 443e1821	centos-4
 
 fe837f6f	centos-security-6
+
+# CentOS SoftwareCollections SIG (https://wiki.centos.org/SpecialInterestGroup/SCLo
+f2ee9d55	centos-sc
 
 9c800aca	SuSE
 3d25d3d9	SuSE-security
