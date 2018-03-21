@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.46 2017/09/10 16:29:46 friedman Exp $
+# $Id: rpm-pkg-list,v 1.47 2018/02/28 08:02:10 friedman Exp $
 
 # Commentary:
 # Code:
@@ -409,6 +409,9 @@ __DATA__
 ## GPG key fingerprints for RPM signatures
 ######
 
+429476b4	fedora-29
+9db62fb1	fedora-28
+f5282ee4	fedora-27
 64dab85d	fedora-26
 bfb2d6e3	fedora-26-neverused
 fdb19c98	fedora-25
@@ -430,6 +433,7 @@ d22e77f2	fedora-11
 6df2196f	fedora-8/9	# only used for fedora 8/9 updates
 df9b0ae9	fedora-8/9-test
 
+# No secondary keys after Fedora 26
 3b921d09	fedora-26-secondary
 e372e838	fedora-25-secondary
 030d5aed	fedora-24-secondary
@@ -457,6 +461,7 @@ f613cbe8	fedora-9/10/11-ia64
 
 fd431d51	rhel-6
 
+7d838377	rpmfusion-free-f27
 9690e4af	rpmfusion-free-f26
 6806a9cb	rpmfusion-free-f25
 b7546f06	rpmfusion-free-f24
@@ -475,6 +480,7 @@ a3780952	rpmfusion-free-f13
 8fcff4da	rpmfusion-free-f11
 49c8885a	rpmfusion-free-f10-or-earlier
 
+b9c13282	rpmfusion-nonfree-f27
 3276f4b3	rpmfusion-nonfree-f26
 fa7a179a	rpmfusion-nonfree-f25
 96ca6280	rpmfusion-nonfree-f24
