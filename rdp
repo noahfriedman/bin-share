@@ -4,7 +4,7 @@
 # Created: 2005-08-10
 # Public domain
 
-# $Id: rdp,v 1.11 2016/07/24 02:33:26 friedman Exp $
+# $Id: rdp,v 1.12 2016/07/24 21:34:44 friedman Exp $
 
 # Commentary:
 
@@ -89,7 +89,7 @@ run_xfreerdp()
 {
   case $1 in
       -fs ) shift
-            set : "$@" /size:$display_geom -decorations
+            set : "$@" /f -decorations
             shift ;;
       *   ) size=/size:${RDP_GEOM-$geom} ;;
   esac
@@ -97,26 +97,35 @@ run_xfreerdp()
   rhost=$1
   shift
 
-  set -x
+  #set -x
   ${RDP_PROG-xfreerdp} \
       /client-hostname:${RDP_CLIENT-$client} \
-      $size \
+      /v:$rhost \
       /u:${RDP_USER-${LOGNAME-$USER}} \
+      $size \
       /bpp:${RDP_DEPTH-$depth} \
+      /dynamic-resolution \
+      /disp \
+      /geometry \
+      /echo \
       /compression-level:1 \
       /clipboard \
       -grab-keyboard \
       /sound:sys:pulse \
       /cert-ignore \
-      -sec:rdp \
-      /v:$rhost \
-      "$@" &
+      +fonts \
+      +auto-reconnect \
+      +print-reconnect-cookie \
+      -toggle-fullscreen \
+      +multitransport \
+      -sec-nla \
+      "$@" #&
 }
 
 main()
 {
   setup "$@"
-  case ${RDP_PROG-rdesktop} in
+  case ${RDP_PROG-freerdp} in
     *rdesktop* ) run_rdesktop "$@" ;;
     *freerdp*  ) run_xfreerdp "$@" ;;
   esac
