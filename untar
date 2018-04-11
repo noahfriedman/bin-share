@@ -4,7 +4,7 @@
 # Created: 1996-01-15
 # Public domain
 
-# $Id: untar,v 1.35 2016/10/12 00:34:56 friedman Exp $
+# $Id: untar,v 1.36 2018/04/10 18:33:46 friedman Exp $
 
 # Commentary:
 
@@ -94,7 +94,7 @@ extract()
         *.rpm )
             ${RPM2CPIO-rpm2cpio} "$file" | ${CPIO-cpio} -dimv --no-absolute-filenames ;;
 
-        *.deb )
+        *.deb | *.udeb )
             ${AR-ar} xv "$file"
             for file in control.tar.* data.tar.* ; do
                 (pre; extract; post)
