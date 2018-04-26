@@ -1,0 +1,8 @@
+#!/bin/sh
+# $Id$
+
+exec ${ETAGS-etags} \
+     --regex='/[ \t]*create\(?:[\t ]+or[\t ]+replace\)?[\t ]+\(table\|function|procedure\|trigger\|view\)\(?:[\t ]+if[\t ]+not[\t ]+exists\)?[\t ]+\([^ \t\n]+\)/\2/i' \
+     "$@"
+
+# eof
