@@ -27,7 +27,7 @@ sub expand_range
       $range =~ s/^\s*(.*?)\s*$/$1/; # strip surrounding whitespace
       foreach (split (/\s*,\s*/, $range))
         {
-          my %range;
+          my %tbl;
           my $action = '+';
           my $prefix = ""; # optional prefix (IP addresses only)
           my $suffix = ""; # optional domain extension
@@ -64,11 +64,12 @@ sub expand_range
               # Start with 1 to omit network address
               for (my $i = 1; $i < $max; $i++)
                 {
-                  $range{ ntoa ($net + $i) } = $idx++;
+                  $tbl{ ntoa ($net + $i) } = $idx++;
                 }
 
               $_ = ''; # don't do any more processing on this entry
             }
+
           # Save off leading/trailing octets of IP addr, if there are any.
           #   A-B.C.D.E
           #   A.B-C.D.E
@@ -78,6 +79,7 @@ sub expand_range
               $prefix = defined $1 ? $1 : "";
               $_ = "$2-$3";
               $suffix = defined $4 ? $4 : "";
+
             }
           # Save off fqdn, if there are any.
           # Accept the following specifications:
@@ -92,9 +94,9 @@ sub expand_range
           # or even clusterM-N-N'.domain.com!
           # If ranges are generated programmatically and fed to this script,
           # this caveat should be kept in mind.
-          elsif (/^([^.]*)(\d+)-(\d+)(\..*)/) # case (a)
+          elsif (/^([^.]*)(\d+)-(\d+)(\..*)/)       # case (a)
             { $suffix = $4; $_ = "$1$2-$3" }
-          elsif (/^([^.]*)(\d+)()-\1(\d+)(\..*)$/) # case (b)
+          elsif (/^([^.]*)(\d+)()-\1(\d+)(\..*)$/)  # case (b)
             { $suffix = $5; $_ = "$1$2-$1$4" }
           elsif (/^([^.]*)(\d+)(\..+?)-\1(\d+)\3$/) # case (c)
             { $suffix = $3; $_ = "$1$2-$1$4" }
@@ -113,24 +115,24 @@ sub expand_range
               my $fmt = "%s%s%0${l}d%s";
               for (my $i = $2+0; $i <= $3+0; $i++)
                 {
-                  $range{ sprintf ($fmt, $prefix, $1, $i, $suffix) } = $idx++;
+                  $tbl{ sprintf ($fmt, $prefix, $1, $i, $suffix) } = $idx++;
                 }
             }
           elsif ($_ ne '') # literal
-            { $range{$prefix . $_ . $suffix} = $idx++ }
+            { $tbl{$prefix . $_ . $suffix} = $idx++ }
 
           # Depending on "action" merge it in or filter it out
           if (($action eq '+') || ($action eq '|'))
-            { %result = (%result, %range) }
+            { %result = (%result, %tbl) }
           elsif (($action eq '-') || ($action eq '!'))
-            { map { delete $result{$_} } keys %range }
+            { map { delete $result{$_} } keys %tbl }
           elsif ($action eq '&')
-            { map { delete $result{$_} if !$range{$_} } keys %result }
+            { map { delete $result{$_} if !$tbl{$_} } keys %result }
         }
     }
-  return (wantarray
-          ? sort { $result{$a} <=> $result{$b} } keys %result
-          : \%result);
+
+  my @res = sort { $result{$a} <=> $result{$b} } keys %result;
+  return wantarray ? @res : \@res;
 }
 
 map { print $_, "\n" } expand_range (@ARGV);
