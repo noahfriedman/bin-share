@@ -101,7 +101,12 @@ sub expand_range
           elsif (/^([^.]*)(\d+)(\..+?)-\1(\d+)\3$/) # case (c)
             { $suffix = $3; $_ = "$1$2-$1$4" }
 
-          if (/^(.*?)(\d+)-\1?(\d+)$/)
+          if( /^(\d+)$/)
+            {
+		  ### Single digit
+              $tbl{$1 . $suffix} = $idx++;
+            }
+          elsif (/^(.*?)(\d+)-\1?(\d+)$/)
             {
               # We matched the following cases:
               # * Range of digits: 1-10
