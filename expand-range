@@ -34,7 +34,7 @@ sub expand_range
 
           if (/^([-+&\|!])/)
             {
-              $action = substr ($_, 0, 1);
+              $action = $1;
               s/^.//;
             }
 
