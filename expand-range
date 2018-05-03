@@ -79,8 +79,8 @@ sub expand_range
               $prefix = defined $1 ? $1 : "";
               $_ = "$2-$3";
               $suffix = defined $4 ? $4 : "";
-
             }
+
           # Save off fqdn, if there are any.
           # Accept the following specifications:
           #    (a) hostM-N.domain.com
@@ -101,12 +101,7 @@ sub expand_range
           elsif (/^([^.]*)(\d+)(\..+?)-\1(\d+)\3$/) # case (c)
             { $suffix = $3; $_ = "$1$2-$1$4" }
 
-          if( /^(\d+)$/)
-            {
-		  ### Single digit
-              $tbl{$1 . $suffix} = $idx++;
-            }
-          elsif (/^(.*?)(\d+)-\1?(\d+)$/)
+          if (/^(.*?)(\d+)-\1?(\d+)$/)
             {
               # We matched the following cases:
               # * Range of digits: 1-10
