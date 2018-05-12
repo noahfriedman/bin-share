@@ -1,0 +1,141 @@
+#!/usr/bin/env perl
+# hbytes --- show human-readable sizes in various metric units
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2018-05-09
+# Public domain.
+
+# $Id$
+
+use strict;
+use warnings qw(all);
+
+use Getopt::Long;
+use Pod::Usage;
+use POSIX;
+use Symbol;
+use bignum;
+
+(my $progname = $0) =~ s|.*/||;
+
+# After Y, could add H (Hella), but that's not official.
+my @metric = (qw(B K M G T P E Z Y));
+my @unit_name;
+my %factor = ( map { $_ => 512 } (qw(b blk blks block blocks)));
+
+our %opt = ( blocksize => 'human',
+             precision => 2, );
+
+sub make_mult_table
+{
+  my $factor = shift;
+  map { my $u = $metric[$_];
+        my $n = $factor ** $_;
+        map { lc ("${u}$_") => $n } @_;
+      } (1 .. $#metric);
+}
+
+sub to_unit
+{
+  my $val = shift;
+  return "0 B" unless $val;
+
+  if ($opt{blocksize} eq 'human')
+    {
+      my $q = $factor{$opt{blocksize}};
+      my $n = 0;
+      my $ispow2 = ($val & ($val-1)) == 0;
+      #my $isdiv  = ($val % $q) == 0;
+
+      while ($val > $q && $n < $#metric)
+        {
+          $val /= $q;
+          $n++;
+        }
+      if ($ispow2 && $val < 10) # Prefer "4096M" to "4G"
+        {
+          $val *= $q;
+          $n--;
+        }
+      $val = $val->as_int() if $ispow2;
+      return join (' ', $val, $unit_name[$n]);
+    }
+  else
+    {
+      $val /= to_bytes ($opt{blocksize});
+      return $val->bround();
+    }
+}
+
+sub to_bytes
+{
+  my $val = shift;
+
+  if ($val =~ /\s*([a-z]+)\s*$/i)
+    {
+      my $spec = $1;
+      my $vunit = $factor{lc $spec};
+      die "$progname: $spec: invalid unit\n" unless defined $vunit;
+
+      $val =~ s///;
+      $val = 1 if $val eq '';
+      return $val * $vunit;
+    }
+  return $val;
+}
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help; # no init; perl 5.8 will treat as REF() instead of SCALAR()
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev gnu_compat no_ignorecase));
+
+  my $succ = $parser->getoptions
+    ("help"                     => sub { $help = 3 },
+     "usage"                    => sub { $help = 1 },
+
+     "P|precision=i"            =>      \$opt{precision},
+
+     "s|si"                     =>      \$opt{si},
+     "B|blocksize|block-size=s" =>      \$opt{blocksize},
+     "k"                        => sub { $opt{blocksize} = '1k'    },
+     "m"                        => sub { $opt{blocksize} = '1m'    },
+     "g"                        => sub { $opt{blocksize} = '1g'    },
+     "t"                        => sub { $opt{blocksize} = '1t'    },
+     "h|human-readable"         => sub { $opt{blocksize} = 'human' },
+    );
+
+  $help ||= 0; # but if not set yet, we need to set it here now.
+  pod2usage (-exitstatus => 1, -verbose => 0)         unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help - 1) if $help > 0;
+
+  bignum->precision (0 - $opt{precision}) if defined $opt{precision};
+}
+
+sub main
+{
+  parse_options (\@_);
+
+  if ($opt{si})
+    {
+      @unit_name = ('B', map { $_.'B' } @metric[1..$#metric]);
+      %factor = ( %factor, human => 1000,
+                  make_mult_table (1000, '', 'b'),
+                  make_mult_table (1024, 'ib'));
+    }
+  else
+    {
+      @unit_name = ('B', map { $_.'iB' } @metric[1..$#metric]);
+      %factor = ( %factor, human => 1024,
+                  make_mult_table (1024, '', 'b', 'ib'));
+    }
+
+  map { my $bytes = to_bytes ($_);
+        print to_unit ($bytes), "\n"
+      } @_;
+}
+
+main (@ARGV);
+
+# eof
