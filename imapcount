@@ -1,14 +1,21 @@
-#!/bin/sh
-exec ${PERL-perl} -wSx $0 ${1+"$@"}
-#!perl
+#!/usr/bin/env perl
+# $Id: imapcount,v 1.5 2017/08/02 03:01:36 friedman Exp $
 
-# $Id: imapcount,v 1.4 2003/12/25 18:32:14 friedman Exp $
+(my $progname = $0) =~ s=.*/==;
 
 package IMAP;
 
-use Socket;
-use Symbol;
 use strict;
+use warnings qw(all);
+use Socket;
+
+my $socklib_def = q(IO::Socket);
+my $socklib_ssl = q(IO::Socket::SSL);
+my %socklib_map = (   143 => $socklib_def,     993 => $socklib_ssl,
+                     imap => $socklib_def,   imaps => $socklib_ssl, );
+
+our $SSL_ERROR    = ""; # Will be overridden by ssl class if loaded.
+our $SSL_version_default = 'TLSv1_2'; # 2016-07-04
 
 sub new
 {
@@ -18,67 +25,33 @@ sub new
   return $self;
 }
 
-sub open_network_stream
+sub _error
 {
-  my $self = shift;
-
-  my $rhostname = shift || $self->{host};
-  my $port      = shift || $self->{port};
-
-  my $proto = getprotobyname ("tcp");
-  (undef, undef, $port) = getservbyname ($port, "tcp") if ($port !~ /^\d+$/o);
-
-  my @rhostaddr;
-  if ($rhostname =~ /^[\d.]+$/o)
-    {
-      push @rhostaddr, inet_aton ($rhostname);
-    }
-  else
-    {
-      @rhostaddr = gethostbyname ($rhostname);
-      return undef unless (scalar @rhostaddr > 0);
-      # try to get fully-qualified name.
-      $rhostname = $rhostaddr[0]
-        if (length ($rhostaddr[0]) > length ($rhostname));
-      splice (@rhostaddr, 0, 4);
-    }
-
-  my $sock = gensym;
-  my $connected = 0;
-  while (!$connected && scalar @rhostaddr > 0)
-    {
-      close ($sock) if (defined fileno ($sock));
-      return undef
-        unless (socket ($sock, AF_INET, SOCK_STREAM, $proto));
-      $connected = 1
-        if connect ($sock, sockaddr_in ($port, shift @rhostaddr));
-    }
-
-  if ($connected)
-    {
-      $self->{sock} = $sock;
-      return $sock;
-    }
-  close ($sock);  # free socket
-  return undef;
-}
-
-# mode 1 = buffering, 0 = no buffering
-sub set_buffering_mode
-{
-  my ($self, $mode) = @_;
-
-  my $orig_handle = select ($self->{sock});
-  $| = ($mode == 0);
-  select ($orig_handle);
+  my $msg = join (": ", $progname, "error", @_);
+  $msg .= "\n" unless substr ($msg, -1, 1) eq "\n";
+  die $msg;
 }
 
 sub connect
 {
   my $self = shift;
 
-  $self->open_network_stream;
-  $self->set_buffering_mode (0);
+  my $class = $socklib_map{$self->{port}} || $socklib_def;
+  eval "use $class";
+  _error ($@) if $@;
+
+  my %p = (Type     => SOCK_STREAM,
+           Domain   => AF_INET,
+           PeerHost => $self->{host},
+           PeerPort => $self->{port},
+           @_);
+  if ($class eq $socklib_ssl)
+    {
+      $p{SSL_version}     = $SSL_version_default;
+      $p{SSL_verify_mode} = 0;
+    }
+
+  my $fh = $self->{sock} = $class->new (%p) or _error ($@ || $SSL_ERROR);
   $self->login;
 }
 
@@ -101,7 +74,7 @@ sub message_count
   my $result = $self->read_response ("EXAMINE");
 
   my $count = $1
-    if $result =~ /^\* (\d+) EXISTS\r?\n/mo;
+    if $result =~ /^\* (\d+) EXISTS\r?\n/m;
   return $count;
 }
 
@@ -118,9 +91,9 @@ sub response_ok_p
 
   my $response = $self->read_response ($tag);
 
-  $response =~ s/\r?\n$//o;
-  $response =~ s/.*\n//go;
-  my @x = split (/[ \t]+/o, $response, 3);
+  $response =~ s/\r?\n$//;
+  $response =~ s/.*\n//g;
+  my @x = split (/[ \t]+/, $response, 3);
 
   return 1 if ($x[1] eq 'OK');
   return 0;
@@ -154,7 +127,7 @@ sub read_response
   return $output;
 }
 
-sub disconnect ($)
+sub disconnect
 {
   my $self = shift;
   $self->send_command ("LOGOUT logout");
@@ -171,16 +144,19 @@ use POSIX qw(setsid);
 use Symbol;
 use strict;
 
+sub file_contents
+{
+  open (my $fh, $_[0]) || die "$_[0]: $!\n";
+  local $/ = undef;
+  scalar <$fh>;
+}
+
 sub client
 {
   my $option = shift;
   my $file = $option->{countfile};
-
   exit (1) if (-z $file);
-  my $fh = gensym;
-  open ($fh, "<$file") || exit (1);
-  print while (<$fh>);
-  close ($fh);
+  print file_contents ($file);
 }
 
 sub daemon
