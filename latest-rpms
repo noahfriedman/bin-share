@@ -4,7 +4,7 @@
 # Created: 2005-07-24
 # Public domain
 
-# $Id: latest-rpms,v 1.5 2007/05/04 19:56:22 friedman Exp $
+# $Id: latest-rpms,v 1.6 2018/07/26 21:49:12 friedman Exp $
 
 # Commentary:
 # Code:
@@ -23,7 +23,7 @@ my $rpmpkg_flags;
 map { $rpmpkg_flags |= RPM2->$_ }
     qw(vsf_nohdrchk
        vsf_nosha1header
-       vsf_nomd5header  vsf_nomd5
+                        vsf_nomd5
        vsf_nodsaheader  vsf_nodsa
        vsf_norsaheader  vsf_norsa);
 
