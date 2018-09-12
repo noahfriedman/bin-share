@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.47 2018/02/28 08:02:10 friedman Exp $
+# $Id: rpm-pkg-list,v 1.48 2018/03/21 00:12:18 friedman Exp $
 
 # Commentary:
 # Code:
@@ -515,8 +515,16 @@ fe837f6f	centos-security-6
 # CentOS SoftwareCollections SIG (https://wiki.centos.org/SpecialInterestGroup/SCLo
 f2ee9d55	centos-sc
 
-9c800aca	SuSE
-3d25d3d9	SuSE-security
+3dbdc284	opensuse
+
+39db7c82	suse-sles-12.0
+50a3dd1c	suse-sles-12.0-reserve
+
+307e3d54	suse-sles-11.2
+b37b98a9        suse-sles-11.2-ptf
+
+9c800aca	suse
+3d25d3d9	suse-security
 
 f14ab620	zfsonlinux.org
 f6777c67	adobe
@@ -532,6 +540,7 @@ be1229cf	microsoft
 f90c0e97	negativo17
 98ab5139	oracle-virtualbox
 a9464aa9	pidgin
+bf6a7041	slack.com
 ba392878	splode-internal-2005	# internal reference key; not secure
 dbcccc4b	splode-internal-2015	# internal reference key; not secure
 
