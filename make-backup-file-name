@@ -5,7 +5,7 @@
 # Created: 1994-01-14
 # Public domain
 
-# $Id$
+# $Id: make-backup-file-name,v 1.2 2007/07/18 21:11:17 friedman Exp $
 
 # Commentary:
 
@@ -22,35 +22,28 @@
 name=$1
 
 case $VERSION_CONTROL in
-  never | simple )
-    result=$name~ ;;
+    never | simple )
+        result=$name~ ;;
 
-  * )
-    highest=`for f in "$name".~*~ ; do
-               echo "$f"
-             done \
-              | sed -e 's/~$//' \
-                    -e 's/.*\.~//' \
-                    -e 's/\..*//' \
-              | sort -n -r \
-              | sed -n \
-                    -e 1p \
-                    -e q`
-
-    case $highest in
-       '*' | '' ) highest=0 ;;
-    esac
-
-    case $VERSION_CONTROL in
-      nil | existing )
+    * )
+        highest=`for f in "$1".~*~ ; do echo "$f"; done |
+                 sed -ne '/.*\.~\([0-9][0-9]*\)~$/{s//\1/p;}' |
+                 sort -rn |
+                 sed -e 1q`
         case $highest in
-          0 ) result=$name~ ;;
-        esac ;;
+            '' ) highest=0 ;;
+        esac
 
-      t | numbered | * )
-        next=`expr $highest + 1`
-        result=$name.~$next~ ;;
-    esac ;;
+        case $VERSION_CONTROL in
+            nil | existing )
+                case $highest in
+                    0 ) result=$name~ ;;
+                esac ;;
+
+            t | numbered | * )
+                next=`expr $highest + 1`
+                result=$name.~$next~ ;;
+        esac ;;
 esac
 
 echo "$result"
