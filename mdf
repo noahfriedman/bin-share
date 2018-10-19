@@ -4,7 +4,7 @@
 # Created: 2001-01-11
 # Public domain.
 
-# $Id: mdf,v 1.20 2015/11/30 01:58:57 friedman Exp $
+# $Id: mdf,v 1.21 2017/07/21 22:57:15 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -28,7 +28,7 @@ use constant
     DF_USED  => 2,     MI_DEV => 2,
     DF_AVAIL => 3,     MI_RT  => 3,
     DF_PCT   => 4,     MI_MPT => 4,
-    DF_MPT   => 5,
+    DF_MPT   => 5,     MI_TAG => 6,
   };
 
 my %mult
@@ -195,7 +195,12 @@ sub mountinfo
 {
   my $minfo = $_[0] || "/proc/self/mountinfo";
   return unless -f $minfo;
-  return fieldarray (xcat ($minfo));
+  my @minfo = fieldarray (xcat ($minfo));
+  # Further distinguish device by the first tag id, since e.g. nfs mounts
+  # from the same server might happen to be separate exported mountpoints
+  # on what is (local to the server) the same filesystem.
+  map { $_->[MI_DEV] .= '-' . $_->[MI_TAG] } @minfo;
+  return @minfo;
 }
 
 # (0) mount ID:  unique identifier of the mount (may be reused after umount)
@@ -204,6 +209,7 @@ sub mountinfo
 # (3) root:  root of the mount within the filesystem
 # (4) mount point:  mount point relative to the process's root
 # (5-) varies depending on kernel version
+# (6) first tag, for recent-ish linux kernels; usually "shared:n".
 sub parse_mountinfo
 {
   my %root;
