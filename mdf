@@ -4,7 +4,7 @@
 # Created: 2001-01-11
 # Public domain.
 
-# $Id: mdf,v 1.21 2017/07/21 22:57:15 friedman Exp $
+# $Id: mdf,v 1.22 2018/10/19 19:57:07 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -196,10 +196,15 @@ sub mountinfo
   my $minfo = $_[0] || "/proc/self/mountinfo";
   return unless -f $minfo;
   my @minfo = fieldarray (xcat ($minfo));
+
+  # Unique-ifying field.  If tag field is `-', it means there are no
+  # tags, so use the device name instead.
+  my $uf = $minfo[0][MI_TAG] eq '-' ? MI_TAG + 2 : MI_TAG;
+
   # Further distinguish device by the first tag id, since e.g. nfs mounts
   # from the same server might happen to be separate exported mountpoints
   # on what is (local to the server) the same filesystem.
-  map { $_->[MI_DEV] .= '-' . $_->[MI_TAG] } @minfo;
+  map { $_->[MI_DEV] .= '-' . $_->[$uf] } @minfo;
   return @minfo;
 }
 
