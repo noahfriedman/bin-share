@@ -5,7 +5,7 @@
 # Created: 1996-01-29
 # Public domain.
 
-# $Id$
+# $Id: incgrep,v 2.6 2012/09/06 18:34:11 friedman Exp $
 
 cc=${CC-gcc}
 cpp=cpp
@@ -54,9 +54,9 @@ fi
 
 {
     case $lang in
-        c ) find $includes $follow -name '*.h' -print ;;
-        * ) find $includes $follow -type f     -print ;;
+        c ) find $includes $follow -name '*.h' -print0 ;;
+        * ) find $includes $follow -type f     -print0 ;;
     esac
-} 2> /dev/null | xargs egrep ${1+"$@"}
+} 2> /dev/null | xargs -0 egrep "$@"
 
 # eof
