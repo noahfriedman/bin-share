@@ -1,0 +1,738 @@
+#!/usr/bin/env python
+# pystty --- pure python implementation of stty command
+
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2018-10-30
+# Public domain
+
+# $Id$
+
+# Commentary:
+
+# stuff to do:
+# 	* grab console: TIOCCONS
+#	* document all the supported flags
+
+# Code:
+
+from   __future__ import print_function
+
+import os
+import sys
+import fcntl
+import termios
+import struct
+import argparse
+import re
+import time
+import functools
+
+
+TC_IFLAG  = 0  # tc*etattr fields
+TC_OFLAG  = 1
+TC_CFLAG  = 2
+TC_LFLAG  = 3
+TC_ISPEED = 4
+TC_OSPEED = 5
+TC_CC     = 6
+
+WS_ROW    = 0  # TIOC*WINSZ fields
+WS_COL    = 1
+WS_XPIXEL = 2
+WS_YPIXEL = 3
+
+OS = os.uname()[0]
+
+def CTRL(c): return ord( c.upper() ) - 64
+
+# Singleton wrapper around termios module to handle differences between
+# operating systems, including potentially known but undefined attributes.
+# Prefer the module attributes if they exist, otherwise try ours, or return
+# None as a last resort.
+class PseudoTermios( object ):
+    @classmethod
+    def __getattr__( self, attr ):
+        try:
+            return getattr( termios, attr )
+        except AttributeError:
+            try:
+                return getattr( self, attr )
+            except AttributeError:
+                return None
+
+    # Assigned at class definition time.
+    if OS == 'Linux':
+        B500000    = termios.CBAUDEX | 0o05
+        B576000    = termios.CBAUDEX | 0o06
+        B921600    = termios.CBAUDEX | 0o07
+        B1000000   = termios.CBAUDEX | 0o10
+        B1152000   = termios.CBAUDEX | 0o11
+        B1500000   = termios.CBAUDEX | 0o12
+        B2000000   = termios.CBAUDEX | 0o13
+        B2500000   = termios.CBAUDEX | 0o14
+        B3000000   = termios.CBAUDEX | 0o15
+        B3500000   = termios.CBAUDEX | 0o16
+        B4000000   = termios.CBAUDEX | 0o17
+
+        CMSPAR     = 0o10000000000
+        EXTPROC    =      0o200000
+        IUTF8      =       0o40000
+
+        # Some line disciplines which python doesn't usually define.
+        N_AX25     =  5
+        N_X25      =  6 # X.25 async
+        N_IRDA     = 11 # http://irda.sourceforge.net/
+        N_SMSBLOCK = 12 # SMS block mode for GSM
+        N_SYNC_PPP = 14 # synchronous PPP
+        N_SLCAN    = 17 # Serial / USB serial CAN Adaptors
+        N_PPS      = 18 # Pulse per Second (GPS, etc)
+
+
+    elif OS == 'FreeBSD':
+        B7200      =   7200
+        B14400     =  14400
+        B28800     =  28800
+        B57600     =  57600
+        B76800     =  76800
+        B115200    = 115200
+        B230400    = 230400
+        B460800    = 460800
+        B921600    = 921600
+
+        VERASE2    =  7
+        VDSUSP     = 11
+        VSTATUS    = 18
+
+        CERASE2    = CTRL( 'H' )
+        CDSUSP     = CTRL( 'Y' )
+        CSTATUS    = CTRL( 'T' )
+
+        # lflags: nokerninfo altwerase extproc
+        NOKERNINFO = 0x02000000	# no kernel output from VSTATUS
+        ALTWERASE  = 0x00000200 # use alternate WERASE algorithm
+        EXTPROC    = 0x00000800 # external processing
+
+        # cflags: dsrflow dtrflow mdmbuf
+        CCTS_OFLOW = 0x00010000	# CTS flowctl of output
+        CRTS_IFLOW = 0x00020000	# RTS flowctl of input
+        CDTR_IFLOW = 0x00040000	# DTR flowctl of input
+        CDSR_OFLOW = 0x00080000	# DSR flowctl of output
+        CCAR_OFLOW = 0x00100000	# DCD flowctl of output
+
+
+_termios = PseudoTermios()
+
+FLAG_LIST = (
+    ( 'ignbrk',  TC_IFLAG,  termios.IGNBRK  ), # break handling
+    ( 'brkint',  TC_IFLAG,  termios.BRKINT  ),
+    ( 'ignpar',  TC_IFLAG,  termios.IGNPAR  ), # parity handling
+    ( 'parmrk',  TC_IFLAG,  termios.PARMRK  ),
+    ( 'inpck',   TC_IFLAG,  termios.INPCK   ),
+    ( 'istrip',  TC_IFLAG,  termios.ISTRIP  ), # strip 8th bit
+    ( 'inlcr',   TC_IFLAG,  termios.INLCR   ), # cr/lf handling
+    ( 'igncr',   TC_IFLAG,  termios.IGNCR   ),
+    ( 'icrnl',   TC_IFLAG,  termios.ICRNL   ),
+    ( 'iuclc',   TC_IFLAG, _termios.IUCLC   ), # non-posix
+    ( 'ixon',    TC_IFLAG,  termios.IXON    ), # flow control handling
+    ( 'ixany',   TC_IFLAG,  termios.IXANY   ),
+    ( 'ixoff',   TC_IFLAG,  termios.IXOFF   ),
+    ( 'imaxbel', TC_IFLAG, _termios.IMAXBEL ), # non-posix
+    ( 'iutf8',   TC_IFLAG, _termios.IUTF8   ), # non-posix
+
+    ( 'opost',   TC_OFLAG,  termios.OPOST,  ),
+    ( 'olcuc',   TC_OFLAG, _termios.OLCUC,  ), # non-posix
+    ( 'onlcr',   TC_OFLAG,  termios.ONLCR,  ),
+    ( 'ocrnl',   TC_OFLAG,  termios.OCRNL,  ),
+    ( 'onocr',   TC_OFLAG,  termios.ONOCR,  ),
+    ( 'onlret',  TC_OFLAG,  termios.ONLRET, ),
+    ( 'ofill',   TC_OFLAG, _termios.OFILL,  ),
+    ( 'ofdel',   TC_OFLAG, _termios.OFDEL,  ),
+    ( 'nl0',     TC_OFLAG, _termios.NLDLY,  _termios.NL0   ),
+    ( 'nl1',     TC_OFLAG, _termios.NLDLY,  _termios.NL1   ),
+    ( 'cr0',     TC_OFLAG, _termios.CRDLY,  _termios.CR0   ),
+    ( 'cr1',     TC_OFLAG, _termios.CRDLY,  _termios.CR1   ),
+    ( 'cr2',     TC_OFLAG, _termios.CRDLY,  _termios.CR2   ),
+    ( 'cr3',     TC_OFLAG, _termios.CRDLY,  _termios.CR3   ),
+    ( 'tab0',    TC_OFLAG, _termios.TABDLY, _termios.TAB0  ),
+    ( 'tab1',    TC_OFLAG, _termios.TABDLY, _termios.TAB1  ),
+    ( 'tab2',    TC_OFLAG, _termios.TABDLY, _termios.TAB2  ),
+    ( 'tab3',    TC_OFLAG, _termios.TABDLY, _termios.TAB3  ),
+    ( 'xtabs',   TC_OFLAG, _termios.TABDLY, _termios.XTABS ),
+    ( 'bs0',     TC_OFLAG, _termios.BSDLY,  _termios.BS0   ), # not impl
+    ( 'bs1',     TC_OFLAG, _termios.BSDLY,  _termios.BS1   ), # not impl
+    ( 'ff0',     TC_OFLAG, _termios.FFDLY,  _termios.FF0   ),
+    ( 'ff1',     TC_OFLAG, _termios.FFDLY,  _termios.FF1   ),
+    ( 'vt0',     TC_OFLAG, _termios.VTDLY,  _termios.VT0   ),
+    ( 'vt1',     TC_OFLAG, _termios.VTDLY,  _termios.VT1   ),
+
+    ( 'cs5',     TC_CFLAG,  termios.CSIZE, termios.CS5 ),
+    ( 'cs6',     TC_CFLAG,  termios.CSIZE, termios.CS6 ),
+    ( 'cs7',     TC_CFLAG,  termios.CSIZE, termios.CS7 ),
+    ( 'cs8',     TC_CFLAG,  termios.CSIZE, termios.CS8 ),
+    ( 'cstopb',  TC_CFLAG,  termios.CSTOPB  ),
+    ( 'cread',   TC_CFLAG,  termios.CREAD   ),
+    ( 'parenb',  TC_CFLAG,  termios.PARENB  ),
+    ( 'parodd',  TC_CFLAG,  termios.PARODD  ),
+    ( 'hupcl',   TC_CFLAG,  termios.HUPCL   ),
+    ( 'clocal',  TC_CFLAG,  termios.CLOCAL  ),
+    ( 'crtscts', TC_CFLAG, _termios.CRTSCTS ), # non-posix
+    ( 'cmspar',  TC_CFLAG, _termios.CMSPAR  ), # non-posix
+    ( 'loblk',   TC_CFLAG, _termios.LOBLK   ), # non-posix
+    ( 'dsrflow', TC_CFLAG, _termios.CDSR_OFLOW ), # freebsd
+    ( 'dtrflow', TC_CFLAG, _termios.CDTR_IFLOW ), # freebsd
+    ( 'mdmbuf',  TC_CFLAG, _termios.CCAR_OFLOW ), # freebsd
+
+    ( 'isig',    TC_LFLAG,  termios.ISIG    ),
+    ( 'icanon',  TC_LFLAG,  termios.ICANON  ),
+    ( 'xcase',   TC_LFLAG, _termios.XCASE   ), # non-posix
+    ( 'echo',    TC_LFLAG,  termios.ECHO    ),
+    ( 'echoe',   TC_LFLAG,  termios.ECHOE   ),
+    ( 'echok',   TC_LFLAG,  termios.ECHOK   ),
+    ( 'echonl',  TC_LFLAG,  termios.ECHONL  ),
+    ( 'noflsh',  TC_LFLAG,  termios.NOFLSH  ),
+    ( 'tostop',  TC_LFLAG,  termios.TOSTOP  ),
+    ( 'echoctl', TC_LFLAG, _termios.ECHOCTL ), # non-posix
+    ( 'echoprt', TC_LFLAG, _termios.ECHOPRT ), # non-posix
+    ( 'echoke',  TC_LFLAG, _termios.ECHOKE  ), # non-posix
+    ( 'flusho',  TC_LFLAG, _termios.FLUSHO  ), # non-posix
+    ( 'pendin',  TC_LFLAG, _termios.PENDIN  ), # non-posix
+    ( 'iexten',  TC_LFLAG,  termios.IEXTEN  ),
+    ( 'extproc', TC_LFLAG, _termios.EXTPROC ), # non-posix
+    ( 'defecho', TC_LFLAG, _termios.DEFECHO ), # non-posix
+)
+
+FLAG = { elt[ 0 ] : elt[ 1: ] for elt in FLAG_LIST }
+
+SPEED = {
+          '0' : _termios.B0,
+         '50' : _termios.B50,
+         '75' : _termios.B75,
+        '110' : _termios.B110,
+        '134' : _termios.B134,
+        '150' : _termios.B150,
+        '200' : _termios.B200,
+        '300' : _termios.B300,
+        '600' : _termios.B600,
+       '1200' : _termios.B1200,
+       '1800' : _termios.B1800,
+       '2400' : _termios.B2400,
+       '4800' : _termios.B4800,
+       '7200' : _termios.B7200,
+       '9600' : _termios.B9600,
+      '14400' : _termios.B14400,
+      '19200' : _termios.B19200,
+      '28800' : _termios.B28800,
+      '38400' : _termios.B38400,
+      '57600' : _termios.B57600,
+      '76800' : _termios.B76800,
+     '115200' : _termios.B115200,
+     '230400' : _termios.B230400,
+     '460800' : _termios.B460800,
+     '500000' : _termios.B500000,
+     '576000' : _termios.B576000,
+     '921600' : _termios.B921600,
+    '1000000' : _termios.B1000000,
+    '1152000' : _termios.B1152000,
+    '1500000' : _termios.B1500000,
+    '2000000' : _termios.B2000000,
+    '2500000' : _termios.B2500000,
+    '3000000' : _termios.B3000000,
+    '3500000' : _termios.B3500000,
+    '4000000' : _termios.B4000000,
+}
+
+NTOSPEED = { v : k for k, v in SPEED.items() }
+
+CC_PARAM_LIST = (
+    ('intr',     termios.VINTR,    termios.CINTR,   ), # ^C
+    ('quit',     termios.VQUIT,    termios.CQUIT,   ), # ^\
+    ('erase',    termios.VERASE,   termios.CERASE,  ), # ^?
+    ('erase2',  _termios.VERASE2, _termios.CERASE2, ), # ^H
+    ('kill',     termios.VKILL,    termios.CKILL,   ), # ^U
+    ('eof',      termios.VEOF,     termios.CEOF,    ), # ^D
+    ('eol',      termios.VEOL,     termios.CEOL,    ), # ^@
+    ('eol2',     termios.VEOL2,    None,            ),
+    ('swtch',   _termios.VSWTCH,   None,            ),
+    ('start',    termios.VSTART,   termios.CSTART,  ), # ^Q
+    ('stop',     termios.VSTOP,    termios.CSTOP,   ), # ^S
+    ('susp',     termios.VSUSP,    termios.CSUSP,   ), # ^Z
+    ('dsusp',   _termios.VDSUSP,  _termios.CDSUSP,  ), # ^Y
+    ('rprint',   termios.VREPRINT, termios.CRPRNT,  ), # ^R
+    ('status',  _termios.VSTATUS, _termios.CSTATUS, ), # ^T
+    ('werase',   termios.VWERASE,  termios.CWERASE, ), # ^W
+    ('lnext',    termios.VLNEXT,   termios.CLNEXT,  ), # ^V
+    ('discard',  termios.VDISCARD, termios.CFLUSH,  ), # ^O
+    ('min',      termios.VMIN,     None,            ),
+    ('time',     termios.VTIME,    None,            ),
+)
+
+CC_PARAM_CCPOS = 0
+CC_PARAM_DFLT  = 1
+
+CC_PARAM = { elt[ 0 ] : elt[ 1: ] for elt in CC_PARAM_LIST }
+CC_PARAM[ 'swtc' ] = CC_PARAM[ 'swtch' ]
+
+STDKEYS = { elt[ 0 ] : elt[ 1 ]
+            for elt in filter( lambda x: x[1] is not None,
+                               CC_PARAM_LIST ) }
+
+ALIAS = {
+    'cbreak' : [ '-icanon' ],
+   '-cbreak' : [  'icanon' ],
+
+    'cooked' : [  'brkint',
+                  'ignpar',
+                  'istrip',
+                  'icrnl',
+                  'ixon',
+                  'opost',
+                  'isig',
+                  'icanon',
+                  'eof',    CC_PARAM[ 'eof'   ][ CC_PARAM_DFLT ],
+                  'eol',    CC_PARAM[ 'eol'   ][ CC_PARAM_DFLT ], ],
+
+    'crt'    : [  'echoe', 'echok' ],
+
+    'dec'    : [  'echoe',
+                  'echok',
+                  'intr',   CC_PARAM[ 'intr'  ][ CC_PARAM_DFLT ],
+                  'erase',  CC_PARAM[ 'erase' ][ CC_PARAM_DFLT ],
+                  'kill',   CC_PARAM[ 'kill'  ][ CC_PARAM_DFLT ], ],
+
+    'ek'     : [  'erase',  CC_PARAM[ 'erase' ][ CC_PARAM_DFLT ],
+                  'kill',   CC_PARAM[ 'kill'  ][ CC_PARAM_DFLT ], ],
+
+    'evenp'  : [  'cs7',  'parenb', '-parodd', ],
+   '-evenp'  : [  'cs8', '-parenb', ],
+
+    'lcase'  : [  'xcase',  'iuclc',  'olcuc', ],
+   '-lcase'  : [ '-xcase', '-iuclc', '-olcuc', ],
+
+    'litout' : [ '-parenb', '-istrip', '-opost', 'cs8', ],
+   '-litout' : [  'parenb'   'istrip'   'opost'  'cs7', ],
+
+    'nl'     : [ '-icrnl', '-onlcr', ],
+   '-nl'     : [  'icrnl',  'onlcr', '-inlcr', '-igncr', '-ocrnl', '-onlret', ],
+
+    'oddp'   : [  'cs7',  'parenb',  'parodd', ],
+   '-oddp'   : [  'cs8', '-parenb', ],
+
+    'parity' : [  'evenp' ],
+   '-parity' : [ '-evenp' ],
+
+    'pass8'  : [ '-parenb', '-istrip', 'cs8' ],
+   '-pass8'  : [  'parenb',  'istrip', 'cs7' ],
+
+    'raw'    : [ '-ignbrk',
+                 '-brkint',
+                 '-ignpar',
+                 '-parmrk',
+                 '-inpck',
+                 '-istrip',
+                 '-inlcr',
+                 '-igncr',
+                 '-icrnl',
+                 '-ixon',
+                 '-ixoff',
+                 '-icanon',
+                 '-opost',
+                 '-isig',
+                 '-iuclc',
+                 '-ixany',
+                 '-imaxbel',
+                 '-xcase',
+                  'min',    1,
+                  'time',   0, ],
+
+    'sane'   : [  'cread',  # cflags
+
+                  # iflags
+                 '-ignbrk',
+                  'brkint',
+                 '-inlcr',
+                 '-igncr',
+                  'icrnl',
+                 '-ixoff',
+                 '-iutf8',
+                 '-iuclc',
+                 '-ixany',
+                  'imaxbel',
+                 '-xcase',
+                  'bs0',
+                  'cr0',
+                  'ff0',
+                  'nl0',
+                  'tab0',
+                  'vt0',
+
+                  # oflags
+                 '-olcuc',
+                 '-ocrnl',
+                  'opost',
+                 '-ofill',
+                  'onlcr',
+                 '-onocr',
+                 '-onlret',
+                 '-ofdel',
+                 '-extproc',
+                 '-flusho',
+
+                  # lflags
+                  'isig',
+                  'icanon',
+
+                  'echo',
+                  'echoe',
+                  'echok',
+                 '-echonl',
+                 '-echoprt',
+                  'echoctl',
+                  'echoke',
+                  'iexten',
+                 '-noflsh',
+                 '-tostop', ],  # +STDKEYS below
+}
+ALIAS[  'LCASE'  ] = ALIAS[  'lcase'  ]
+ALIAS[ '-LCASE'  ] = ALIAS[ '-lcase'  ]
+ALIAS[ '-cooked' ] = ALIAS[  'raw'    ]
+ALIAS[ '-raw'    ] = ALIAS[  'cooked' ]
+ALIAS[  'sane'   ].extend( STDKEYS )
+
+TERMSZ_list = (
+    ( 'rows',    WS_ROW    ),
+    ( 'cols',    WS_COL    ),
+    ( 'columns', WS_COL    ),
+    ( 'xpixel',  WS_XPIXEL ),
+    ( 'ypixel',  WS_YPIXEL ),
+)
+
+TERMSZ = { elt[ 0 ] : elt[ 1: ] for elt in TERMSZ_list }
+
+
+def termios_notrace( fn ):
+    @functools.wraps( fn )
+    def wrapper( *args, **kwargs ):
+        try:
+            return fn( *args, **kwargs )
+        except (IOError, termios.error) as err:
+            prog = sys.argv[0][ sys.argv[0].rfind( '/' ) + 1 : ]
+            print( prog, fn.__name__, args[0].fd.name, err[1],
+                   sep=': ', file=sys.stderr )
+            sys.exit( 1 )
+    return wrapper
+
+class Stty( object ):
+    cctrans = None
+
+    def __init__( self, fd=sys.stdin, when=termios.TCSANOW ):
+        self._cctrans_init()
+        self.fd    = fd
+        self.when  = when
+        self._attr = None
+
+    @classmethod
+    def _cctrans_init( self ):
+        if self.cctrans: return
+
+        self.cctrans = {}
+        seq = { 'NUL'     : '\x00',
+                'NULL'    : '\x00',
+                'UNDEF'   : '\x00',
+                '<UNDEF>' : '\x00',
+                'TAB'     : '\x09',
+                'NL'      : '\x0a',
+                'LFD'     : '\x0a',
+                'RET'     : '\x0d',
+                'ESC'     : '\x1b',
+                'SPC'     : '\x20',
+                'DEL'     : '\x7f', }
+        for s in seq:
+            self.cctrans[ s ]         = seq[ s ]
+            self.cctrans[ s.lower() ] = seq[ s ]
+        for c in range( 0, 31 ):
+            xlate = [ c,
+                      chr( c ),
+                      '^'  + chr( c + 64 ),
+                      '^'  + chr( c + 64 ).lower(),
+                      'C-' + chr( c + 64 ),
+                      'C-' + chr( c + 64 ).lower(), ]
+            char = chr( c )
+            for seq in xlate:
+                self.cctrans[ seq ] = char
+
+    @staticmethod
+    def _chkspeed( speed ):
+        try:
+            return SPEED[ int( speed ) ]
+        except KeyError:
+            return int( speed )
+
+    @termios_notrace
+    def tcgetattr( self, reset=False ):
+        if reset or self._attr is None:
+            self._attr = termios.tcgetattr( self.fd )
+        return self._attr
+
+    @termios_notrace
+    def tcsetattr( self, when=termios.TCSANOW ):
+        self.tcgetattr()
+        return termios.tcsetattr ( self.fd, when, self._attr )
+
+    def Xflag( self, c_elt, flag=None, set=None ):
+        self.tcgetattr()
+        if flag is None:
+            pass
+        elif set is None:
+            return self._attr[ c_elt ] & flag
+        elif set is True:
+            self._attr[ c_elt ] |= flag
+        elif set is False:
+            self._attr[ c_elt ] &= ~flag
+        elif isinstance( set, (int, long) ):
+            # If set is a number, flag is a mask
+            self._attr[ c_elt ] &= ~flag
+            self._attr[ c_elt ] |= set
+        return self._attr[ c_elt ]
+
+    def setflag( self, arg ):
+        try:
+            if arg[0] == '-':
+                data = FLAG[ arg[1:] ]
+            else:
+                data = FLAG[ arg ]
+        except KeyError:
+            raise # FIXME need better diag
+
+        try:
+            val = data[2]
+        except IndexError:
+            val = bool( arg[0] != '-' )
+
+        return self.Xflag( data[0], data[1], val )
+
+    # Currently unused
+    #
+    #def iflag( self, *args, **kwargs ):
+    #    return self.Xflag( TC_IFLAG, *args, **kwargs )
+    #
+    #def oflag( self, *args, **kwargs ):
+    #    return self.Xflag( TC_OFLAG, *args, **kwargs )
+    #
+    #def cflag( self, *args, **kwargs ):
+    #    return self.Xflag( TC_CFLAG, *args, **kwargs )
+    #
+    #def lflag( self, *args, **kwargs ):
+    #    return self.Xflag( TC_LFLAG, *args, **kwargs )
+
+    def getispeed( self ):
+        self.tcgetattr()
+        return self._attr[ TC_ISPEED ]
+
+    def setispeed( self, speed ):
+        self.tcgetattr()
+        self._attr[ TC_ISPEED ] = self._chkspeed( speed )
+
+    def getospeed( self ):
+        self.tcgetattr()
+        return self.Xflag( TC_OSPEED )
+
+    def setospeed( self, speed ):
+        self.tcgetattr()
+        self._attr[ TC_OSPEED ] = self._chkspeed( speed )
+
+    def getcc( self, key ):
+        self.tcgetattr()
+        return self._attr[ TC_CC ][ key ]
+
+    def setcc( self, key, char ):
+        self.tcgetattr()
+        if isinstance( char, (int, long) ):
+            char = chr( char & 0xff )
+        try:
+            char = self.cctrans[ char ]
+        except KeyError:
+            char = char[0]
+        self._attr[ TC_CC ][ key ] = char
+        return char
+
+    @termios_notrace
+    def getwinsz( self, fd=None ):
+        raw = fcntl.ioctl ( fd or self.fd, termios.TIOCGWINSZ, '  ' * 4 )
+        winsz = list( struct.unpack( '@4H', raw ) )
+        if not fd:
+            self._winsz = winsz
+        return winsz
+
+    @termios_notrace
+    def setwinsz( self, fd=None, winsz=None ):
+        if not winsz:
+            winsz = self._winsz
+        raw = struct.pack( '@4H', *winsz )
+        return fcntl.ioctl( fd or self.fd, termios.TIOCSWINSZ, raw )
+
+    @termios_notrace
+    def getldisc( self ):
+        raw = fcntl.ioctl( self.fd, termios.TIOCGETD, ' ' * 4 )
+        self._ldisc = struct.unpack( '@i', raw )[0]
+        return self._ldisc
+
+    @termios_notrace
+    def setldisc( self, n ):
+        raw = struct.pack( '@i', n )
+        return fcntl.ioctl( self.fd, termios.TIOCSETD, raw )
+
+
+def fold( flags, maxlen=75, indent=0, sep=' ' ):
+    lines   = []
+    current = []
+
+    maxlen -= indent
+    while flags:
+        current.append ( flags.pop( 0 ) )
+        text = sep.join( current )
+        if len( text ) >= maxlen:
+            flags.insert( 0, current.pop() ) # put it back
+            lines.append( sep.join( current ) )
+            current = []
+    if current:
+        lines.append( sep.join( current ) )
+    linesep = '\n' + ' ' * indent
+    return linesep.join( lines )
+
+def dispchar( c ):
+    n = ord( c )
+    #if n < 1:
+    #    return '<undef>'
+    if n < 31:
+        return '^' + chr( n + 64 )
+    if n == 0x7f:
+        return '^?'
+    else:
+        return c
+
+def make_display_values( tty ):
+    winsz  = tty.getwinsz()
+    ispeed = NTOSPEED[ tty.getispeed() ]
+    ospeed = NTOSPEED[ tty.getospeed() ]
+
+    if ispeed == ospeed:
+        line1 = [   'speed = {};'.format( ospeed ) ]
+    else:
+        line1 = [  'ispeed = {};'.format( ispeed ),
+                   'ospeed = {};'.format( ospeed ), ]
+    line1.append(    'rows = {};'.format( winsz[ WS_ROW ] ) )
+    line1.append( 'columns = {};'.format( winsz[ WS_COL ] ) )
+    if winsz[ WS_XPIXEL ] != 0 or winsz[ WS_YPIXEL ] != 0:
+        line1.append( 'ypixels = {};'.format( winsz[ WS_YPIXEL ] ) )
+        line1.append( 'xpixels = {};'.format( winsz[ WS_XPIXEL ] ) )
+    line1.append(    'line = {};'.format( tty.getldisc() ) )
+
+    char = []
+    for elt in CC_PARAM_LIST:
+        name = elt[0]
+        try:
+            val = tty.getcc( elt[1] )
+        except TypeError: # name not defined on this platform
+            continue
+        if name in ['time', 'min']:
+            try:
+                val = ord( val )
+            except TypeError: # sometimes already an int
+                pass
+        else:
+            val = dispchar( val )
+        char.append( '{} = {};'.format( name, val ) )
+
+    values = [ [] for x in (TC_IFLAG, TC_OFLAG, TC_CFLAG, TC_LFLAG) ]
+    for elt in FLAG_LIST:
+        name        = elt[0]
+        tc_xflag    = elt[1]
+        xflag_value = values[ tc_xflag ]
+        mask        = elt[ 2 ]
+        if mask is None:
+            continue
+        try:
+            isset = elt[3]
+            current = tty.Xflag( tc_xflag, mask )
+            if current == isset:
+                xflag_value.append( name )
+        except IndexError:
+            if tty.Xflag( tc_xflag, mask ):
+                xflag_value.append( name )
+            else:
+                xflag_value.append( '-' + name )
+
+    return [ line1, char, values ]
+
+
+def display_all( tty ):
+    line1, char, values = make_display_values( tty )
+    values.append( char )
+    width = tty.getwinsz( sys.stdout )[1] or 75
+    print( ' '.join( line1 ))
+    labels = ('iflags', 'oflags', 'cflags', 'lflags', 'cchars')
+    for label, flags in zip( labels, values ):
+        indent = 2 + len( label )
+        text   = fold( flags, maxlen=width, indent=indent )
+        print( label, text, sep=': ' )
+
+
+def get_args():
+    p = argparse.ArgumentParser( description='Print or change terminal characteristics.' )
+    p.add_argument( '-F', '--file', dest='device', default=sys.stdin, type=file, help='open and use the specified DEVICE instead of stdin')
+    p.add_argument( '-a', '--all', action='store_true', help='print all current settings in human-readable form' )
+    args, unknown = p.parse_known_args()
+    args.setting = unknown
+    return args
+
+def main():
+    args = get_args()
+    tty = Stty( fd=args.device )
+
+    if args.all:
+        display_all( tty )
+        return
+
+    # Expand any aliases
+    settings = []
+    for arg in args.setting:
+        if arg in ALIAS:
+            settings.extend( ALIAS[ arg ] )
+        else:
+            settings.append( arg )
+
+    while settings:
+        arg = settings.pop( 0 )
+        if arg in SPEED:
+            tty.setispeed( arg )
+            tty.setospeed( arg )
+        elif arg in ['ispeed', 'ospeed', 'speed']:
+            speed = settings.pop( 0 )
+            if arg[0] in ['i', 's']: tty.setispeed( speed )
+            if arg[0] in ['o', 's']: tty.setospeed( speed )
+        elif arg in CC_PARAM:
+            param = CC_PARAM[ arg ]
+            tty.setcc ( param[ 0 ], settings.pop( 0 ) )
+        elif arg in TERMSZ:
+            size = int( settings.pop( 0 ) )
+            winsz = tty.getwinsz()
+            winsz[ TERMSZ[ arg ][0] ] = size
+            tty.setwinsz()
+        elif arg in [ 'line' ]:
+            ldisc = settings.pop( 0 )
+            try:
+                ldisc = int( ldisc )
+            except (TypeError, ValueError):
+                attr = 'N_{}'.format( ldisc.upper() )
+                ldisc = getattr( _termios, attr )
+            print(ldisc)
+            tty.setldisc( ldisc )
+        else:
+            tty.setflag( arg )
+    tty.tcsetattr()
+
+
+if __name__ == '__main__':
+    main ()
+
+# eof
