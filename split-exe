@@ -1,32 +1,93 @@
-#!/bin/sh
-# $Id: split-exe,v 1.3 2010/04/20 19:03:52 friedman Exp $
+#!/usr/bin/env perl
+# split-exe --- split executables or objects into separate sections
 
-ofmt="-O binary"
-case $1 in
-  -O ) ofmt="-O $2"; shift; shift ;;
-esac
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2006-03-30
+# Public domain
 
-for exe in ${1+"$@"}; do
-  name=`basename "$exe"`
-  mkdir -p "$name.sections"
+# $Id$
 
-  set x `objdump -h "$exe" | sed -ne '/^ *[0-9]* \([^ ]*\)  *[0-9a-f].*/!d;s//\1/p'`
-  shift
+use strict;
+use warnings qw(all);
 
-  for section in ${1+"$@"}; do
-    echo $name: $section
-    outname=`echo $section | sed -e 's/^\./_/' -e 'y/\//_/'`
+use FindBin;
+use lib "$FindBin::Bin/../../lib/perl";
+use lib "$ENV{HOME}/lib/perl";
 
-    # We have to mangle addresses and flags to get objcopy to work for all
-    # possible sections.
-    objcopy \
-        --only-section           $section   \
-        --change-section-address $section=0 \
-        --change-section-lma     $section=0 \
-        --change-section-vma     $section=0 \
-        --set-section-flags      $section=contents,load \
-        $ofmt \
-        "$exe" \
-        "$name.sections/$outname"
-  done
-done
+use NF::FileUtil    qw(:all);
+use NF::PrintObject qw(:all);
+
+# Like `` but avoids shell exec/reparsing.
+sub bt
+{
+  local $SIG{__WARN__} = sub { return };
+  local $/ = undef;
+  open ( my $fh, "-|", @_ ) or die "exec: $_[0]: $!\n";
+  return <$fh>;
+}
+
+sub sections_readelf
+{
+  local $_ = bt( $ENV{READELF} || 'readelf', '-WS', @_ );
+
+  my @section;
+  # [idx], name, type, address, off, size, etc
+  while (/^\s*\[\s*\d+\]\s(\S+)\s+\S+\s+[0-9a-f]+\s+([0-9a-f]+)\s+([0-9a-f]+)/mig)
+    {
+      push @section, [ $1, hex( $2 ), hex( $3 ) ];
+    }
+  return @section;
+}
+
+sub sections_objdump
+{
+  local $_ = bt( $ENV{OBJDUMP} || 'objdump', '-wh', @_ );
+  my @section;
+  # idx, name, size, vma, lma, off, etc
+  while (/^\s*\d+\s+(\S+)\s+([0-9a-f]+)(?:\s+\S+){2}\s+([0-9a-f]+)/mig)
+    {
+      push @section, [ $1, hex( $3 ), hex( $2 ) ];
+    }
+  return @section;
+}
+
+sub contents_range
+{
+  my ($fh, $off, $size) = @_;
+  my $buf = "";
+
+  xsysseek( $fh, $off );
+  xsysread( $fh, $buf, $size );
+  return $buf;
+}
+
+sub main
+{
+  my $file = shift;
+  my $exe = xsysopen( $file );
+  xsysread ($exe, my $magic, 4);
+
+  my @section = ( $magic eq "\x7fELF"
+                  ? sections_readelf( $file )
+                  : sections_objdump( $file ) )
+    or exit( 1 );
+
+  (my $basename = $file) =~ s=^.*/==;
+  my $dir = "$basename.sections";
+  mkdirhier ( $dir );
+
+  for my $elt (@section)
+    {
+      my ($name, $off, $siz) = @$elt;
+      $name =~ s=^.=_=;
+
+      print( "$basename: $name\n" );
+      my $outfh = xsysopen( "$dir/$name", "w" );
+      print $outfh contents_range( $exe, $off, $siz );
+      close( $outfh );
+    }
+}
+
+main( @ARGV );
+
+# eof
