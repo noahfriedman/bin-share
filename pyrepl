@@ -1,0 +1,42 @@
+#!/usr/bin/env python
+# pyrepl --- interactive python interpreter with easier to read output
+
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2018-09-05
+# Public domain
+
+# $Id$
+
+# Commentary:
+# Code:
+
+from   __future__ import print_function
+
+import sys
+import platform
+import code
+import subprocess
+import pprint
+
+repl_pp = pprint.PrettyPrinter( indent=2, width=40 )
+def pp( *args, **kwargs ):
+    for arg in args:
+        repl_pp.pprint( arg, **kwargs )
+
+def bt( cmd ):
+    return subprocess.check_output( [cmd] ).rstrip( ' \t\r\n' )
+
+if __name__ == '__main__':
+    # Don't display 'None' if there is nothing to display.
+    sys.displayhook = lambda arg: (arg is None) or pp( arg )
+    code.interact( local = locals(),
+                   banner = '{} {}.{}.{} [{}] {}-{}'.format(
+                       sys.subversion[ 0 ],
+                       sys.version_info.major,
+                       sys.version_info.minor,
+                       sys.version_info.micro,
+                       platform.python_build()[1],
+                       sys.platform,
+                       platform.machine(), ))
+
+# eof
