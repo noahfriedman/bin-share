@@ -5,7 +5,7 @@
 # Created: 2018-09-05
 # Public domain
 
-# $Id$
+# $Id: pyrepl,v 1.1 2018/11/21 01:44:13 friedman Exp $
 
 # Commentary:
 # Code:
@@ -29,14 +29,23 @@ def bt( cmd ):
 if __name__ == '__main__':
     # Don't display 'None' if there is nothing to display.
     sys.displayhook = lambda arg: (arg is None) or pp( arg )
-    code.interact( local = locals(),
-                   banner = '{} {}.{}.{} [{}] {}-{}'.format(
-                       sys.subversion[ 0 ],
-                       sys.version_info.major,
-                       sys.version_info.minor,
-                       sys.version_info.micro,
-                       platform.python_build()[1],
-                       sys.platform,
-                       platform.machine(), ))
+
+    banner = '{} {}.{}.{} [{}] {}-{}'.format(
+        platform.python_implementation(),
+        sys.version_info.major,
+        sys.version_info.minor,
+        sys.version_info.micro,
+        platform.python_build()[1],
+        sys.platform,
+        platform.machine(), )
+    exitmsg = ''
+
+    # non-builtin symbols to be present at start in the repl
+    local = { 'bt' : bt, }
+
+    try:               # python3
+        code.interact( local=local, banner=banner, exitmsg=exitmsg )
+    except TypeError:  # python2
+        code.interact( local=local, banner=banner )
 
 # eof
