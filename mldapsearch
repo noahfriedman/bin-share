@@ -5,12 +5,14 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.16 2017/08/12 01:10:36 friedman Exp $
+# $Id: mldapsearch,v 1.17 2017/08/16 01:24:44 friedman Exp $
 
 use strict;
 use warnings qw(all);
 
 use Net::LDAP;
+use Net::LDAP::Util qw(:url);
+use Net::LDAP::Constant qw(LDAP_REFERRAL);
 use Getopt::Long;
 
 use FindBin;
@@ -23,6 +25,7 @@ our %opt = ( host      => 'ldap',
              base      => $ENV{LDAP_BASEDN},
              scope     => 'sub',  # base, one|single, sub|subtree, children
              deref     => 'never',  # never, search, find, always
+             follow    => 1,
 
              onerror   => undef,  # undef, die, warn
              verify    => 'none',
@@ -71,12 +74,14 @@ sub parse_options
       "s|scope=s",             => \$opt{scope},
       "P|cert=s"               => \$opt{cafile},
 
+      "f|follow-referrals!"    => \$opt{follow},
       "n|sizelimit=i"          => \$opt{sizelimit},
       "wrap=i"                 => \$opt{wrap},
       "l|lowercase|lcase"      => \$opt{lcase},
       "sort!"                  => \$opt{sort},
       "types-only"             => \$opt{typesonly},
 
+      "F"                      => sub { $opt{follow} = 0 },
       "E|exclude-attribute=s@" => \$opt{exclude},
       "O|oc|objectclass=s@"    => \$opt{oc_attrs},
       #"o|oa|operationalattr"  => \$opt{op_attrs},
@@ -247,42 +252,50 @@ sub do_search
       my %dparm = map { $_ => $parm{$_}
                       } (qw(host bind
                             base scope deref
-                            filter attrs exclude
+                            filter attrs exclude control
                           ));
 
       print STDERR object_pp (\%dparm), "\n";
     }
 
   my $result = $ldap->search (%parm);
-  if ($result->is_error)
-    {
-      printf(STDERR "Error: %s\n%s\n",
-             $result->error_name,
-             $result->error_text);
-      return;
-    }
-
+  return unless $result;
+  return print_ldap_err( $result )
+    if $result->is_error && $result->code != LDAP_REFERRAL;
   return $result;
+}
+
+sub print_ldap_err
+{
+  my $result = shift;
+  # Sometimes message has trailing NULs
+  (my $msg = $result->{errorMessage}) =~ s/\0//;
+
+  printf( STDERR "Error: %s\n%s\n%s\n",
+          $result->error_name,
+          $result->error_text,
+          $msg );
+  return;
 }
 
 sub do_print
 {
-  my ($result, $ldap) = (shift, shift);
+  my ($result, $ldap, $opt) = (shift, shift, shift);
 
-  my @lopt   = (change    => undef     );
-  push @lopt,  (sort      => 1         )  if $opt{sort};
-  push @lopt,  (wrap      => $opt{wrap})  if $opt{wrap};
-  push @lopt,  (lowercase => 1         )  if $opt{lcase};
+  my @lopt   = (change    => undef       );
+  push @lopt,  (sort      => 1           ) if $opt->{sort};
+  push @lopt,  (wrap      => $opt->{wrap}) if $opt->{wrap};
+  push @lopt,  (lowercase => 1           ) if $opt->{lcase};
 
   # The default class doesn't do anything useful with schema.
   push @lopt,  (schema => $ldap->schema)
-    if $opt{ldifclass} ne 'Net::LDAP::LDIF' && $ldap && $ldap->can('schema');
+    if $opt->{ldifclass} ne 'Net::LDAP::LDIF' && $ldap && $ldap->can('schema');
 
   map { my $entry = $_;
-        map { $entry->delete ($_) } @{$opt{exclude}} if $entry->can ('delete');
-        if ($opt{dump})
+        map { $entry->delete ($_) } @{$opt->{exclude}} if $entry->can ('delete');
+        if ($opt->{dump})
           {
-            my $obj = ($opt{dump} > 1
+            my $obj = ($opt->{dump} > 1
                        ? $entry
                        : ($entry->{attrs}
                           ? $entry->{attrs}
@@ -309,15 +322,51 @@ sub objectclass_attrs
       } @_;
 }
 
+sub new_ldap
+{
+  my $_opt = shift || \%opt;
+
+  my $ldap = Net::LDAP->new ($_opt->{host}, %$_opt) || die "$@\n";
+  $ldap->bind ($_opt->{bind}, %$_opt) if defined $_opt->{bind};
+  return $ldap;
+}
+
+sub stdsearch
+{
+  my ($ldap, $opt) = (shift, shift);
+
+  my $result = do_search( $ldap, $opt, @_ );
+  return unless $result;
+  if ($result->code == LDAP_REFERRAL)
+    {
+      return print_ldap_err( $result ) unless ($opt->{follow});
+      for my $uri (@{$result->{referral}})
+        {
+          print( STDERR "** Following referral $uri\n" )
+            if defined $opt->{debug};
+
+          my %parsed = ldap_url_parse( $uri );
+          my %nopt = (%$opt, %parsed,
+                      scope  => $opt->{scope},
+                      follow => 0);  # Don't follow nested referrals
+          my $nldap = new_ldap( \%nopt );
+          stdsearch( $nldap, \%nopt, @_ );
+        }
+    }
+  else
+    {
+      do_print( $result, $ldap, $opt );
+    }
+}
+
 sub main
 {
   parse_options (\@_);
-  my $ldap = Net::LDAP->new ($opt{host}, %opt) || die "$@\n";
-  $ldap->bind ($opt{bind}, %opt) if defined $opt{bind};
+  my $ldap = new_ldap();
 
   if ($opt{metaquery} eq 'rootdse')
     {
-      do_print (get_root_dse ($ldap, @_), $ldap);
+      do_print (get_root_dse ($ldap, @_), $ldap, \%opt);
     }
   elsif ($opt{metaquery} eq 'schema')
     {
@@ -325,7 +374,7 @@ sub main
         {
           push @_, objectclass_attrs ($ldap, @{$opt{oc_attrs}});
           my $result = do_schema_search ($ldap, @_);
-          do_print ($result, $ldap) if $result;
+          do_print ($result, $ldap, \%opt) if $result;
         }
       else
         {
@@ -334,13 +383,12 @@ sub main
     }
   else
     {
-      push @_, objectclass_attrs ($ldap, @{$opt{oc_attrs}});
-      my $result = do_search ($ldap, @_);
-      do_print ($result, $ldap) if $result;
+      push @_, objectclass_attrs( $ldap, @{$opt{oc_attrs}} );
+      stdsearch( $ldap, \%opt, @_ );
     }
 }
 
-main (@ARGV);
+main( @ARGV );
 
 1;
 
