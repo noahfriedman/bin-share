@@ -5,7 +5,7 @@
 # Created: 2018-10-30
 # Public domain
 
-# $Id$
+# $Id: pystty,v 1.1 2018/11/17 03:28:00 friedman Exp $
 
 # Commentary:
 
@@ -414,9 +414,9 @@ def termios_notrace( fn ):
     def wrapper( *args, **kwargs ):
         try:
             return fn( *args, **kwargs )
-        except (IOError, termios.error) as err:
+        except (IOError, OSError, termios.error) as err:
             prog = sys.argv[0][ sys.argv[0].rfind( '/' ) + 1 : ]
-            print( prog, fn.__name__, args[0].fd.name, err[1],
+            print( prog, fn.__name__, args[0].fd_name, err[1],
                    sep=': ', file=sys.stderr )
             sys.exit( 1 )
     return wrapper
@@ -426,9 +426,9 @@ class Stty( object ):
 
     def __init__( self, fd=sys.stdin, when=termios.TCSANOW ):
         self._cctrans_init()
-        self.fd    = fd
-        self.when  = when
-        self._attr = None
+        self._open( fd )
+        self.when    = when
+        self._attr   = None
 
     @classmethod
     def _cctrans_init( self ):
@@ -459,6 +459,16 @@ class Stty( object ):
             char = chr( c )
             for seq in xlate:
                 self.cctrans[ seq ] = char
+
+    @termios_notrace
+    def _open( self, _file ):
+        if isinstance( _file, file ):
+            self.fd_name = _file.name
+            self.fd      = _file
+        else:
+            fl = os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY
+            self.fd_name = _file
+            self.fd = os.open( _file, fl)
 
     @staticmethod
     def _chkspeed( speed ):
@@ -572,14 +582,65 @@ class Stty( object ):
 
     @termios_notrace
     def getldisc( self ):
-        raw = fcntl.ioctl( self.fd, termios.TIOCGETD, ' ' * 4 )
+        raw = fcntl.ioctl( self.fd, termios.TIOCGETD, '\x00' * 4 )
         self._ldisc = struct.unpack( '@i', raw )[0]
         return self._ldisc
 
     @termios_notrace
     def setldisc( self, n ):
-        raw = struct.pack( '@i', n )
+        try:
+            raw = struct.pack( '@i', n )
+        except struct.error as err:
+            raise OSError( self, 'unknown line discipline "{}"'.format( n ))
         return fcntl.ioctl( self.fd, termios.TIOCSETD, raw )
+
+    def ldisc_name_maps( self ):
+        filt = lambda x: filter( lambda elt: elt.find( 'N_' ) == 0, dir( x ) )
+        names = filt( _termios )
+        names.extend( filt( termios ) )
+        formap = { name[2:].lower() : getattr( _termios, name ) for name in names }
+        revmap = { v : k for k, v in formap.items() }
+        return (formap, revmap)
+
+    tcgets_param = {
+        'Linux'   : { 'template'  : '@4I B {}c 2I'.format( termios.NCCS ),
+                      'bufsize'   : 60,
+                      'TC_LINE'   : 4, }, }
+    tcsets_when = { termios.TCSANOW   : getattr( termios, 'TCSETS',  None ),
+                    termios.TCSADRAIN : getattr( termios, 'TCSETSW', None ),
+                    termios.TCSAFLUSH : getattr( termios, 'TCSETSF', None ), }
+
+    @termios_notrace
+    def _tcgets( self, reset=False ):
+        try:
+            param = self.tcgets_param[ OS ]
+            bufsize = param[ 'bufsize' ]
+            buf  = fcntl.ioctl( self.fd, termios.TCGETS, '\x00' * bufsize )
+            return list( struct.unpack( param[ 'template' ], buf ) )
+        except (KeyError, AttributeError):
+            pass
+
+    @termios_notrace
+    def _tcsets( self, attr ):
+        template = self.tcgets_param[ OS ][ 'template' ]
+        raw  = struct.pack( template, *attr )
+        when = self.tcsets_when[ self.when ]
+        return fcntl.ioctl( self.fd, when, raw )
+
+    def getcline( self ):
+        attr = self._tcgets()
+        if attr:
+            return attr[ self.tcgets_param[ OS ][ 'TC_LINE' ] ]
+
+    @termios_notrace
+    def setcline( self, line ):
+        attr = self._tcgets()
+        if attr:
+            attr[ self.tcgets_param[ OS ][ 'TC_LINE' ] ] = line
+            try:
+                self._tcsets( attr )
+            except struct.error as err:
+                raise OSError( self, 'unknown line discipline "{}"'.format( line ))
 
 
 def fold( flags, maxlen=75, indent=0, sep=' ' ):
@@ -625,7 +686,25 @@ def make_display_values( tty ):
     if winsz[ WS_XPIXEL ] != 0 or winsz[ WS_YPIXEL ] != 0:
         line1.append( 'ypixels = {};'.format( winsz[ WS_YPIXEL ] ) )
         line1.append( 'xpixels = {};'.format( winsz[ WS_XPIXEL ] ) )
-    line1.append(    'line = {};'.format( tty.getldisc() ) )
+
+    cline = tty.getcline()
+    ldisc = tty.getldisc()
+    ntoi, iton = tty.ldisc_name_maps()
+    if cline is not None:
+        if cline > 0 and cline in iton:
+            line1.append( 'line = {} ({});'.format( cline, iton[ cline ] ))
+        else:
+            line1.append( 'line = {};'.format( cline ) )
+
+        if ldisc > 0 and ldisc in iton:
+            line1.append( 'disc = {} ({});'.format( ldisc, iton[ ldisc] ))
+        else:
+            line1.append( 'disc = {};'.format( ldisc ))
+    else:
+        if ldisc > 0 and ldisc in iton:
+            line1.append( 'line = {} ({});'.format( ldisc, iton[ ldisc] ))
+        else:
+            line1.append( 'line = {};'.format( ldisc ))
 
     char = []
     for elt in CC_PARAM_LIST:
@@ -679,7 +758,7 @@ def display_all( tty ):
 
 def get_args():
     p = argparse.ArgumentParser( description='Print or change terminal characteristics.' )
-    p.add_argument( '-F', '--file', dest='device', default=sys.stdin, type=file, help='open and use the specified DEVICE instead of stdin')
+    p.add_argument( '-F', '--file', dest='device', default=sys.stdin, help='open and use the specified DEVICE instead of stdin')
     p.add_argument( '-a', '--all', action='store_true', help='print all current settings in human-readable form' )
     args, unknown = p.parse_known_args()
     args.setting = unknown
@@ -718,15 +797,18 @@ def main():
             winsz = tty.getwinsz()
             winsz[ TERMSZ[ arg ][0] ] = size
             tty.setwinsz()
-        elif arg in [ 'line' ]:
+        elif arg in [ 'line', 'disc' ]:
             ldisc = settings.pop( 0 )
             try:
                 ldisc = int( ldisc )
             except (TypeError, ValueError):
-                attr = 'N_{}'.format( ldisc.upper() )
-                ldisc = getattr( _termios, attr )
-            print(ldisc)
-            tty.setldisc( ldisc )
+                ntoi, iton = tty.ldisc_name_maps()
+                if ldisc.lower() in ntoi:
+                    ldisc = ntoi[ ldisc.lower() ]
+            if arg == 'line' and tty.getcline() is not None:
+                tty.setcline( ldisc )
+            else:
+                tty.setldisc( ldisc )
         else:
             tty.setflag( arg )
     tty.tcsetattr()
