@@ -5,7 +5,7 @@
 # Created: 2012-09-28
 # Public domain.
 
-# $Id: mldapsearch,v 1.17 2017/08/16 01:24:44 friedman Exp $
+# $Id: mldapsearch,v 1.18 2018/11/22 01:44:41 friedman Exp $
 
 use strict;
 use warnings qw(all);
@@ -260,8 +260,11 @@ sub do_search
 
   my $result = $ldap->search (%parm);
   return unless $result;
-  return print_ldap_err( $result )
-    if $result->is_error && $result->code != LDAP_REFERRAL;
+  if ($result->is_error && $result->code != LDAP_REFERRAL)
+    {
+      print_ldap_err( $result );
+      return unless $result->{entries};
+    }
   return $result;
 }
 
