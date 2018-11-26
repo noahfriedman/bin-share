@@ -1,6 +1,8 @@
 #!/bin/sh
-# $Id: stty-canon,v 1.7 2017/06/07 00:38:10 friedman Exp $
+# $Id: stty-canon,v 1.8 2017/06/12 20:25:53 friedman Exp $
 # Public domain.
+
+stty=${STTY-stty}
 
 #stty_canon()
 {
@@ -8,33 +10,33 @@
     # them aren't recognized; stty might not evaluate the rest of the
     # arguments.
 
-    stty icanon tabs
-    stty intr '^C' kill '^U' quit '^\\' eof '^D'
-    stty susp '^Z'
-    stty -ixon -ixoff -ixany
-    stty onlcr -ocrnl -onlret
+    $stty icanon tabs
+    $stty intr '^C' kill '^U' quit '^\\' eof '^D'
+    $stty susp '^Z'
+    $stty -ixon -ixoff -ixany
+    $stty onlcr -ocrnl -onlret
 
     case $1 in
         -safe ) shift ;;
         # these settings can make some terminals unusable.
-        *     ) stty cs8 -istrip -iexten -parenb ;;
+        *     ) $stty cs8 -istrip -iexten -parenb ;;
     esac
 
     case ${INSIDE_EMACS+t}${EMACS+t}:$TERM in
         *:xterm* )
-            stty erase '^?'
-            stty opost 2> /dev/null ;;
+            $stty erase '^?'
+            $stty opost 2> /dev/null ;;
 
         *:eterm* ) # M-x term, M-x ansi-term
-            stty -icrnl -inlcr  onlcr  echo ;;
+            $stty -icrnl -inlcr  onlcr  echo ;;
 
         t* | *:emacs* )
-            stty -icrnl -inlcr -onlcr -echo ;;
+            $stty -icrnl -inlcr -onlcr -echo ;;
     esac
 
     case $# in
         0 ) : ;;
-        * ) stty ${1+"$@"} ;;
+        * ) $stty ${1+"$@"} ;;
     esac
 }
 
