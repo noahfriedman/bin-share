@@ -5,7 +5,7 @@
 # Created: 2018-10-30
 # Public domain
 
-# $Id: pystty,v 1.1 2018/11/17 03:28:00 friedman Exp $
+# $Id: pystty,v 1.2 2018/11/22 02:32:37 friedman Exp $
 
 # Commentary:
 
@@ -27,23 +27,15 @@ import re
 import time
 import functools
 
-
-TC_IFLAG  = 0  # tc*etattr fields
-TC_OFLAG  = 1
-TC_CFLAG  = 2
-TC_LFLAG  = 3
-TC_ISPEED = 4
-TC_OSPEED = 5
-TC_CC     = 6
-
-WS_ROW    = 0  # TIOC*WINSZ fields
-WS_COL    = 1
-WS_XPIXEL = 2
-WS_YPIXEL = 3
-
 OS = os.uname()[0]
 
 def CTRL(c): return ord( c.upper() ) - 64
+
+# This just generates global variables; there are no objects.
+class _Enum():
+    def __init__( self, *args ):
+        for n, name in enumerate( args ):
+            globals()[ name ] = n
 
 # Singleton wrapper around termios module to handle differences between
 # operating systems, including potentially known but undefined attributes.
@@ -87,7 +79,6 @@ class PseudoTermios( object ):
         N_SLCAN    = 17 # Serial / USB serial CAN Adaptors
         N_PPS      = 18 # Pulse per Second (GPS, etc)
 
-
     elif OS == 'FreeBSD':
         B7200      =   7200
         B14400     =  14400
@@ -119,89 +110,126 @@ class PseudoTermios( object ):
         CDSR_OFLOW = 0x00080000	# DSR flowctl of output
         CCAR_OFLOW = 0x00100000	# DCD flowctl of output
 
+_termios = _t = PseudoTermios()
 
-_termios = PseudoTermios()
+POSIX = True
+
+_Enum( 'TC_IFLAG',	# tc*etattr fields
+       'TC_OFLAG',
+       'TC_CFLAG',
+       'TC_LFLAG',
+       'TC_ISPEED',
+       'TC_OSPEED',
+       'TC_CC', )
 
 FLAG_LIST = (
-    ( 'ignbrk',  TC_IFLAG,  termios.IGNBRK  ), # break handling
-    ( 'brkint',  TC_IFLAG,  termios.BRKINT  ),
-    ( 'ignpar',  TC_IFLAG,  termios.IGNPAR  ), # parity handling
-    ( 'parmrk',  TC_IFLAG,  termios.PARMRK  ),
-    ( 'inpck',   TC_IFLAG,  termios.INPCK   ),
-    ( 'istrip',  TC_IFLAG,  termios.ISTRIP  ), # strip 8th bit
-    ( 'inlcr',   TC_IFLAG,  termios.INLCR   ), # cr/lf handling
-    ( 'igncr',   TC_IFLAG,  termios.IGNCR   ),
-    ( 'icrnl',   TC_IFLAG,  termios.ICRNL   ),
-    ( 'iuclc',   TC_IFLAG, _termios.IUCLC   ), # non-posix
-    ( 'ixon',    TC_IFLAG,  termios.IXON    ), # flow control handling
-    ( 'ixany',   TC_IFLAG,  termios.IXANY   ),
-    ( 'ixoff',   TC_IFLAG,  termios.IXOFF   ),
-    ( 'imaxbel', TC_IFLAG, _termios.IMAXBEL ), # non-posix
-    ( 'iutf8',   TC_IFLAG, _termios.IUTF8   ), # non-posix
+    ( 'ignbrk',     TC_IFLAG,  termios.IGNBRK,     None,     False, POSIX, 'ignore break chars' ),
+    ( 'brkint',     TC_IFLAG,  termios.BRKINT,     None,     True,  POSIX, 'breaks cause an interrupt signal' ),
+    ( 'ignpar',     TC_IFLAG,  termios.IGNPAR,     None,     None,  POSIX, 'ignore chars with parity errors' ),
+    ( 'parmrk',     TC_IFLAG,  termios.PARMRK,     None,     None,  POSIX, 'mark parity errors with a 255-0-char sequence' ),
+    ( 'inpck',      TC_IFLAG,  termios.INPCK,      None,     None,  POSIX, 'enable input parity checking' ),
+    ( 'istrip',     TC_IFLAG,  termios.ISTRIP,     None,     None,  POSIX, 'clear 8th bit of input chars' ),
+    ( 'inlcr',      TC_IFLAG,  termios.INLCR,      None,     False, POSIX, 'xlate newline to carriage return' ),
+    ( 'igncr',      TC_IFLAG,  termios.IGNCR,      None,     False, POSIX, 'ignore carriage return' ),
+    ( 'icrnl',      TC_IFLAG,  termios.ICRNL,      None,     True,  POSIX, 'xlate carriage return to newline' ),
+    ( 'iuclc',      TC_IFLAG, _termios.IUCLC,      None,     False, False, 'xlate uppercase chars to lowercase' ),
+    ( 'ixon',       TC_IFLAG,  termios.IXON,       None,     None,  POSIX, 'enable xon/xoff flow control'),
+    ( 'ixany',      TC_IFLAG, _termios.IXANY,      None,     False, False, 'any char restarts output, not only start char' ),
+    ( 'ixoff',      TC_IFLAG,  termios.IXOFF,      None,     False, POSIX, 'enable sending start/stop chars' ),
+    ( 'imaxbel',    TC_IFLAG, _termios.IMAXBEL,    None,     True,  False, 'beep and do not flush a full input buffer on a character' ),
+    ( 'iutf8',      TC_IFLAG, _termios.IUTF8,      None,     False, False, 'assume input chars are UTF-8 encoded' ),
 
-    ( 'opost',   TC_OFLAG,  termios.OPOST,  ),
-    ( 'olcuc',   TC_OFLAG, _termios.OLCUC,  ), # non-posix
-    ( 'onlcr',   TC_OFLAG,  termios.ONLCR,  ),
-    ( 'ocrnl',   TC_OFLAG,  termios.OCRNL,  ),
-    ( 'onocr',   TC_OFLAG,  termios.ONOCR,  ),
-    ( 'onlret',  TC_OFLAG,  termios.ONLRET, ),
-    ( 'ofill',   TC_OFLAG, _termios.OFILL,  ),
-    ( 'ofdel',   TC_OFLAG, _termios.OFDEL,  ),
-    ( 'nl0',     TC_OFLAG, _termios.NLDLY,  _termios.NL0   ),
-    ( 'nl1',     TC_OFLAG, _termios.NLDLY,  _termios.NL1   ),
-    ( 'cr0',     TC_OFLAG, _termios.CRDLY,  _termios.CR0   ),
-    ( 'cr1',     TC_OFLAG, _termios.CRDLY,  _termios.CR1   ),
-    ( 'cr2',     TC_OFLAG, _termios.CRDLY,  _termios.CR2   ),
-    ( 'cr3',     TC_OFLAG, _termios.CRDLY,  _termios.CR3   ),
-    ( 'tab0',    TC_OFLAG, _termios.TABDLY, _termios.TAB0  ),
-    ( 'tab1',    TC_OFLAG, _termios.TABDLY, _termios.TAB1  ),
-    ( 'tab2',    TC_OFLAG, _termios.TABDLY, _termios.TAB2  ),
-    ( 'tab3',    TC_OFLAG, _termios.TABDLY, _termios.TAB3  ),
-    ( 'xtabs',   TC_OFLAG, _termios.TABDLY, _termios.XTABS ),
-    ( 'bs0',     TC_OFLAG, _termios.BSDLY,  _termios.BS0   ), # not impl
-    ( 'bs1',     TC_OFLAG, _termios.BSDLY,  _termios.BS1   ), # not impl
-    ( 'ff0',     TC_OFLAG, _termios.FFDLY,  _termios.FF0   ),
-    ( 'ff1',     TC_OFLAG, _termios.FFDLY,  _termios.FF1   ),
-    ( 'vt0',     TC_OFLAG, _termios.VTDLY,  _termios.VT0   ),
-    ( 'vt1',     TC_OFLAG, _termios.VTDLY,  _termios.VT1   ),
+    ( 'opost',      TC_OFLAG,  termios.OPOST,      None,     True,  POSIX, 'postprocess output' ),
+    ( 'olcuc',      TC_OFLAG, _termios.OLCUC,      None,     False, False, 'xlate lowercase chars to uppercase' ),
+    ( 'onlcr',      TC_OFLAG, _termios.ONLCR,      None,     True,  False, 'xlate newline to carriage return-newline' ),
+    ( 'ocrnl',      TC_OFLAG, _termios.OCRNL,      None,     False, False, 'xlate carriage return to newline' ),
+    ( 'onocr',      TC_OFLAG, _termios.ONOCR,      None,     False, False, 'do not print carriage returns in 1st column' ),
+    ( 'onlret',     TC_OFLAG, _termios.ONLRET,     None,     False, False, 'newline performs a carriage return'),
+    ( 'ofill',      TC_OFLAG, _termios.OFILL,      None,     False, False, 'use fill (padding) chars instead of timing for delays' ),
+    ( 'ofdel',      TC_OFLAG, _termios.OFDEL,      None,     False, False, 'use DEL chars for fill instead of NUL' ),
+    ( 'nl0',        TC_OFLAG, _termios.NLDLY,      _t.NL0,   True,  'nlN', 'newline delay style, N in [0..1]' ),
+    ( 'nl1',        TC_OFLAG, _termios.NLDLY,      _t.NL1,   None,  False, None ),
+    ( 'cr0',        TC_OFLAG, _termios.CRDLY,      _t.CR0,   True,  'crN', 'carriage return delay style, N in [0..3]' ),
+    ( 'cr1',        TC_OFLAG, _termios.CRDLY,      _t.CR1,   None,  False, None ),
+    ( 'cr2',        TC_OFLAG, _termios.CRDLY,      _t.CR2,   None,  False, None ),
+    ( 'cr3',        TC_OFLAG, _termios.CRDLY,      _t.CR3,   None,  False, None ),
+    ( 'tab0',       TC_OFLAG, _termios.TABDLY,     _t.TAB0,  True,  'tabN', 'horizontal tab delay style, N in [0..3]' ),
+    ( 'tab1',       TC_OFLAG, _termios.TABDLY,     _t.TAB1,  None,  False, None ),
+    ( 'tab2',       TC_OFLAG, _termios.TABDLY,     _t.TAB2,  None,  False, None ),
+    ( 'tab3',       TC_OFLAG, _termios.TABDLY,     _t.TAB3,  None,  False, None ),
+    ( 'xtabs',      TC_OFLAG, _termios.TABDLY,     _t.XTABS, None,  False, None ),
+    ( 'bs0',        TC_OFLAG, _termios.BSDLY,      _t.BS0,   True,  'bsN', 'backspace delay style, N in [0..1]' ), # not impl
+    ( 'bs1',        TC_OFLAG, _termios.BSDLY,      _t.BS1,   None,  False, None ),
+    ( 'ff0',        TC_OFLAG, _termios.FFDLY,      _t.FF0,   True,  'ffN', 'form feed delay style, N in [0..1]' ),
+    ( 'ff1',        TC_OFLAG, _termios.FFDLY,      _t.FF1,   None,  False, None ),
+    ( 'vt0',        TC_OFLAG, _termios.VTDLY,      _t.VT0,   True,  'vtN', 'vertical tab delay style, N in [0..1]' ),
+    ( 'vt1',        TC_OFLAG, _termios.VTDLY,      _t.VT1,   None,  False, None ),
 
-    ( 'cs5',     TC_CFLAG,  termios.CSIZE, termios.CS5 ),
-    ( 'cs6',     TC_CFLAG,  termios.CSIZE, termios.CS6 ),
-    ( 'cs7',     TC_CFLAG,  termios.CSIZE, termios.CS7 ),
-    ( 'cs8',     TC_CFLAG,  termios.CSIZE, termios.CS8 ),
-    ( 'cstopb',  TC_CFLAG,  termios.CSTOPB  ),
-    ( 'cread',   TC_CFLAG,  termios.CREAD   ),
-    ( 'parenb',  TC_CFLAG,  termios.PARENB  ),
-    ( 'parodd',  TC_CFLAG,  termios.PARODD  ),
-    ( 'hupcl',   TC_CFLAG,  termios.HUPCL   ),
-    ( 'clocal',  TC_CFLAG,  termios.CLOCAL  ),
-    ( 'crtscts', TC_CFLAG, _termios.CRTSCTS ), # non-posix
-    ( 'cmspar',  TC_CFLAG, _termios.CMSPAR  ), # non-posix
-    ( 'loblk',   TC_CFLAG, _termios.LOBLK   ), # non-posix
-    ( 'dsrflow', TC_CFLAG, _termios.CDSR_OFLOW ), # freebsd
-    ( 'dtrflow', TC_CFLAG, _termios.CDTR_IFLOW ), # freebsd
-    ( 'mdmbuf',  TC_CFLAG, _termios.CCAR_OFLOW ), # freebsd
+    ( 'cs5',        TC_CFLAG, _termios.CSIZE,      _t.CS5,   None,  'crN', 'carriage return delay style, N in [0..3]' ),
+    ( 'cs6',        TC_CFLAG, _termios.CSIZE,      _t.CS6,   None,  False, None ),
+    ( 'cs7',        TC_CFLAG, _termios.CSIZE,      _t.CS7,   None,  False, None ),
+    ( 'cs8',        TC_CFLAG, _termios.CSIZE,      _t.CS8,   None,  False, None ),
+    ( 'cstopb',     TC_CFLAG,  termios.CSTOPB,     None,     None,  POSIX, "use 2 stop bits per char (1 with '-')" ),
+    ( 'cread',      TC_CFLAG,  termios.CREAD,      None,     True,  POSIX, 'allow input to be received' ),
+    ( 'parenb',     TC_CFLAG,  termios.PARENB,     None,     None,  POSIX, 'generate parity bit in output and expect parity bit in input' ),
+    ( 'parodd',     TC_CFLAG,  termios.PARODD,     None,     None,  POSIX, "set odd parity (or even parity with '-')" ),
+    ( 'hupcl',      TC_CFLAG,  termios.HUPCL,      None,     None,  POSIX, 'send hangup signal when last process closes tty' ),
+    ( 'clocal',     TC_CFLAG,  termios.CLOCAL,     None,     None,  POSIX, 'disable modem control signals' ),
+    ( 'crtscts',    TC_CFLAG, _termios.CRTSCTS,    None,     None,  False, 'enable RTS/CTS handshaking' ),
+    ( 'cdtrcts',    TC_CFLAG, _termios.CDTRCTS,    None,     None,  False, 'enable DTR/CTS handshaking' ), # netbsd
+    ( 'cmspar',     TC_CFLAG, _termios.CMSPAR,     None,     None,  False, 'use "stick" (mark/space) parity' ),
+    ( 'loblk',      TC_CFLAG, _termios.LOBLK,      None,     None,  False, 'block output from non-current layers' ), # solaris
+    ( 'dsrflow',    TC_CFLAG, _termios.CDSR_OFLOW, None,     None,  False, 'start/stop output on DSR' ), # freebsd
+    ( 'dtrflow',    TC_CFLAG, _termios.CDTR_IFLOW, None,     None,  False, 'start/stop input on DTR' ),  # freebsd
+    ( 'mdmbuf',     TC_CFLAG, _termios.CCAR_OFLOW, None,     None,  False, 'start/stop on carrier' ),    # bsd
 
-    ( 'isig',    TC_LFLAG,  termios.ISIG    ),
-    ( 'icanon',  TC_LFLAG,  termios.ICANON  ),
-    ( 'xcase',   TC_LFLAG, _termios.XCASE   ), # non-posix
-    ( 'echo',    TC_LFLAG,  termios.ECHO    ),
-    ( 'echoe',   TC_LFLAG,  termios.ECHOE   ),
-    ( 'echok',   TC_LFLAG,  termios.ECHOK   ),
-    ( 'echonl',  TC_LFLAG,  termios.ECHONL  ),
-    ( 'noflsh',  TC_LFLAG,  termios.NOFLSH  ),
-    ( 'tostop',  TC_LFLAG,  termios.TOSTOP  ),
-    ( 'echoctl', TC_LFLAG, _termios.ECHOCTL ), # non-posix
-    ( 'echoprt', TC_LFLAG, _termios.ECHOPRT ), # non-posix
-    ( 'echoke',  TC_LFLAG, _termios.ECHOKE  ), # non-posix
-    ( 'flusho',  TC_LFLAG, _termios.FLUSHO  ), # non-posix
-    ( 'pendin',  TC_LFLAG, _termios.PENDIN  ), # non-posix
-    ( 'iexten',  TC_LFLAG,  termios.IEXTEN  ),
-    ( 'extproc', TC_LFLAG, _termios.EXTPROC ), # non-posix
-    ( 'defecho', TC_LFLAG, _termios.DEFECHO ), # non-posix
+    ( 'isig',       TC_LFLAG,  termios.ISIG,       None,     True,  POSIX, 'enable interrupt, quit, and suspend special chars' ),
+    ( 'icanon',     TC_LFLAG,  termios.ICANON,     None,     True,  POSIX, 'enable special chars: erase, kill, werase, rprnt' ),
+    ( 'xcase',      TC_LFLAG, _termios.XCASE,      None,     False, False, "with icanon, escape with '\x5c' for uppercase chars" ),
+    ( 'echo',       TC_LFLAG,  termios.ECHO,       None,     True,  POSIX, 'echo input chars' ),
+    ( 'echoe',      TC_LFLAG,  termios.ECHOE,      None,     True,  POSIX, 'echo erase chars as backspace-space-backspace' ),
+    ( 'echok',      TC_LFLAG,  termios.ECHOK,      None,     True,  POSIX, 'echo a newline after a kill char' ),
+    ( 'echonl',     TC_LFLAG,  termios.ECHONL,     None,     False, POSIX, 'echo newline even if not echoing other chars' ),
+    ( 'noflsh',     TC_LFLAG,  termios.NOFLSH,     None,     False, POSIX, 'disable flushing after interrupt and quit special chars' ),
+    ( 'tostop',     TC_LFLAG,  termios.TOSTOP,     None,     False, POSIX, 'stop background jobs that try to write to the terminal' ),
+    ( 'echoctl',    TC_LFLAG, _termios.ECHOCTL,    None,     True,  False, "echo control chars in '^c' notation" ),
+    ( 'echoprt',    TC_LFLAG, _termios.ECHOPRT,    None,     False, False, "echo erased chars backward, between '\x5c' and '/'" ),
+    ( 'echoke',     TC_LFLAG, _termios.ECHOKE,     None,     True,  False, "kill line by obeying the echoprt ('-' echoctl) and echoe ('-' echok) settings" ),
+    ( 'flusho',     TC_LFLAG, _termios.FLUSHO,     None,     False, False, 'discard output' ),
+    ( 'pendin',     TC_LFLAG, _termios.PENDIN,     None,     None,  False, 'retype pending input' ),
+    ( 'iexten',     TC_LFLAG,  termios.IEXTEN,     None,     True,  POSIX, 'enable non-POSIX special chars' ),
+    ( 'extproc',    TC_LFLAG, _termios.EXTPROC,    None,     False, False, 'enable "line mode"; useful with high latency links' ),
+    ( 'defecho',    TC_LFLAG, _termios.DEFECHO,    None,     None,  False, 'echo only when a process is reading' ), # solaris
+    ( 'altwerase',  TC_LFLAG, _termios.ALTWERASE,  None,     None,  False, 'Use alternate word erase algorithm' ),  # bsd
+    ( 'nokerninfo', TC_LFLAG, _termios.NOKERNINFO, None,     None,  False, 'Enable status line when STATUS char detected' ), # bsd
 )
 
 FLAG = { elt[ 0 ] : elt[ 1: ] for elt in FLAG_LIST }
+
+FLAG_LABEL = { TC_IFLAG  : 'iflags',
+               TC_OFLAG  : 'oflags',
+               TC_CFLAG  : 'cflags',
+               TC_LFLAG  : 'lflags',
+               TC_ISPEED : 'ispeed',
+               TC_OSPEED : 'ospeed',
+               TC_CC     : 'cchars', }
+# Add inverse of the above
+FLAG_LABEL.update( { v : k for k, v in FLAG_LABEL.items() } )
+
+_Enum( 'FLL_NAME',	# fields in FLAGS_LIST
+       'FLL_XFLAG',
+       'FLL_FIELD',
+       'FLL_FIELD_VALUE',
+       'FLL_SANE_SETTING',
+       'FLL_POSIX',
+       'FLL_HELP', )
+
+_Enum( 'FL_XFLAG',	# fields in FLAGS value
+       'FL_FIELD',
+       'FL_FIELD_VALUE',
+       'FL_SANE_SETTING',
+       'FL_POSIX',
+       'FL_HELP', )
 
 SPEED = {
           '0' : _termios.B0,
@@ -238,8 +266,7 @@ SPEED = {
     '2500000' : _termios.B2500000,
     '3000000' : _termios.B3000000,
     '3500000' : _termios.B3500000,
-    '4000000' : _termios.B4000000,
-}
+    '4000000' : _termios.B4000000, }
 
 NTOSPEED = { v : k for k, v in SPEED.items() }
 
@@ -263,170 +290,214 @@ CC_PARAM_LIST = (
     ('lnext',    termios.VLNEXT,   termios.CLNEXT,  ), # ^V
     ('discard',  termios.VDISCARD, termios.CFLUSH,  ), # ^O
     ('min',      termios.VMIN,     None,            ),
-    ('time',     termios.VTIME,    None,            ),
-)
+    ('time',     termios.VTIME,    None,            ), )
 
-CC_PARAM_CCPOS = 0
-CC_PARAM_DFLT  = 1
+_Enum( 'CC_PARAM_LIST_NAME',
+       'CC_PARAM_LIST_POS',
+       'CC_PARAM_LIST_DFLT', )
+
+_Enum( 'CC_PARAM_POS',
+       'CC_PARAM_DFLT', )
 
 CC_PARAM = { elt[ 0 ] : elt[ 1: ] for elt in CC_PARAM_LIST }
 CC_PARAM[ 'swtc' ] = CC_PARAM[ 'swtch' ]
 
-STDKEYS = { elt[ 0 ] : elt[ 1 ]
-            for elt in filter( lambda x: x[1] is not None,
-                               CC_PARAM_LIST ) }
+STDKEYS = []
+for elt in CC_PARAM_LIST:
+    if elt[1] is not None and elt[2] is not None:
+        STDKEYS.extend( elt[0:3:2] )
+
+def cc_dflt( name ):
+    return CC_PARAM[ name ][ CC_PARAM_DFLT ]
 
 ALIAS = {
-    'cbreak' : [ '-icanon' ],
-   '-cbreak' : [  'icanon' ],
+     'cbreak'   : [ '-icanon' ],
+    '-cbreak'   : [  'icanon' ],
 
-    'cooked' : [  'brkint',
-                  'ignpar',
-                  'istrip',
-                  'icrnl',
-                  'ixon',
-                  'opost',
-                  'isig',
-                  'icanon',
-                  'eof',    CC_PARAM[ 'eof'   ][ CC_PARAM_DFLT ],
-                  'eol',    CC_PARAM[ 'eol'   ][ CC_PARAM_DFLT ], ],
+     'cooked'   : [  'brkint',
+                     'ignpar',
+                     'istrip',
+                     'icrnl',
+                     'ixon',
+                     'opost',
+                     'isig',
+                     'icanon',
+                     'eof',    cc_dflt( 'eof' ),
+                     'eol',    cc_dflt( 'eol' ), ],
 
-    'crt'    : [  'echoe', 'echok' ],
+     'crt'      : [  'echoe', 'echoctl', 'echok' ],
 
-    'dec'    : [  'echoe',
-                  'echok',
-                  'intr',   CC_PARAM[ 'intr'  ][ CC_PARAM_DFLT ],
-                  'erase',  CC_PARAM[ 'erase' ][ CC_PARAM_DFLT ],
-                  'kill',   CC_PARAM[ 'kill'  ][ CC_PARAM_DFLT ], ],
+     'crterase' : [  'echoe' ],
+    '-crterase' : [ '-echoe' ],
 
-    'ek'     : [  'erase',  CC_PARAM[ 'erase' ][ CC_PARAM_DFLT ],
-                  'kill',   CC_PARAM[ 'kill'  ][ CC_PARAM_DFLT ], ],
+     'crtkill'  : [  'echoke' ],
+    '-crtkill'  : [ '-echoke' ],
 
-    'evenp'  : [  'cs7',  'parenb', '-parodd', ],
-   '-evenp'  : [  'cs8', '-parenb', ],
+     'ctlecho'  : [  'echoctl' ],
+    '-ctlecho'  : [ '-echoctl' ],
 
-    'lcase'  : [  'xcase',  'iuclc',  'olcuc', ],
-   '-lcase'  : [ '-xcase', '-iuclc', '-olcuc', ],
+     'dec'      : [  'echoe',
+                     'echoctl'
+                     'echok',
+                    '-ixany',
+                     'intr',   cc_dflt( 'intr'  ),
+                     'erase',  cc_dflt( 'erase' ),
+                     'kill',   cc_dflt( 'kill'  ), ],
 
-    'litout' : [ '-parenb', '-istrip', '-opost', 'cs8', ],
-   '-litout' : [  'parenb'   'istrip'   'opost'  'cs7', ],
+     'decctlq'  : [  'ixany' ],
+    '-decctlq'  : [ '-ixany' ],
 
-    'nl'     : [ '-icrnl', '-onlcr', ],
-   '-nl'     : [  'icrnl',  'onlcr', '-inlcr', '-igncr', '-ocrnl', '-onlret', ],
+     'ek'       : [  'erase',  cc_dflt( 'erase' ),
+                     'kill',   cc_dflt( 'kill'  ), ],
 
-    'oddp'   : [  'cs7',  'parenb',  'parodd', ],
-   '-oddp'   : [  'cs8', '-parenb', ],
+     'evenp'    : [  'cs7',  'parenb', '-parodd', ],
+    '-evenp'    : [  'cs8', '-parenb', ],
 
-    'parity' : [  'evenp' ],
-   '-parity' : [ '-evenp' ],
+      'hup'     : [  'hupcl', ],
+     '-hup'     : [ '-hupcl', ],
 
-    'pass8'  : [ '-parenb', '-istrip', 'cs8' ],
-   '-pass8'  : [  'parenb',  'istrip', 'cs7' ],
+     'lcase'    : [  'xcase',  'iuclc',  'olcuc', ],
+    '-lcase'    : [ '-xcase', '-iuclc', '-olcuc', ],
 
-    'raw'    : [ '-ignbrk',
-                 '-brkint',
-                 '-ignpar',
-                 '-parmrk',
-                 '-inpck',
-                 '-istrip',
-                 '-inlcr',
-                 '-igncr',
-                 '-icrnl',
-                 '-ixon',
-                 '-ixoff',
-                 '-icanon',
-                 '-opost',
-                 '-isig',
-                 '-iuclc',
-                 '-ixany',
-                 '-imaxbel',
-                 '-xcase',
-                  'min',    1,
-                  'time',   0, ],
+     'litout'   : [ '-parenb', '-istrip', '-opost', 'cs8', ],
+    '-litout'   : [  'parenb'   'istrip'   'opost'  'cs7', ],
 
-    'sane'   : [  'cread',  # cflags
+     'nl'       : [ '-icrnl', '-onlcr', ],
+    '-nl'       : [  'icrnl',  'onlcr', '-inlcr', '-igncr', '-ocrnl', '-onlret', ],
 
-                  # iflags
-                 '-ignbrk',
-                  'brkint',
-                 '-inlcr',
-                 '-igncr',
-                  'icrnl',
-                 '-ixoff',
-                 '-iutf8',
-                 '-iuclc',
-                 '-ixany',
-                  'imaxbel',
-                 '-xcase',
-                  'bs0',
-                  'cr0',
-                  'ff0',
-                  'nl0',
-                  'tab0',
-                  'vt0',
+     'oddp'     : [  'cs7',  'parenb',  'parodd', ],
+    '-oddp'     : [  'cs8', '-parenb', ],
 
-                  # oflags
-                 '-olcuc',
-                 '-ocrnl',
-                  'opost',
-                 '-ofill',
-                  'onlcr',
-                 '-onocr',
-                 '-onlret',
-                 '-ofdel',
-                 '-extproc',
-                 '-flusho',
+     'parity'   : [  'evenp' ],
+    '-parity'   : [ '-evenp' ],
 
-                  # lflags
-                  'isig',
-                  'icanon',
+     'pass8'    : [ '-parenb', '-istrip', 'cs8' ],
+    '-pass8'    : [  'parenb',  'istrip', 'cs7' ],
 
-                  'echo',
-                  'echoe',
-                  'echok',
-                 '-echonl',
-                 '-echoprt',
-                  'echoctl',
-                  'echoke',
-                  'iexten',
-                 '-noflsh',
-                 '-tostop', ],  # +STDKEYS below
-}
+     'prterase' : [ 'echoprt', ],
+    '-prterase' : [ '-echoprt', ],
+
+     'raw'      : [ '-ignbrk',
+                    '-brkint',
+                    '-ignpar',
+                    '-parmrk',
+                    '-inpck',
+                    '-istrip',
+                    '-inlcr',
+                    '-igncr',
+                    '-icrnl',
+                    '-ixon',
+                    '-ixoff',
+                    '-icanon',
+                    '-opost',
+                    '-isig',
+                    '-iuclc',
+                    '-ixany',
+                    '-imaxbel',
+                    '-xcase',
+                     'min',    1,
+                     'time',   0, ],
+
+     'sane'     : [  'cread',  # cflags
+
+                     # iflags
+                    '-ignbrk',
+                     'brkint',
+                    '-inlcr',
+                    '-igncr',
+                     'icrnl',
+                    '-ixoff',
+                    '-iutf8',
+                    '-iuclc',
+                    '-ixany',
+                     'imaxbel',
+                    '-xcase',
+                     'bs0',
+                     'cr0',
+                     'ff0',
+                     'nl0',
+                     'tab0',
+                     'vt0',
+
+                     # oflags
+                    '-olcuc',
+                    '-ocrnl',
+                     'opost',
+                    '-ofill',
+                     'onlcr',
+                    '-onocr',
+                    '-onlret',
+                    '-ofdel',
+                    '-extproc',
+                    '-flusho',
+
+                     # lflags
+                     'isig',
+                     'icanon',
+
+                     'echo',
+                     'echoe',
+                     'echok',
+                    '-echonl',
+                    '-echoprt',
+                     'echoctl',
+                     'echoke',
+                     'iexten',
+                    '-noflsh',
+                    '-tostop', ], # +STDKEYS
+
+     'tabs'     : [  'tab0' ],
+    '-tabs'     : [  'tab3' ],
+
+     'tandem'   : [  'ixoff' ],
+    '-tandem'   : [ '-ixoff' ], }
+
 ALIAS[  'LCASE'  ] = ALIAS[  'lcase'  ]
 ALIAS[ '-LCASE'  ] = ALIAS[ '-lcase'  ]
 ALIAS[ '-cooked' ] = ALIAS[  'raw'    ]
 ALIAS[ '-raw'    ] = ALIAS[  'cooked' ]
 ALIAS[  'sane'   ].extend( STDKEYS )
 
-TERMSZ_list = (
+_Enum( 'WS_ROW',	# TIOC*WINSZ fields
+       'WS_COL',
+       'WS_XPIXEL',
+       'WS_YPIXEL', )
+
+TERMSZ_LIST = (
     ( 'rows',    WS_ROW    ),
     ( 'cols',    WS_COL    ),
     ( 'columns', WS_COL    ),
     ( 'xpixel',  WS_XPIXEL ),
-    ( 'ypixel',  WS_YPIXEL ),
-)
+    ( 'ypixel',  WS_YPIXEL ), )
 
-TERMSZ = { elt[ 0 ] : elt[ 1: ] for elt in TERMSZ_list }
+TERMSZ = { elt[ 0 ] : elt[ 1: ] for elt in TERMSZ_LIST }
 
+def fatal( *args, **kwargs ):
+    msg = list( args )
+    if 'fn' in kwargs:
+        msg.insert( 0, kwargs[ 'fn' ].__name__ )
+    prog = sys.argv[0][ sys.argv[0].rfind( '/' ) + 1 : ]
+    msg.insert( 0, prog )
+    print( *msg, sep=': ', file=sys.stderr )
+    sys.exit( 1 )
 
 def termios_notrace( fn ):
     @functools.wraps( fn )
     def wrapper( *args, **kwargs ):
         try:
             return fn( *args, **kwargs )
-        except (IOError, OSError, termios.error) as err:
-            prog = sys.argv[0][ sys.argv[0].rfind( '/' ) + 1 : ]
-            print( prog, fn.__name__, args[0].fd_name, err[1],
-                   sep=': ', file=sys.stderr )
-            sys.exit( 1 )
+        except Exception as err:
+            if os.getenv( 'STTY_DEBUG' ):
+                raise
+            else:
+                fatal( args[0].fd_name, err[-1], fn=fn )
     return wrapper
 
 class Stty( object ):
     cctrans = None
 
     def __init__( self, fd=sys.stdin, when=termios.TCSANOW ):
-        self._cctrans_init()
-        self._open( fd )
+        self.open( fd )
         self.when    = when
         self._attr   = None
 
@@ -435,34 +506,51 @@ class Stty( object ):
         if self.cctrans: return
 
         self.cctrans = {}
-        seq = { 'NUL'     : '\x00',
+        seq = { ''        : '\x00',
+                '^-'      : '\x00',
+                'NUL'     : '\x00',
                 'NULL'    : '\x00',
                 'UNDEF'   : '\x00',
                 '<UNDEF>' : '\x00',
+                'BS'      : '\x08',
                 'TAB'     : '\x09',
                 'NL'      : '\x0a',
+                'LF'      : '\x0a',
                 'LFD'     : '\x0a',
+                'CR'      : '\x0d',
                 'RET'     : '\x0d',
                 'ESC'     : '\x1b',
+                'SP'      : '\x20',
                 'SPC'     : '\x20',
                 'DEL'     : '\x7f', }
         for s in seq:
-            self.cctrans[ s ]         = seq[ s ]
+            self.cctrans[ s.upper() ] = seq[ s ]
             self.cctrans[ s.lower() ] = seq[ s ]
         for c in range( 0, 31 ):
             xlate = [ c,
                       chr( c ),
+                      '0{:01o}'.format( c ),  # 07
+                      '0{:02o}'.format( c ),  # 007
+                      '0{:03o}'.format( c ),  # 0007
+                      '{:#03o}'.format( c ),  # 0o7
+                      '{:#04o}'.format( c ),  # 0o07
+                      '{:#05o}'.format( c ),  # 0o007
+                      '{:#03x}'.format( c ),  # 0xa
+                      '{:#04x}'.format( c ),  # 0x0a
                       '^'  + chr( c + 64 ),
-                      '^'  + chr( c + 64 ).lower(),
-                      'C-' + chr( c + 64 ),
-                      'C-' + chr( c + 64 ).lower(), ]
+                      'C-' + chr( c + 64 ), ]
             char = chr( c )
             for seq in xlate:
                 self.cctrans[ seq ] = char
+                try:
+                    self.cctrans[ seq.upper() ] = char
+                    self.cctrans[ seq.lower() ] = char
+                except AttributeError:
+                    pass # 'int' object has no attribute 'upper'
 
     @termios_notrace
-    def _open( self, _file ):
-        if isinstance( _file, file ):
+    def open( self, _file ):
+        if hasattr( _file, 'fileno' ):
             self.fd_name = _file.name
             self.fd      = _file
         else:
@@ -473,9 +561,12 @@ class Stty( object ):
     @staticmethod
     def _chkspeed( speed ):
         try:
-            return SPEED[ int( speed ) ]
+            sp = SPEED[ speed ] # might be None
         except KeyError:
-            return int( speed )
+            sp = None
+        if sp is None:
+            fatal( speed, 'unsupported speed' )
+        return sp
 
     @termios_notrace
     def tcgetattr( self, reset=False ):
@@ -491,18 +582,26 @@ class Stty( object ):
     def Xflag( self, c_elt, flag=None, set=None ):
         self.tcgetattr()
         if flag is None:
-            pass
+            if isinstance( set, int ):
+                self._attr[ c_elt ] = set
         elif set is None:
             return self._attr[ c_elt ] & flag
         elif set is True:
             self._attr[ c_elt ] |= flag
         elif set is False:
             self._attr[ c_elt ] &= ~flag
-        elif isinstance( set, (int, long) ):
+        elif isinstance( set, int ):
             # If set is a number, flag is a mask
             self._attr[ c_elt ] &= ~flag
             self._attr[ c_elt ] |= set
         return self._attr[ c_elt ]
+
+    def sane_default( self, arg ):
+        if arg[0] == '-':
+            data = FLAG[ arg[1:] ]
+        else:
+            data = FLAG[ arg ]
+        return data[ FL_SANE_SETTING ]
 
     def setflag( self, arg ):
         try:
@@ -511,28 +610,12 @@ class Stty( object ):
             else:
                 data = FLAG[ arg ]
         except KeyError:
-            raise # FIXME need better diag
-
-        try:
-            val = data[2]
-        except IndexError:
+            fatal( arg, 'invalid argument' )
+        if data[ FL_FIELD_VALUE ] is None:
             val = bool( arg[0] != '-' )
-
-        return self.Xflag( data[0], data[1], val )
-
-    # Currently unused
-    #
-    #def iflag( self, *args, **kwargs ):
-    #    return self.Xflag( TC_IFLAG, *args, **kwargs )
-    #
-    #def oflag( self, *args, **kwargs ):
-    #    return self.Xflag( TC_OFLAG, *args, **kwargs )
-    #
-    #def cflag( self, *args, **kwargs ):
-    #    return self.Xflag( TC_CFLAG, *args, **kwargs )
-    #
-    #def lflag( self, *args, **kwargs ):
-    #    return self.Xflag( TC_LFLAG, *args, **kwargs )
+        else:
+            val = data[ FL_FIELD_VALUE ]
+        return self.Xflag( data[ FL_XFLAG ], data[ FL_FIELD ], val )
 
     def getispeed( self ):
         self.tcgetattr()
@@ -554,14 +637,21 @@ class Stty( object ):
         self.tcgetattr()
         return self._attr[ TC_CC ][ key ]
 
+    @termios_notrace
     def setcc( self, key, char ):
         self.tcgetattr()
-        if isinstance( char, (int, long) ):
-            char = chr( char & 0xff )
+        if isinstance( char, int ):
+            # Make sure data is binary for python3
+            char = str.encode( chr( char & 0xff ) )
+        elif len( char ) > 2 and char[0] == '^':
+            char = char[0:2]
+
+        self._cctrans_init()
         try:
             char = self.cctrans[ char ]
         except KeyError:
-            char = char[0]
+            if len( char ) > 1:
+                raise KeyError( '"{}": unrecognized character alias'.format( char ) )
         self._attr[ TC_CC ][ key ] = char
         return char
 
@@ -595,7 +685,7 @@ class Stty( object ):
         return fcntl.ioctl( self.fd, termios.TIOCSETD, raw )
 
     def ldisc_name_maps( self ):
-        filt = lambda x: filter( lambda elt: elt.find( 'N_' ) == 0, dir( x ) )
+        filt = lambda x: list( filter( lambda elt: elt.find( 'N_' ) == 0, dir( x ) ))
         names = filt( _termios )
         names.extend( filt( termios ) )
         formap = { name[2:].lower() : getattr( _termios, name ) for name in names }
@@ -642,10 +732,79 @@ class Stty( object ):
             except struct.error as err:
                 raise OSError( self, 'unknown line discipline "{}"'.format( line ))
 
+    def save( self, forfd=sys.stdout ):
+        if forfd.isatty():
+            return self._save_gpysttyv()
+        else:
+            return self._save_gpysttyc()
+
+    def _save_gpysttyc( self ):
+        g = [ 'gpysttyc' ]
+        for n, data in enumerate( self.tcgetattr() ):
+            name = FLAG_LABEL[ n ]
+            if name in ['cchars']:
+                for c in data:
+                    g.append( '{:x}'.format( ord( c )))
+            else:
+                g.append( '{:x}'.format( data ) )
+        return str.join( ':', g )
+
+    def _save_gpysttyv( self ):
+        g = [ 'gpysttyv' ]
+        for n, data in enumerate( self.tcgetattr() ):
+            name = FLAG_LABEL[ n ]
+            if n in [ TC_CC ]:
+                for elt in CC_PARAM_LIST:
+                    cc_pos  = elt[ CC_PARAM_LIST_POS  ]
+                    if cc_pos is None:
+                        continue
+                    cc_name = elt[ CC_PARAM_LIST_NAME ]
+                    cc = ord( data[ cc_pos ] )
+                    g.append( '{}={:x}'.format( cc_name, cc ))
+            elif n in [ TC_ISPEED, TC_OSPEED ]:
+                g.append( '{}={}'.format( name, NTOSPEED[ data ] ))
+            else:
+                g.append( '{}={:x}'.format( name, data ))
+        return str.join( ':', g )
+
+    def restore( self, saved ):
+        ga = saved.split( ':' )
+        fn_name = '_restore_{}'.format( ga.pop( 0 ) )
+        fn = getattr( self, fn_name, None )
+        if callable( fn ):
+            fn( ga )
+
+    def _restore_gpysttyc( self, ga ):
+        attr = self.tcgetattr()
+        cchar = attr[ TC_CC ]
+        for n, data in enumerate( ga ):
+            if n >= TC_CC:
+                cchar[ n - TC_CC ] = str.encode( chr( int( data, base=16 )))
+            else:
+                attr[ n ] = int( data, base=16 )
+        return self.tcsetattr()
+
+    def _restore_gpysttyv( self, ga ):
+        attr = self.tcgetattr()
+        cchar = attr[ TC_CC ]
+        gd = { k : v for k, v in ( p.split( '=' ) for p in ga ) }
+        for k, v in gd.items():
+            if k in CC_PARAM:
+                pos = CC_PARAM[ k ][ CC_PARAM_POS ]
+                cchar[ pos ] = str.encode( chr( int( v, base=16 )))
+            elif k in ['ispeed', 'ospeed']:
+                field = FLAG_LABEL[ k ]
+                attr[ field ] = SPEED[ v ]
+            elif k in FLAG_LABEL:
+                field = FLAG_LABEL[ k ]
+                attr[ field ] = int( v, base=16 )
+        return self.tcsetattr()
+
 
 def fold( flags, maxlen=75, indent=0, sep=' ' ):
     lines   = []
     current = []
+    flags = list( flags[:] ) # copy tuple or list
 
     maxlen -= indent
     while flags:
@@ -660,10 +819,10 @@ def fold( flags, maxlen=75, indent=0, sep=' ' ):
     linesep = '\n' + ' ' * indent
     return linesep.join( lines )
 
-def dispchar( c ):
+def dispchar( c, args=None ):
     n = ord( c )
-    #if n < 1:
-    #    return '<undef>'
+    if n < 1 and args and (args.wide or args.align or args.bsd):
+        return '<undef>'
     if n < 31:
         return '^' + chr( n + 64 )
     if n == 0x7f:
@@ -671,95 +830,233 @@ def dispchar( c ):
     else:
         return c
 
-def make_display_values( tty ):
-    winsz  = tty.getwinsz()
+def make_display_values( tty, args ):
     ispeed = NTOSPEED[ tty.getispeed() ]
     ospeed = NTOSPEED[ tty.getospeed() ]
-
+    line1 = []
     if ispeed == ospeed:
-        line1 = [   'speed = {};'.format( ospeed ) ]
+        line1.append( ( 'speed', ospeed) )
     else:
-        line1 = [  'ispeed = {};'.format( ispeed ),
-                   'ospeed = {};'.format( ospeed ), ]
-    line1.append(    'rows = {};'.format( winsz[ WS_ROW ] ) )
-    line1.append( 'columns = {};'.format( winsz[ WS_COL ] ) )
-    if winsz[ WS_XPIXEL ] != 0 or winsz[ WS_YPIXEL ] != 0:
-        line1.append( 'ypixels = {};'.format( winsz[ WS_YPIXEL ] ) )
-        line1.append( 'xpixels = {};'.format( winsz[ WS_XPIXEL ] ) )
+        line1.append( ('ispeed', ispeed) )
+        line1.append( ('ospeed', ospeed) )
+
+    if args.all:
+        winsz = tty.getwinsz()
+        line1.append(    ('rows', winsz[ WS_ROW ]) )
+        line1.append( ('columns', winsz[ WS_COL ]) )
+        if winsz[ WS_XPIXEL ] != 0 or winsz[ WS_YPIXEL ] != 0:
+            line1.append( ('ypixels', winsz[ WS_YPIXEL ]) )
+            line1.append( ('xpixels', winsz[ WS_XPIXEL ]) )
 
     cline = tty.getcline()
     ldisc = tty.getldisc()
     ntoi, iton = tty.ldisc_name_maps()
-    if cline is not None:
-        if cline > 0 and cline in iton:
-            line1.append( 'line = {} ({});'.format( cline, iton[ cline ] ))
-        else:
-            line1.append( 'line = {};'.format( cline ) )
-
+    if cline is None:
         if ldisc > 0 and ldisc in iton:
-            line1.append( 'disc = {} ({});'.format( ldisc, iton[ ldisc] ))
+            line1.append( ('line', ldisc, iton[ ldisc ]) )
         else:
-            line1.append( 'disc = {};'.format( ldisc ))
+            line1.append( ('line', ldisc) )
     else:
-        if ldisc > 0 and ldisc in iton:
-            line1.append( 'line = {} ({});'.format( ldisc, iton[ ldisc] ))
+        if cline > 0 and cline in iton:
+            line1.append( ('line', cline, iton[ cline ]) )
         else:
-            line1.append( 'line = {};'.format( ldisc ))
+            line1.append( ('line', cline) )
+
+        if args.all or ldisc != cline:
+            if ldisc > 0 and ldisc in iton:
+                line1.append( ('disc', ldisc, iton[ ldisc]) )
+            else:
+                line1.append( ('disc', ldisc) )
 
     char = []
     for elt in CC_PARAM_LIST:
-        name = elt[0]
+        name = elt[ CC_PARAM_LIST_NAME ]
         try:
-            val = tty.getcc( elt[1] )
+            val = tty.getcc( elt[ CC_PARAM_LIST_POS ] )
         except TypeError: # name not defined on this platform
             continue
+        if not args.all:
+            dfl = elt[ CC_PARAM_LIST_DFLT ]
+            if dfl is None or ord( val ) == dfl:
+                continue
         if name in ['time', 'min']:
             try:
                 val = ord( val )
             except TypeError: # sometimes already an int
                 pass
         else:
-            val = dispchar( val )
-        char.append( '{} = {};'.format( name, val ) )
+            val = dispchar( val, args )
+        char.append( (name, val) )
 
     values = [ [] for x in (TC_IFLAG, TC_OFLAG, TC_CFLAG, TC_LFLAG) ]
     for elt in FLAG_LIST:
-        name        = elt[0]
-        tc_xflag    = elt[1]
+        name        = elt[ FLL_NAME ]
+        tc_xflag    = elt[ FLL_XFLAG ]
         xflag_value = values[ tc_xflag ]
-        mask        = elt[ 2 ]
-        if mask is None:
+        mask        = elt[ FLL_FIELD ]
+        if mask is None:  # not defined on this platform
             continue
-        try:
-            isset = elt[3]
-            current = tty.Xflag( tc_xflag, mask )
-            if current == isset:
-                xflag_value.append( name )
-        except IndexError:
+
+        masked_val = elt[ FLL_FIELD_VALUE ]
+        if masked_val is None: # just binary flag
             if tty.Xflag( tc_xflag, mask ):
                 xflag_value.append( name )
             else:
                 xflag_value.append( '-' + name )
+        else: # non-binary field value
+            current = tty.Xflag( tc_xflag, mask )
+            if current == masked_val:
+                xflag_value.append( name )
+    return ( line1, char, values )
 
-    return [ line1, char, values ]
+
+def format_display_values( data, args ):
+    def maxlen( array, validcol ):
+        valid =  filter( lambda x: x[ validcol ] is not None, array )
+        return max( map( lambda x: len( x[ 0 ] ), valid ))
+
+    line1, char, values = data
+    for i, e in enumerate( line1 ):
+        fmt = '{} = {} ({});' if (len( e ) > 2) else '{} = {};'
+        line1[ i ] = fmt.format( *e )
+
+    if char:
+        if args.align and not args.wide:
+            l = max( map( lambda c: len( c[0] ), char ))
+            fmt = '{{:<{}}} = {{:<8}} '.format( l ).format
+        else:
+            fmt = '{} = {}'.format
+        char = [ fmt( elt[0], str( elt[1] ) + ';' ) for elt in char ]
+
+    if args.align:
+        l = max( max( map( len, flag ) for flag in values ))
+        fmt = '{{:<{}}}'.format( l ).format
+        for i, xflag in enumerate( values ):
+            new = []
+            for elt in xflag:
+                if elt[0] != '-':
+                    elt = ' ' + elt
+                new.append( fmt( elt ) )
+            values[ i ] = new
+    return ( line1, char, values )
 
 
-def display_all( tty ):
-    line1, char, values = make_display_values( tty )
+def display_all( tty, args ):
+    line1, char, values = format_display_values(
+        make_display_values( tty, args ),
+        args )
     values.append( char )
     width = tty.getwinsz( sys.stdout )[1] or 75
     print( ' '.join( line1 ))
     labels = ('iflags', 'oflags', 'cflags', 'lflags', 'cchars')
     for label, flags in zip( labels, values ):
-        indent = 2 + len( label )
-        text   = fold( flags, maxlen=width, indent=indent )
+        if args.wide:
+            text = str.join( ' ', flags )
+        else:
+            indent = 2 + len( label )
+            text = fold( flags, maxlen=width, indent=indent )
+        print( label, text, sep=': ' )
+
+
+# Traditional bsd "stty everything" format of chars.
+def display_bsd( tty, args ):
+    dv = make_display_values( tty, args )
+    line1, ignore,  values = format_display_values( dv, args )
+
+    width = tty.getwinsz( sys.stdout )[1] or 75
+    print( ' '.join( line1 ))
+    labels = ('iflags', 'oflags', 'cflags', 'lflags')
+    for label, flags in zip( labels, values ):
+        if args.wide:
+            text = str.join( ' ', flags )
+        else:
+            indent = 2 + len( label )
+            text = fold( flags, maxlen=width, indent=indent )
+        print( label, text, sep=': ' )
+
+    cnam, cval = zip(*dv[1])
+    cwidth = max( map( len, cnam ))
+    fmt = '{{:<{}}}'.format( cwidth + 1 ).format
+    c1 = map( lambda x: fmt( x ), cnam )
+    c2 = map( lambda x: fmt( x ), cval )
+
+    if args.wide:
+        print( *c1 )
+        print( *c2 )
+    else:
+        cl1 = fold( c1, maxlen=width ).split( '\n' )
+        cl2 = fold( c2, maxlen=width ).split( '\n' )
+        for pair in zip( cl1, cl2 ):
+            print( pair[0] )
+            print( pair[1] )
+
+
+def diff_against_sane( tty, args ):
+    line1, char, values = make_display_values( tty, args )
+    sanelist = ALIAS[ 'sane' ]
+    for xflag in values:
+        for sane in sanelist:
+            try:
+                xflag.remove( sane )
+            except ValueError:
+                pass
+        for elt in list( xflag ):
+            if tty.sane_default( elt ) is None:
+                xflag.remove( elt )
+    line1, char, values = format_display_values( (line1, char, values), args )
+
+    values.append( char )
+    width = tty.getwinsz( sys.stdout )[1] or 75
+    print( ' '.join( line1 ))
+    labels = ('iflags', 'oflags', 'cflags', 'lflags', 'cchars')
+    for label, flags in zip( labels, values ):
+        if not flags:
+            continue
+        if args.wide:
+            text = str.join( ' ', flags )
+        else:
+            indent = 2 + len( label )
+            text   = fold( flags, maxlen=width, indent=indent )
         print( label, text, sep=': ' )
 
 
+# Modified from original not to split single-char prefix options into separate one-letter args.
+# That is, "-echo" is not shorthand for "-e -c -h -o".
+# This means that all actual single-letter options must be specified independently.
+class ArgParser( argparse.ArgumentParser ):
+    def _get_option_tuples(self, option_string):
+        result = []
+        chars = self.prefix_chars
+        if option_string[0] in chars and option_string[1] in chars:
+            if '=' in option_string:
+                option_prefix, explicit_arg = option_string.split('=', 1)
+            else:
+                option_prefix = option_string
+                explicit_arg = None
+            for option_string in self._option_string_actions:
+                if option_string.startswith(option_prefix):
+                    action = self._option_string_actions[option_string]
+                    tup = action, option_string, explicit_arg
+                    result.append(tup)
+        elif option_string[0] in chars and option_string[1] not in chars:
+            option_prefix = option_string
+            explicit_arg = None
+            short_option_prefix = option_string[:2]
+            short_explicit_arg  = option_string[2:]
+        else:
+            self.error(_('unexpected option string: %s') % option_string)
+        return result
+
+
 def get_args():
-    p = argparse.ArgumentParser( description='Print or change terminal characteristics.' )
-    p.add_argument( '-F', '--file', dest='device', default=sys.stdin, help='open and use the specified DEVICE instead of stdin')
-    p.add_argument( '-a', '--all', action='store_true', help='print all current settings in human-readable form' )
+    p = ArgParser( description='Print or change terminal characteristics.' )
+    p.add_argument( '-F', '-f', '--file', dest='device', default=sys.stdin, help='open and use the specified DEVICE instead of stdin')
+    p_x = p.add_mutually_exclusive_group()
+    p_x.add_argument( '-a', '--all',   action='store_true', default=False, help='print all current settings in human-readable form' )
+    p_x.add_argument( '-e', '--bsd',   action='store_true', default=False, help='print all current settings in traditional BSD "all" and "everything" formats' )
+    p_x.add_argument( '-g', '--save',  action='store_true', default=False, help='print all current settings in stty-readable form' )
+    p.add_argument(   '-c', '--align', action='store_true', default=False, help='Align output into columns' )
+    p.add_argument(   '-w', '--wide',  action='store_true', default=False, help='Do not wrap lines' )
     args, unknown = p.parse_known_args()
     args.setting = unknown
     return args
@@ -768,50 +1065,75 @@ def main():
     args = get_args()
     tty = Stty( fd=args.device )
 
+    try:
+        arg1 = args.setting[ 0 ]
+        slen = len( args.setting )
+    except IndexError:
+        arg1 = None
+        slen = 0
+
     if args.all:
-        display_all( tty )
-        return
-
-    # Expand any aliases
-    settings = []
-    for arg in args.setting:
-        if arg in ALIAS:
-            settings.extend( ALIAS[ arg ] )
+        display_all( tty, args )
+    elif args.bsd or arg1 in ['all', 'everything']:
+        args.all = args.bsd = True
+        display_bsd( tty, args )
+    elif args.save:
+        print( tty.save() )
+    elif not args.setting:
+        diff_against_sane( tty, args )
+    elif slen == 1 and arg1 == 'size':
+        winsz = tty.getwinsz()
+        print( winsz[ WS_ROW ], winsz[ WS_COL ] )
+    elif slen == 1 and arg1 == 'speed':
+        ispeed = NTOSPEED[ tty.getispeed() ]
+        ospeed = NTOSPEED[ tty.getospeed() ]
+        if ispeed == ospeed:
+            print( ospeed )
         else:
-            settings.append( arg )
-
-    while settings:
-        arg = settings.pop( 0 )
-        if arg in SPEED:
-            tty.setispeed( arg )
-            tty.setospeed( arg )
-        elif arg in ['ispeed', 'ospeed', 'speed']:
-            speed = settings.pop( 0 )
-            if arg[0] in ['i', 's']: tty.setispeed( speed )
-            if arg[0] in ['o', 's']: tty.setospeed( speed )
-        elif arg in CC_PARAM:
-            param = CC_PARAM[ arg ]
-            tty.setcc ( param[ 0 ], settings.pop( 0 ) )
-        elif arg in TERMSZ:
-            size = int( settings.pop( 0 ) )
-            winsz = tty.getwinsz()
-            winsz[ TERMSZ[ arg ][0] ] = size
-            tty.setwinsz()
-        elif arg in [ 'line', 'disc' ]:
-            ldisc = settings.pop( 0 )
-            try:
-                ldisc = int( ldisc )
-            except (TypeError, ValueError):
-                ntoi, iton = tty.ldisc_name_maps()
-                if ldisc.lower() in ntoi:
-                    ldisc = ntoi[ ldisc.lower() ]
-            if arg == 'line' and tty.getcline() is not None:
-                tty.setcline( ldisc )
+            print( ispeed, ospeed )
+    elif arg1.find( 'gpystty' ) == 0:
+        tty.restore( arg1 )
+    else:
+        # Expand any aliases
+        settings = []
+        for arg in args.setting:
+            if arg in ALIAS:
+                settings.extend( ALIAS[ arg ] )
             else:
-                tty.setldisc( ldisc )
-        else:
-            tty.setflag( arg )
-    tty.tcsetattr()
+                settings.append( arg )
+
+        while settings:
+            arg = settings.pop( 0 )
+            if arg in SPEED:
+                tty.setispeed( arg )
+                tty.setospeed( arg )
+            elif arg in ['ispeed', 'ospeed', 'speed']:
+                speed = settings.pop( 0 )
+                if arg[0] in ['i', 's']: tty.setispeed( speed )
+                if arg[0] in ['o', 's']: tty.setospeed( speed )
+            elif arg in CC_PARAM:
+                param = CC_PARAM[ arg ]
+                tty.setcc ( param[ 0 ], settings.pop( 0 ) )
+            elif arg in TERMSZ:
+                size = int( settings.pop( 0 ) )
+                winsz = tty.getwinsz()
+                winsz[ TERMSZ[ arg ][0] ] = size
+                tty.setwinsz()
+            elif arg in [ 'line', 'disc' ]:
+                ldisc = settings.pop( 0 )
+                try:
+                    ldisc = int( ldisc )
+                except (TypeError, ValueError):
+                    ntoi, iton = tty.ldisc_name_maps()
+                    if ldisc.lower() in ntoi:
+                        ldisc = ntoi[ ldisc.lower() ]
+                if arg == 'line' and tty.getcline() is not None:
+                    tty.setcline( ldisc )
+                else:
+                    tty.setldisc( ldisc )
+            else:
+                tty.setflag( arg )
+        tty.tcsetattr()
 
 
 if __name__ == '__main__':
