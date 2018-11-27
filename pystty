@@ -5,7 +5,7 @@
 # Created: 2018-10-30
 # Public domain
 
-# $Id: pystty,v 1.2 2018/11/22 02:32:37 friedman Exp $
+# $Id: pystty,v 1.3 2018/11/27 02:35:32 friedman Exp $
 
 # Commentary:
 
@@ -464,11 +464,11 @@ _Enum( 'WS_ROW',	# TIOC*WINSZ fields
        'WS_YPIXEL', )
 
 TERMSZ_LIST = (
-    ( 'rows',    WS_ROW    ),
-    ( 'cols',    WS_COL    ),
-    ( 'columns', WS_COL    ),
-    ( 'xpixel',  WS_XPIXEL ),
-    ( 'ypixel',  WS_YPIXEL ), )
+    ( 'rows',     WS_ROW    ),
+    ( 'cols',     WS_COL    ),
+    ( 'columns',  WS_COL    ),
+    ( 'xpixels',  WS_XPIXEL ),
+    ( 'ypixels',  WS_YPIXEL ), )
 
 TERMSZ = { elt[ 0 ] : elt[ 1: ] for elt in TERMSZ_LIST }
 
@@ -845,8 +845,8 @@ def make_display_values( tty, args ):
         line1.append(    ('rows', winsz[ WS_ROW ]) )
         line1.append( ('columns', winsz[ WS_COL ]) )
         if winsz[ WS_XPIXEL ] != 0 or winsz[ WS_YPIXEL ] != 0:
-            line1.append( ('ypixels', winsz[ WS_YPIXEL ]) )
             line1.append( ('xpixels', winsz[ WS_XPIXEL ]) )
+            line1.append( ('ypixels', winsz[ WS_YPIXEL ]) )
 
     cline = tty.getcline()
     ldisc = tty.getldisc()
