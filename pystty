@@ -5,7 +5,7 @@
 # Created: 2018-10-30
 # Public domain
 
-# $Id: pystty,v 1.3 2018/11/27 02:35:32 friedman Exp $
+# $Id: pystty,v 1.4 2018/11/27 02:39:52 friedman Exp $
 
 # Commentary:
 
@@ -398,6 +398,7 @@ ALIAS = {
                      'min',    1,
                      'time',   0, ],
 
+     # We ought to be able to compute this one from CC_PARAM_LIST
      'sane'     : [  'cread',  # cflags
 
                      # iflags
@@ -487,10 +488,14 @@ def termios_notrace( fn ):
         try:
             return fn( *args, **kwargs )
         except Exception as err:
-            if os.getenv( 'STTY_DEBUG' ):
+            if os.getenv( 'PYSTTY_DEBUG' ):
                 raise
             else:
-                fatal( args[0].fd_name, err[-1], fn=fn )
+                try:
+                    errmsg = err.strerror  # python3
+                except AttributeError:
+                    errmsg = err[-1]       # python 2.7
+                fatal( args[0].fd_name, errmsg, fn=fn )
     return wrapper
 
 class Stty( object ):
@@ -640,18 +645,24 @@ class Stty( object ):
     @termios_notrace
     def setcc( self, key, char ):
         self.tcgetattr()
-        if isinstance( char, int ):
-            # Make sure data is binary for python3
-            char = str.encode( chr( char & 0xff ) )
-        elif len( char ) > 2 and char[0] == '^':
-            char = char[0:2]
+        if key in [termios.VMIN, termios.VTIME]:
+            try:
+                char = int( char )
+            except ValueError:
+                raise
+        else:
+            if isinstance( char, int ):
+                # Make sure data is binary for python3
+                char = str.encode( chr( char & 0xff ) )
+            elif len( char ) > 2 and char[0] == '^':
+                char = char[0:2]
 
-        self._cctrans_init()
-        try:
-            char = self.cctrans[ char ]
-        except KeyError:
-            if len( char ) > 1:
-                raise KeyError( '"{}": unrecognized character alias'.format( char ) )
+            self._cctrans_init()
+            try:
+                char = self.cctrans[ char ]
+            except KeyError:
+                if len( char ) > 1:
+                    raise KeyError( '"{}": unrecognized character alias'.format( char ) )
         self._attr[ TC_CC ][ key ] = char
         return char
 
@@ -672,9 +683,12 @@ class Stty( object ):
 
     @termios_notrace
     def getldisc( self ):
-        raw = fcntl.ioctl( self.fd, termios.TIOCGETD, '\x00' * 4 )
-        self._ldisc = struct.unpack( '@i', raw )[0]
-        return self._ldisc
+        try:
+            raw = fcntl.ioctl( self.fd, termios.TIOCGETD, '\x00' * 4 )
+            self._ldisc = struct.unpack( '@i', raw )[0]
+            return self._ldisc
+        except OSError:
+            pass
 
     @termios_notrace
     def setldisc( self, n ):
@@ -696,6 +710,10 @@ class Stty( object ):
         'Linux'   : { 'template'  : '@4I B {}c 2I'.format( termios.NCCS ),
                       'bufsize'   : 60,
                       'TC_LINE'   : 4, }, }
+    # I suspect ESXi supports this to be API-compatible with linux but the
+    # c_line field is non-functional, since TIOCGETD returns an error.
+    tcgets_param[ 'VMkernel' ] = tcgets_param[ 'Linux' ]
+
     tcsets_when = { termios.TCSANOW   : getattr( termios, 'TCSETS',  None ),
                     termios.TCSADRAIN : getattr( termios, 'TCSETSW', None ),
                     termios.TCSAFLUSH : getattr( termios, 'TCSETSF', None ), }
@@ -732,8 +750,8 @@ class Stty( object ):
             except struct.error as err:
                 raise OSError( self, 'unknown line discipline "{}"'.format( line ))
 
-    def save( self, forfd=sys.stdout ):
-        if forfd.isatty():
+    def save( self, verbose=False ):
+        if verbose:
             return self._save_gpysttyv()
         else:
             return self._save_gpysttyc()
@@ -744,7 +762,10 @@ class Stty( object ):
             name = FLAG_LABEL[ n ]
             if name in ['cchars']:
                 for c in data:
-                    g.append( '{:x}'.format( ord( c )))
+                    try:
+                        g.append( '{:x}'.format( ord( c )))
+                    except TypeError: # min, time are int already
+                        g.append( '{:x}'.format( c ))
             else:
                 g.append( '{:x}'.format( data ) )
         return str.join( ':', g )
@@ -759,7 +780,10 @@ class Stty( object ):
                     if cc_pos is None:
                         continue
                     cc_name = elt[ CC_PARAM_LIST_NAME ]
-                    cc = ord( data[ cc_pos ] )
+                    try:
+                        cc = ord( data[ cc_pos ] )
+                    except TypeError: # min, time are int already
+                        cc = data[ cc_pos ]
                     g.append( '{}={:x}'.format( cc_name, cc ))
             elif n in [ TC_ISPEED, TC_OSPEED ]:
                 g.append( '{}={}'.format( name, NTOSPEED[ data ] ))
@@ -801,7 +825,16 @@ class Stty( object ):
         return self.tcsetattr()
 
 
-def fold( flags, maxlen=75, indent=0, sep=' ' ):
+stdowidth = 78
+
+def stdocols( fd=sys.stdout ):
+    tty = Stty( fd=fd )
+    try:
+        return tty.getwinsz( fd=fd )[1]
+    except (IOError, IndexError):
+        return stdowidth
+
+def fold( flags, maxlen=stdowidth, indent=0, sep=' ' ):
     lines   = []
     current = []
     flags = list( flags[:] ) # copy tuple or list
@@ -841,18 +874,23 @@ def make_display_values( tty, args ):
         line1.append( ('ospeed', ospeed) )
 
     if args.all:
-        winsz = tty.getwinsz()
-        line1.append(    ('rows', winsz[ WS_ROW ]) )
-        line1.append( ('columns', winsz[ WS_COL ]) )
-        if winsz[ WS_XPIXEL ] != 0 or winsz[ WS_YPIXEL ] != 0:
-            line1.append( ('xpixels', winsz[ WS_XPIXEL ]) )
-            line1.append( ('ypixels', winsz[ WS_YPIXEL ]) )
+        try:
+            winsz = tty.getwinsz()
+            line1.append(    ('rows', winsz[ WS_ROW ]) )
+            line1.append( ('columns', winsz[ WS_COL ]) )
+            if winsz[ WS_XPIXEL ] != 0 or winsz[ WS_YPIXEL ] != 0:
+                line1.append( ('xpixels', winsz[ WS_XPIXEL ]) )
+                line1.append( ('ypixels', winsz[ WS_YPIXEL ]) )
+        except IOError:
+            pass
 
     cline = tty.getcline()
     ldisc = tty.getldisc()
     ntoi, iton = tty.ldisc_name_maps()
     if cline is None:
-        if ldisc > 0 and ldisc in iton:
+        if ldisc is None:
+            pass
+        elif ldisc > 0 and ldisc in iton:
             line1.append( ('line', ldisc, iton[ ldisc ]) )
         else:
             line1.append( ('line', ldisc) )
@@ -863,7 +901,9 @@ def make_display_values( tty, args ):
             line1.append( ('line', cline) )
 
         if args.all or ldisc != cline:
-            if ldisc > 0 and ldisc in iton:
+            if ldisc is None:
+                pass
+            elif ldisc > 0 and ldisc in iton:
                 line1.append( ('disc', ldisc, iton[ ldisc]) )
             else:
                 line1.append( ('disc', ldisc) )
@@ -946,7 +986,7 @@ def display_all( tty, args ):
         make_display_values( tty, args ),
         args )
     values.append( char )
-    width = tty.getwinsz( sys.stdout )[1] or 75
+    width = stdocols()
     print( ' '.join( line1 ))
     labels = ('iflags', 'oflags', 'cflags', 'lflags', 'cchars')
     for label, flags in zip( labels, values ):
@@ -963,7 +1003,7 @@ def display_bsd( tty, args ):
     dv = make_display_values( tty, args )
     line1, ignore,  values = format_display_values( dv, args )
 
-    width = tty.getwinsz( sys.stdout )[1] or 75
+    width = stdocols()
     print( ' '.join( line1 ))
     labels = ('iflags', 'oflags', 'cflags', 'lflags')
     for label, flags in zip( labels, values ):
@@ -1006,7 +1046,7 @@ def diff_against_sane( tty, args ):
     line1, char, values = format_display_values( (line1, char, values), args )
 
     values.append( char )
-    width = tty.getwinsz( sys.stdout )[1] or 75
+    width = stdocols()
     print( ' '.join( line1 ))
     labels = ('iflags', 'oflags', 'cflags', 'lflags', 'cchars')
     for label, flags in zip( labels, values ):
@@ -1052,11 +1092,12 @@ def get_args():
     p = ArgParser( description='Print or change terminal characteristics.' )
     p.add_argument( '-F', '-f', '--file', dest='device', default=sys.stdin, help='open and use the specified DEVICE instead of stdin')
     p_x = p.add_mutually_exclusive_group()
-    p_x.add_argument( '-a', '--all',   action='store_true', default=False, help='print all current settings in human-readable form' )
-    p_x.add_argument( '-e', '--bsd',   action='store_true', default=False, help='print all current settings in traditional BSD "all" and "everything" formats' )
-    p_x.add_argument( '-g', '--save',  action='store_true', default=False, help='print all current settings in stty-readable form' )
-    p.add_argument(   '-c', '--align', action='store_true', default=False, help='Align output into columns' )
-    p.add_argument(   '-w', '--wide',  action='store_true', default=False, help='Do not wrap lines' )
+    p_x.add_argument( '-a', '--all',     action='store_true', default=False, help='print all current settings in human-readable form' )
+    p_x.add_argument( '-e', '--bsd',     action='store_true', default=False, help='print all current settings in traditional BSD "all" and "everything" formats' )
+    p_x.add_argument( '-g', '--save',    action='store_true', default=False, help='print all current settings in stty-readable form' )
+    p.add_argument(   '-c', '--align',   action='store_true', default=False, help='Align output into columns' )
+    p.add_argument(   '-w', '--wide',    action='store_true', default=False, help='Do not wrap lines' )
+    p.add_argument(   '-v', '--verbose', action='store_true', default=False, help='Extended output' )
     args, unknown = p.parse_known_args()
     args.setting = unknown
     return args
@@ -1078,7 +1119,7 @@ def main():
         args.all = args.bsd = True
         display_bsd( tty, args )
     elif args.save:
-        print( tty.save() )
+        print( tty.save( verbose=args.verbose ) )
     elif not args.setting:
         diff_against_sane( tty, args )
     elif slen == 1 and arg1 == 'size':
