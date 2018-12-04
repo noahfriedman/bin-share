@@ -5,7 +5,7 @@
 # Created: 2018-10-30
 # Public domain
 
-# $Id: pystty,v 1.4 2018/11/27 02:39:52 friedman Exp $
+# $Id: pystty,v 1.5 2018/12/04 20:31:57 friedman Exp $
 
 # Commentary:
 
@@ -830,7 +830,8 @@ stdowidth = 78
 def stdocols( fd=sys.stdout ):
     tty = Stty( fd=fd )
     try:
-        return tty.getwinsz( fd=fd )[1]
+        width = tty.getwinsz( fd=fd )[1]
+        return width or stdowidth
     except (IOError, IndexError):
         return stdowidth
 
