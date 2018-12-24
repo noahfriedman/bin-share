@@ -1,11 +1,22 @@
-#! /bin/sh
-# $Id: dist-tar,v 1.9 2015/09/12 04:46:22 friedman Exp $
+#!/bin/sh
+# $Id: dist-tar,v 1.10 2017/09/30 01:09:27 friedman Exp $
 
 LC_COLLATE=C
 export LC_COLLATE
 
-if ${TAR-tar} --version 2>&1 | grep 'GNU tar' > /dev/null; then
-  gnutar=t
+cmdp() { type "$@" > /dev/null 2>&1; }
+case ${FIND-nil} in nil ) if cmdp gfind; then FIND=gfind; fi ;; esac
+case ${TAR-nil}  in nil ) if cmdp gtar;  then TAR=gtar;   fi ;; esac
+case ${SORT-nil} in nil ) if cmdp gsort; then SORT=gsort; fi ;; esac
+
+gnup() { "$1" --version 2>&1 | grep "GNU" > /dev/null; }
+if gnup ${TAR-tar}; then
+    gnutar=t
+    if gnup ${FIND-find} && gnup ${SORT-sort}; then
+        FPRINT=print0
+        SORTOPT="$SORTOPT --zero-terminated"
+        TAROPT="$TAROPT --null"
+    fi
 fi
 
 case $1 in
@@ -13,35 +24,31 @@ case $1 in
 esac
 
 case ${DIST_TAR_ZIP-gzip} in
-  gzip  ) zip=gzip  z=gz   zargs='-9' ;;
-  bzip2 ) zip=bzip2 z=bz2  zargs='-9' ;;
-  lzma  ) zip=lzma  z=lzma zargs='-9 --extreme --threads=0' ;;
-  xz    ) zip=xz    z=xz   zargs='-9 --extreme --threads=0' ;;
-  *     ) echo "dist-tar: $DIST_TAR_ZIP: unknown compression method" 1>&2
-          exit 1 ;;
+    gzip  ) zip=gzip  z=gz   zargs='-9' ;;
+    bzip2 ) zip=bzip2 z=bz2  zargs='-9' ;;
+    lzma  ) zip=lzma  z=lzma zargs='-9 --extreme --threads=0' ;;
+    xz    ) zip=xz    z=xz   zargs='-9 --extreme --threads=0' ;;
+    *     ) echo "dist-tar: $DIST_TAR_ZIP: unknown compression method" 1>&2
+            exit 1 ;;
 esac
 
-for dir in ${1+"$@"} ; do
-  # Protect against accidental trailing slash, i.e. if someone does
-  # dist-tar foo/, don't create foo/.tar.gz only to delete foo
-  # afterward.
-  case $dir in
-    */ ) dir=`echo "$dir" | sed -e 's=/$==g'` ;;
-  esac
+for dir in "$@" ; do
+    # Protect against accidental trailing slash, i.e. if someone does
+    # dist-tar foo/, don't create foo/.tar.gz only to delete foo after.
+    dir=${dir%/}
+    { case $gnutar in
+          t ) echo "dist-tar: (gnu) packing $dir.tar.$z"
+              ${FIND-find} "$dir" -${FPRINT-print} \
+                  | ${SORT-sort} $SORTOPT \
+                  | ${TAR-tar} $TAROPT --no-recursion -T - -cvf - \
+                  | $zip $zargs > "$dir.tar.$z" ;;
 
-  echo "dist-tar: packing $dir.tar.$z"
-
-  { case $gnutar in
-      t ) find "$dir" -print \
-           | sort \
-           | ${TAR-tar} ${TAROPT} --no-recursion -T - -cvf - \
-           | $zip $zargs > "$dir.tar.$z" ;;
-
-      * ) ${TAR-tar} ${TAROPT} -cvf - "$dir" \
-           | $zip $zargs > "$dir.tar.$z" ;;
-    esac
-  } && touch -r "$dir" "$dir.tar.$z" \
-    && rm -rf "$dir"
+          * ) echo "dist-tar: packing $dir.tar.$z"
+              ${TAR-tar} $TAROPT -cvf - "$dir" \
+                  | $zip $zargs > "$dir.tar.$z" ;;
+      esac
+    } && touch -r "$dir" "$dir.tar.$z" \
+      && rm -rf "$dir"
 done
 
 # eof
