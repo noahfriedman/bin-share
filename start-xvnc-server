@@ -3,7 +3,7 @@
 # Author: Noah Friedman <friedman@splode.com>
 # Public domain.
 
-# $Id: start-xvnc-server,v 1.8 2017/08/06 07:07:29 friedman Exp $
+# $Id: start-xvnc-server,v 1.9 2017/08/06 10:29:43 friedman Exp $
 
 # Commentary:
 # Code:
@@ -70,9 +70,9 @@ getopt='
     optarg_optional=
   }'
 
-geom=1024x768
-depth=24
-name=Xvnc
+name=
+geom=
+depth=
 
 # Parse command line arguments.
 # Make sure that all wildcarded options are long enough to be unambiguous.
@@ -122,35 +122,32 @@ while : ; do
     esac
 done
 
-
-case $name in
-    vmware )
-        # (2006) The irregular display size accounts for the display used
-        # by the emulated workstation window running under vmware, plus the
-        # height of the menu bar displayed by vmware itself.
-        # n.b. add 64 to height if including toolbar.
-        #
-        # (2017) I'm not sure if those numbers are even right anymore with
-        # modern vmware workstation windows.
-        geom=$((${geom%x*} + 8))x$((${geom#*x} + 32))
-        ;;
-esac
+homedirs=( $XDG_CONFIG_HOME
+           $XDG_DATA_HOME
+           $HOME/etc/misc )
+for dir in "${homedirs[@]}"; do
+    if [ -d "$dir/.vnc" ]; then
+        HOME=$dir
+        break
+    fi
+done
 
 displaynum=${XVNCDISPLAY-10}
 displaynum=${displaynum#*:}
 
 # add elements to end of bash shell array in a readable way
 apush() { eval "$1=(\"\${$1[@]}\" \"\${@:2}\")"; }
-vnccmd=( ${VNCSERVER-vncserver} :$displaynum
-         -geometry $geom
-         -depth    $depth
-         -name     $name
-       )
+vnccmd=( ${VNCSERVER-vncserver} :$displaynum )
+case ${name:+isset}  in isset ) apush vnccmd -name     $name  ;; esac
+case ${geom:+isset}  in isset ) apush vnccmd -geometry $geom  ;; esac
+case ${depth:+isset} in isset ) apush vnccmd -depth    $depth ;; esac
 
 # Figure out if we're running tightvnc or real/tiger vnc
 case `Xvnc -version 2>&1 | grep '^Xvnc'` in
     *tight*         ) apush vnccmd -dontdisconnect ;;
-    *TigerVNC*      ) apush vnccmd -DisconnectClients=0 -ZlibLevel=3 ;;
+    *TigerVNC*      ) if ! [ -s $HOME/.vnc/config ]; then
+                          apush vnccmd -DisconnectClients=0 -ZlibLevel=3
+                      fi ;;
     *' version 4.'* ) apush vnccmd -DisconnectClients=0 -ZlibLevel=3 ;;
 esac
 
@@ -166,22 +163,12 @@ for dir in "${javadirs[@]}"; do
     fi
 done
 
-homedirs=( $XDG_CONFIG_HOME
-           $XDG_DATA_HOME
-           $HOME/etc/misc )
-for dir in "${homedirs[@]}"; do
-    if [ -d "$dir/.vnc" ]; then
-        HOME=$dir
-        break
-    fi
-done
-
 case ${DISPLAY:+isset} in
     isset ) PARENTDISPLAY=$DISPLAY; export PARENTDISPLAY ;;
 esac
 
 # The vncserver script will background itself
 set -x
-"${vnccmd[@]}" "$@"
+exec with -s "${vnccmd[@]}" "$@"
 
 # eof
