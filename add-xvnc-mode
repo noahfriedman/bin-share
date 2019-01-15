@@ -1,0 +1,25 @@
+#!/usr/bin/env perl
+# $Id$
+
+use strict;
+
+sub main
+{
+  my $refresh_hz = 60.0;
+  my $output_name = 'VNC-0';
+
+  my $geom = shift;
+  my ($h, $v) = split (/x/, $geom);
+  my $pxfreq = ($h * $v * $refresh_hz) / 10**6;
+
+  system (qw(xrandr --newmode),
+          $geom, $pxfreq,
+          $h, 0, 0, $h,
+          $v, 0, 0, $v);
+
+  system (qw(xrandr --addmode), $output_name, $geom);
+}
+
+main (@ARGV);
+
+# eof
