@@ -1,0 +1,76 @@
+#!/bin/sh
+# $Id$
+
+xrandr1() { xrandr --screen ${DISPLAY##*.} "$@"; }
+get_out() { xrandr1 | sed -ne '/^\([^ ]*\)  *connected .*/s//\1/p'; }
+get_res() { xrandr1 | sed -ne '/^  *\([0-9x]*\) [^*+]*\([*+]*\).*/s//\1 \2/p'; }
+set_res() { xrandr1 --output $(get_out) --mode "$@"; }
+
+gcd()
+{
+    test $2 -gt $1 && set -- $2 $1
+    while (( $1 % $2 != 0 )); do
+        set -- $(( $1 - $2 )) $2
+        test $2 -gt $1 && set -- $2 $1
+    done
+    gcd=$2
+}
+
+aspect()
+{
+    set -- ${1%%x*} ${1##*x} "$2"
+    gcd $1 $2
+    let aspect_w=$(( $1 / gcd ))
+    let aspect_h=$(( $2 / gcd ))
+    echo $1 $2  $aspect_w $aspect_h "$3"
+}
+
+sortfn()
+{
+    case $SORT_BY in
+        aspect ) sort -k3,3n  -k4,4n  -k1,1nr -k2,2nr "$@" ;;
+        *      ) sort -k1,1nr -k2,2nr -k3,3n  -k4,4n  "$@" ;;
+    esac
+}
+
+show_avail()
+{
+    let w=0 h=0 aw=0 ah=0 law=0 lah=0
+    local xtra fmt echo=:
+
+    case $SORT_BY in aspect ) echo=echo ;; esac
+
+    get_res |
+        while read geom xtra; do
+            aspect $geom ${xtra:+"$xtra"}
+        done |
+        sortfn |
+        while read w h aw ah xtra; do
+            [  $aw -ne $law ] ||
+            [  $ah -ne $lah ] &&
+            [ $law -ne 0 ]    && $echo
+
+            law=$aw lah=$ah
+            rat=$(dc -e "2 k $aw $ah / p")
+            fmt="%4sx%-4s  %3s:%-2s %s"
+            case ${xtra:+isset} in isset ) fmt="$fmt  %s" ;; esac
+
+            printf "$fmt\n" $w $h $aw $ah $rat ${xtra:+"$xtra"}
+        done
+}
+
+main()
+{
+    case $1 in
+        aspect ) shift; SORT_BY=aspect ;;
+    esac
+
+    case $# in
+        0 ) show_avail ;;
+        * ) set_res "$@" ;;
+    esac
+}
+
+main "$@"
+
+# eof
