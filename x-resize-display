@@ -1,5 +1,10 @@
 #!/bin/sh
-# $Id$
+# x-resize-display --- resize current display or show available resolutions
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2019-02-16
+# Public domain
+
+# $Id: x-resize-display,v 1.1 2019/02/17 04:43:53 friedman Exp $
 
 xrandr1() { xrandr --screen ${DISPLAY##*.} "$@"; }
 get_out() { xrandr1 | sed -ne '/^\([^ ]*\)  *connected .*/s//\1/p'; }
