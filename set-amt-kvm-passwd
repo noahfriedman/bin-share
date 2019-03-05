@@ -1,0 +1,89 @@
+#!/usr/bin/env perl
+# set-amt-kvm-passwd - set password for Intel AMT/vPro KVM interface
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2019-03-04
+# Public domain
+
+# $Id$
+
+use strict;
+use warnings qw( all );
+
+use Getopt::Long;
+use Pod::Usage;
+
+my $kvm_ips = 'http://intel.com/wbem/wscim/1/ips-schema/1/IPS_KVMRedirectionSettingData';
+my $kvm_cim = 'http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_KVMRedirectionSAP';
+
+# n.b this is an ordered property list, not a hash
+my @kvm_opt = ( RFBPassword       => undef,
+                Is5900PortEnabled => 'true',
+                OptInPolicy       => 'false',
+                SessionTimeout    => 0, );
+
+my %opt = ( amt_host => undef,
+            amt_user => $ENV{WSMAN_USER} || 'admin',
+            amt_pass => $ENV{WSMAN_PASS},
+            kvm_pass => undef, );
+
+sub wsman
+{
+  local $ENV{WSMAN_USER} = $opt{amt_user};
+  local $ENV{WSMAN_PASS} = $opt{amt_pass};
+  my @cmd = ( 'wsman', @_, qw(-D text -P 16992 -h), $opt{amt_host} );
+
+  print("\n\n", join(" ", @cmd), "\n");
+  system( @cmd );
+  die "Command failed\n" unless $? == 0;
+}
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help; # no init; perl 5.8 will treat as REF() instead of SCALAR()
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev gnu_compat no_ignorecase));
+
+  my $succ = $parser->getoptions
+    ("help"                     => sub { $help = 3 },
+     "usage"                    => sub { $help = 1 },
+
+     "h|host=s"                 => \$opt{amt_host},
+     "u|user=s"                 => \$opt{amt_user},
+     "p|pass=s"                 => \$opt{amt_pass},
+     "P|vnc-pass=s"             => \$opt{kvm_pass},
+    );
+
+  $help ||= 0; # but if not set yet, we need to set it here now.
+  pod2usage (-exitstatus => 1, -verbose => 0)         unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help - 1) if $help > 0;
+
+  die "AMT host must be specified\n" unless defined $opt{amt_host};
+  die "AMT pass must be specified\n" unless defined $opt{amt_pass};
+  die "VNC passwd must be exactly 8 chars and have at least one of each: upcase, downcase, number, special\n"
+    unless (defined $opt{kvm_pass}
+            && length( $opt{kvm_pass} ) == 8
+            && $opt{kvm_pass} =~ /[A-Z]/
+            && $opt{kvm_pass} =~ /[a-z]/
+            && $opt{kvm_pass} =~ /[0-9]/
+            && $opt{kvm_pass} =~ /[\x21-\x2f\x3a-\x40\x5c-\x60\x7b-\x7e]/);
+
+  $kvm_opt[1] = $opt{kvm_pass};
+}
+
+sub main
+{
+  parse_options( \@_ );
+
+  for (my $i = 0; $i < @kvm_opt; $i += 2)
+    {
+      my $key = join( '=', $kvm_opt[$i], $kvm_opt[$i + 1] );
+      wsman( 'put', $kvm_ips, '-k', $key );
+    }
+  wsman( qw(invoke -a RequestStateChange), $kvm_cim, qw(-k RequestedState=2) );
+}
+
+main( @ARGV );
+
+# eof
