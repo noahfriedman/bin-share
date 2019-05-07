@@ -158,22 +158,19 @@ sub __init
 {
   local $errors_fatal = 1;
 
-  if ($opt{need_net})
+  $opt{prefer_socklib} ||= "inet6 ip inet"; # try ipv6-supporting first
+  unless (ref $opt{prefer_socklib})
     {
-      $opt{prefer_socklib} ||= "inet6 ip inet"; # try ipv6-supporting first
-      unless (ref $opt{prefer_socklib})
-        {
-          my @slibs = map { $socklib{lc $_} || $_
-                          } split (/[,\s]+/, $opt{prefer_socklib});
-          $opt{prefer_socklib} = \@slibs;
-        }
+      my @slibs = map { $socklib{lc $_} || $_
+                      } split (/[,\s]+/, $opt{prefer_socklib});
+      $opt{prefer_socklib} = \@slibs;
+    }
 
-      for my $try (@{$opt{prefer_socklib}})
-        {
-          $SOCKLIB = $try;
-          eval "use $try";
-          last unless $@;
-        }
+  for my $try (@{$opt{prefer_socklib}})
+    {
+      $SOCKLIB = $try;
+      eval "use $try";
+      last unless $@;
     }
 
   if ($opt{need_ssl} || $opt{starttls})
@@ -430,7 +427,7 @@ sub connect
       # We cannot control whether stunnel uses ipv4 or ipv6, if a host name
       # has both kinds of address records.  So resolve the corresponding
       # addresses for the specified address family and direct stunnel to
-      # connect to those instead.
+      # connect to thorse instead.
       ($canon, @connect) = hostaddrs ($param{PeerHost});
     }
   unless (@connect)
