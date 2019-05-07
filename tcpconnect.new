@@ -13,6 +13,10 @@ our %opt;
 our %SSL_options;
 our ($SOCKLIB, $SOCKLIB_SSL);
 
+our $errors_fatal = 0;
+
+our $progname = $0;
+
 sub parse_options
 {
   my $help = -1;
@@ -65,7 +69,7 @@ sub show_version
 
   if ($::debug)
     {
-      $opt{need_net} = $opt{need_ssl} = 1;
+      $opt{need_ssl} = 1;
       net_init();
       $SOCKLIB     ||= "(none loaded)";
       $SOCKLIB_SSL ||= "(none loaded)";
@@ -86,9 +90,59 @@ sub net_init
   From::Socket::__init() if $opt{need_net} || $opt{need_ssl};
 }
 
+sub copy_io_until_close ($$$)
+{
+  my ($inh, $outh, $remh) = @_;
+  my $inbits = '';
+  my $outbits = '';
+  my $bufsize = 4096;
+
+  vec ($inbits, fileno ($inh),  1) = 1;
+  vec ($inbits, fileno ($remh), 1) = 1;
+
+  while (1)
+    {
+      select ($outbits = $inbits, undef, undef, undef);
+
+      if (vec ($outbits, fileno ($inh), 1) == 1)
+        {
+          if (my $len = sysread ($inh, $_, $bufsize))
+            {
+              syswrite ($remh, $_, $len);
+            }
+          else
+            {
+              # Shut down sending, but don't return; allow remaining output
+              # to drain.
+              vec ($inbits, fileno ($inh), 1) = 0;
+              shutdown ($remh, SHUT_WR);
+            }
+        }
+
+      if (vec ($outbits, fileno ($remh), 1) == 1)
+        {
+          if (my $len = sysread ($remh, $_, $bufsize))
+            {
+              syswrite ($outh, $_, $len);
+            }
+          else
+            {
+              shutdown ($remh, SHUT_RDWR);
+              return;
+            }
+        }
+   }
+}
+
 sub main
 {
   parse_options (\@_);
+  TC::Socket::__init();
+  my $sock = NetCmd->new (host => $_[0], port => $_[1]);
+  if ($sock->connect)
+    {
+      copy_io_until_close (*STDIN{IO}, *STDOUT{IO}, $sock->{fh});
+    }
 }
 
 sub _verbose
@@ -105,11 +159,11 @@ sub _error
   my $msg = join (": ", $progname, "error", @_);
   $msg .= "\n" unless substr ($msg, -1, 1) eq "\n";
 
-  if ($errors_fatal)
+#  if ($errors_fatal)
     {
       my $pkg = __PACKAGE__;
       local $Carp::CarpInternal{$pkg} = 1; # don't show this pkg in backtrace
-      local $Carp::Verbose = $debug;
+      local $Carp::Verbose = $opt{debug};
       croak $msg;
     }
 
