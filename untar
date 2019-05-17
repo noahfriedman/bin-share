@@ -4,7 +4,7 @@
 # Created: 1996-01-15
 # Public domain
 
-# $Id: untar,v 1.37 2018/04/11 05:00:29 friedman Exp $
+# $Id: untar,v 1.38 2018/11/19 22:51:21 friedman Exp $
 
 # Commentary:
 
@@ -105,7 +105,14 @@ extract()
             ${LHA-lha} x "$file" ;;
 
         *.rar | *.cbr )
-            ${UNRAR-unrar} x "$file" ;;
+            if type unar >/dev/null 2>&1;
+            then : ${UNRAR:=unar}
+            else : ${UNRAR:=unrar}
+            fi
+            case $UNRAR in
+                *unar  ) $UNRAR -t "$file" ;;
+                *unrar ) $UNRAR x "$file" ;;
+            esac ;;
 
         *.a | *.lib )
             ${AR-ar} t "$file" | sed -ne 's=/[^/]*$==p' |
