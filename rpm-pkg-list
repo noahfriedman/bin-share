@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.49 2018/09/12 19:56:47 friedman Exp $
+# $Id: rpm-pkg-list,v 1.50 2018/10/04 20:54:06 friedman Exp $
 
 # Commentary:
 # Code:
@@ -461,6 +461,7 @@ f613cbe8	fedora-9/10/11-ia64
 
 fd431d51	rhel-6
 
+42f19ed0	rpmfusion-free-f29
 09eab3f2	rpmfusion-free-f28
 7d838377	rpmfusion-free-f27
 9690e4af	rpmfusion-free-f26
@@ -481,6 +482,7 @@ a3780952	rpmfusion-free-f13
 8fcff4da	rpmfusion-free-f11
 49c8885a	rpmfusion-free-f10-or-earlier
 
+d6841af8	rpmfusion-nonfree-f29
 7f858107	rpmfusion-nonfree-f28
 b9c13282	rpmfusion-nonfree-f27
 3276f4b3	rpmfusion-nonfree-f26
