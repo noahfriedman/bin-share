@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# $Id$
+
+apush() { eval "$1=(\"\${$1[@]}\" \"\${@:2}\")"; }
+
+modegen()
+{
+    case $1 in
+        *x* ) set ${1%x*} ${1#*x} $2 $3
+    esac
+
+    local cmd=cvt
+    if type gtf >/dev/null 2>&1; then cmd=gtf; fi
+
+    $cmd $1 $2 ${3-60}
+}
+
+
+getmode()
+{
+    modegen "$@" |
+        while read ml name timings; do
+            case $ml in
+                [Mm]odeline )
+                    name=${name#\"}
+                    name=${name%\"}
+                    name=${name/_/@}
+                    echo $name $timings
+                    return  ;;
+                * ) continue ;;
+            esac
+        done
+}
+
+main()
+{
+    while [ $# -gt 0 ]; do
+        case $1 in
+            [1-9][0-9]* ) apush mode    $1; shift ;;
+            *           ) apush outputs $1; shift ;;
+        esac
+    done
+
+    set : `getmode "${mode[@]}"`
+    name=$2
+    shift 2
+    ${XRANDR-xrandr} --newmode $name "$@"
+    for output in "${outputs[@]}"; do
+        ${XRANDR-xrandr} --addmode $output $name
+    done
+}
+
+main "$@"
+
+# eof
