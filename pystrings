@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# $Id$
+# $Id: pystrings,v 1.1 2018/10/06 00:17:20 friedman Exp $
 
 from __future__ import print_function
 
@@ -15,7 +15,7 @@ def openhook( name, mode ):
         return open( '/dev/null', mode )
 
 def main():
-    pattern = re.compile( b'([\x20-\x7e\t]{4,})' )
+    pattern = re.compile( b'([\x20-\x7e\t ]{4,})' )
     for line in fileinput.input( mode='rb', openhook=openhook ):
         for match in pattern.findall( line ):
             print( match.decode() )
