@@ -4,7 +4,7 @@
 # Created: 2009-02-10
 # Public domain
 
-# $Id$
+# $Id: cookies-sql2txt,v 1.1 2009/02/11 00:39:19 friedman Exp $
 
 # Commentary:
 
@@ -14,10 +14,10 @@
 
 # Code:
 
-$^W = 1; # enable warnings
+use strict;
+use warnings qw(all);
 
 use DBI;
-use strict;
 
 sub main
 {
@@ -29,27 +29,29 @@ sub main
       return 1;
     }
 
-  my $dbh = DBI->connect ("DBI:SQLite:dbname=$cookiedb");
-  return 1 unless $dbh;
+  my $dbh = DBI->connect ("DBI:SQLite:dbname=$cookiedb") or return 1;
 
-  my $stm = "select host,
-                    replace(replace(substr(host,0,1)='.',1,'TRUE'),0,'FALSE') as flag,
-                    path,
-                    isSecure,
-                    expiry,
-                    name,
-                    value
-             from moz_cookies
-             where expiry >= ?
-            ";
-  my $sth = $dbh->prepare ($stm);
+  $dbh->do (q{ pragma busy_timeout = 500 });
+
+  my $stm = q{ select host,
+                      replace(replace(substr(host,0,1)='.',1,'TRUE'),0,'FALSE') as flag,
+                      path,
+                      isSecure,
+                      expiry,
+                      name,
+                      value
+               from moz_cookies
+               where expiry >= ?
+            };
+  my $sth = $dbh->prepare ($stm) or return 1;
   $sth->execute (time);
   while (my @row = $sth->fetchrow_array)
     {
-      print join ("\t", @row), "\n";
+      print join( "\t", @row ), "\n";
     }
+  return 0;
 }
 
-main (@ARGV);
+exit (main (@ARGV));
 
 # eof
