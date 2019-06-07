@@ -4,7 +4,7 @@
 # Created: 2009-02-10
 # Public domain
 
-# $Id: cookies-sql2txt,v 1.1 2009/02/11 00:39:19 friedman Exp $
+# $Id: cookies-sql2txt,v 1.2 2019/06/07 08:26:35 friedman Exp $
 
 # Commentary:
 
@@ -34,7 +34,7 @@ sub main
   $dbh->do (q{ pragma busy_timeout = 500 });
 
   my $stm = q{ select host,
-                      replace(replace(substr(host,0,1)='.',1,'TRUE'),0,'FALSE') as flag,
+                      replace(replace(substr(host,1,1)='.',1,'TRUE'),0,'FALSE') as flag,
                       path,
                       isSecure,
                       expiry,
@@ -42,6 +42,10 @@ sub main
                       value
                from moz_cookies
                where expiry >= ?
+               order by baseDomain,
+                        host,
+                        name,
+                        path
             };
   my $sth = $dbh->prepare ($stm) or return 1;
   $sth->execute (time);
