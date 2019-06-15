@@ -4,7 +4,7 @@
 # Created: 1996-01-15
 # Public domain
 
-# $Id: untar,v 1.38 2018/11/19 22:51:21 friedman Exp $
+# $Id: untar,v 1.39 2019/05/17 20:47:30 friedman Exp $
 
 # Commentary:
 
@@ -141,6 +141,10 @@ extract()
 
         *initramfs*.img | *initrd*.img | *ramdisk.img )
             extract_initrd "$file" ;;
+
+        *.squashfs )
+            dest=${file##*/}
+            unsquashfs -i -d "${dest%.squashfs}" "$file" ;;
 
         *.iso )
             xorriso -for_backup \
