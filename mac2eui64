@@ -1,0 +1,20 @@
+#!/usr/bin/env perl
+# $Id$
+
+# Generate ipv6 autoconf address from MAC
+# e.g. 44:85:00:64:d3:81 => 4685:ff:fe64:d381
+
+use strict;
+use warnings qw(all);
+
+my @x = map { hex $_ } split (/:/, lc( $ARGV[0]));
+$x[0] ^= 2;
+
+splice (@x, 3, 0, 0xff, 0xfe);
+
+my @y;
+while (@x) { push @y, (shift @x) << 8 | shift @x }
+
+print join (":", map { sprintf "%02x", $_ } @y), "\n";
+
+# eof
