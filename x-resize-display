@@ -4,7 +4,7 @@
 # Created: 2019-02-16
 # Public domain
 
-# $Id: x-resize-display,v 1.3 2019/06/12 05:44:22 friedman Exp $
+# $Id: x-resize-display,v 1.4 2019/06/17 02:29:32 friedman Exp $
 
 xrandr1() { xrandr --screen ${DISPLAY##*.} "$@"; }
 
@@ -36,9 +36,8 @@ get_res()
 
 set_res()
 {
-    res=$1
-    output=${2-$(get_out)}
-    shift 2
+    res=$1                 ; shift
+    output=${1-$(get_out)} ; shift
 
     xrandr1 --output "$output" --mode "$res" "$@";
 }
