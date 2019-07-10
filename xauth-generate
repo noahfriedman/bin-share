@@ -1,0 +1,14 @@
+#!/bin/sh
+# $Id$
+
+# Generate xauth MMC1 cookies using random data.
+# This may be useful with displays that have no security
+# extension for `xauth generate'.
+
+# n.b. in place of perl could use:  hexdump -e '16/1 "%02x" "\n"'
+
+dd if=/dev/urandom bs=16 count=1 2>/dev/null |
+    perl -ne 'print unpack("H*", $_)'        |
+    xargs xauth add ${1-$DISPLAY} MIT-MAGIC-COOKIE-1
+
+# eof
