@@ -4,7 +4,7 @@
 # Created: 1996-01-15
 # Public domain
 
-# $Id: untar,v 1.39 2019/05/17 20:47:30 friedman Exp $
+# $Id: untar,v 1.40 2019/06/15 07:21:13 friedman Exp $
 
 # Commentary:
 
@@ -52,7 +52,7 @@ post()
     fi
 
     if   [ $nfiles -gt 1 ] ||
-       { [ $nfiles -eq 1 ] && ! [ ".$ndir" = ".$pkgdir" ]; }
+       { [ $nfiles -eq 1 ] && [ ".$ndir" != ".$pkgdir" ]; }
     then
         cd .. &&
         mv "$tmpdir" "$pkgdir"
