@@ -5,7 +5,7 @@
 # Created: 2018-10-30
 # Public domain
 
-# $Id: pystty,v 1.5 2018/12/04 20:31:57 friedman Exp $
+# $Id: pystty,v 1.6 2018/12/04 20:36:53 friedman Exp $
 
 # Commentary:
 
@@ -687,8 +687,9 @@ class Stty( object ):
             raw = fcntl.ioctl( self.fd, termios.TIOCGETD, '\x00' * 4 )
             self._ldisc = struct.unpack( '@i', raw )[0]
             return self._ldisc
-        except OSError:
-            pass
+        except (OSError, AttributeError):
+            pass    # termios.TIOCGETD is not defined on cygwin
+
 
     @termios_notrace
     def setldisc( self, n ):
