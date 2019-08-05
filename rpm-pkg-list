@@ -4,7 +4,7 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.51 2019/05/24 07:37:09 friedman Exp $
+# $Id: rpm-pkg-list,v 1.52 2019/06/07 07:45:26 friedman Exp $
 
 # Commentary:
 # Code:
@@ -462,6 +462,7 @@ f613cbe8	fedora-9/10/11-ia64
 
 fd431d51	rhel-6
 
+c0aeda6e	rpmfusion-free-f30
 42f19ed0	rpmfusion-free-f29
 09eab3f2	rpmfusion-free-f28
 7d838377	rpmfusion-free-f27
@@ -483,6 +484,7 @@ a3780952	rpmfusion-free-f13
 8fcff4da	rpmfusion-free-f11
 49c8885a	rpmfusion-free-f10-or-earlier
 
+1d14a795	rpmfusion-nonfree-f30
 d6841af8	rpmfusion-nonfree-f29
 7f858107	rpmfusion-nonfree-f28
 b9c13282	rpmfusion-nonfree-f27
@@ -545,9 +547,14 @@ be1229cf	microsoft
 f90c0e97	negativo17
 98ab5139	oracle-virtualbox
 a9464aa9	pidgin
-bf6a7041	slack.com
 ba392878	splode-internal-2005	# internal reference key; not secure
 dbcccc4b	splode-internal-2015	# internal reference key; not secure
+
+d59097ab	ops@packagecloud.io
+038651bd	slack@packagecloud.io
+bf6a7041	slack.com
+
+598252fb	rockowitz@build.opensuse.org
 
 # Note: these redhat keys should be discontinued as of 9/2008
 db42a60e	redhat
