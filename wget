@@ -25,9 +25,9 @@ esac
 
 atleast()
 {
-    [ $vmajor -gt $1 ] \
-        || [ $vmajor -eq $1 ] && [ $vminor -gt $2 ] \
-        || [ $vmajor -eq $1 ] && [ $vminor -eq $2 ] && [ $vpatch -ge ${3-0} ]
+    { [ $vmajor -gt $1 ]; }                         ||
+    { [ $vmajor -eq $1 ] && [ $vminor -gt $2 ]; }   ||
+    { [ $vmajor -eq $1 ] && [ $vminor -eq $2 ] && [ $vpatch -ge ${3-0} ]; }
 }
 
 opts="--wait=0
