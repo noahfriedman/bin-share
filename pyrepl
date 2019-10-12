@@ -26,6 +26,12 @@ def pp( *args, **kwargs ):
 def bt( cmd ):
     return subprocess.check_output( [cmd] ).rstrip( ' \t\r\n' )
 
+def load( filename ):
+    with open( filename, 'r' ) as f:
+        text = f.read()
+    text.replace( '\r\n', '\n' )
+    exec( text, globals() )
+
 if __name__ == '__main__':
     # Don't display 'None' if there is nothing to display.
     sys.displayhook = lambda arg: (arg is None) or pp( arg )
@@ -41,7 +47,10 @@ if __name__ == '__main__':
     exitmsg = ''
 
     # non-builtin symbols to be present at start in the repl
-    local = { 'bt' : bt, }
+    local = { 'bt'      : bt,
+              'load'    : load,
+              # having access to repl_pp lets us change _width on occasion
+              'repl_pp' : repl_pp, }
 
     try:               # python3
         code.interact( local=local, banner=banner, exitmsg=exitmsg )
