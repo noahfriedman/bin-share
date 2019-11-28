@@ -700,7 +700,7 @@ class Stty( object ):
         return fcntl.ioctl( self.fd, termios.TIOCSETD, raw )
 
     def ldisc_name_maps( self ):
-        filt = lambda x: list( filter( lambda elt: elt.find( 'N_' ) == 0, dir( x ) ))
+        filt = lambda x: list( n for n in dir( x ) if n.find( 'N_' ) == 0 )
         names = filt( _termios )
         names.extend( filt( termios ) )
         formap = { name[2:].lower() : getattr( _termios, name ) for name in names }
@@ -841,7 +841,9 @@ def fold( flags, maxlen=stdowidth, indent=0, sep=' ' ):
     current = []
     flags = list( flags[:] ) # copy tuple or list
 
-    maxlen -= indent
+    # maxlen must be at least wide enough for 1 value per line
+    maxlen = max( maxlen - indent,
+                  max( (1 + len( f )) for f in flags ))
     while flags:
         current.append ( flags.pop( 0 ) )
         text = sep.join( current )
@@ -954,8 +956,8 @@ def make_display_values( tty, args ):
 
 def format_display_values( data, args ):
     def maxlen( array, validcol ):
-        valid =  filter( lambda x: x[ validcol ] is not None, array )
-        return max( map( lambda x: len( x[ 0 ] ), valid ))
+        valid = [ x[ validcol ] for x in array if x is not None ]
+        return max( len( x[ 0 ] ) for x in valid )
 
     line1, char, values = data
     for i, e in enumerate( line1 ):
@@ -964,14 +966,14 @@ def format_display_values( data, args ):
 
     if char:
         if args.align and not args.wide:
-            l = max( map( lambda c: len( c[0] ), char ))
+            l = max( len( c[0] ) for c in char )
             fmt = '{{:<{}}} = {{:<8}} '.format( l ).format
         else:
             fmt = '{} = {}'.format
         char = [ fmt( elt[0], str( elt[1] ) + ';' ) for elt in char ]
 
     if args.align:
-        l = max( max( map( len, flag ) for flag in values ))
+        l = max( max( len( f ) for f in flag ) for flag in values )
         fmt = '{{:<{}}}'.format( l ).format
         for i, xflag in enumerate( values ):
             new = []
@@ -1017,10 +1019,10 @@ def display_bsd( tty, args ):
         print( label, text, sep=': ' )
 
     cnam, cval = zip(*dv[1])
-    cwidth = max( map( len, cnam ))
+    cwidth = max( len( x ) for x in cnam )
     fmt = '{{:<{}}}'.format( cwidth + 1 ).format
-    c1 = map( lambda x: fmt( x ), cnam )
-    c2 = map( lambda x: fmt( x ), cval )
+    c1 = [ fmt( x ) for x in cnam ]
+    c2 = [ fmt( x ) for x in cval ]
 
     if args.wide:
         print( *c1 )
