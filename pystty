@@ -70,6 +70,24 @@ class PseudoTermios( object ):
         EXTPROC    =      0o200000
         IUTF8      =       0o40000
 
+        # Termux (android) python doesn't define these.
+        CINTR      = CTRL( 'C' )
+        CQUIT      = CTRL( '\\' )
+        CERASE     = CTRL( '?' )
+        CERASE2    = CTRL( 'H' )
+        CKILL      = CTRL( 'U' )
+        CEOF       = CTRL( 'D' )
+        CEOL       = CTRL( '@' )
+        CSTART     = CTRL( 'Q' )
+        CSTOP      = CTRL( 'S' )
+        CSUSP      = CTRL( 'Z' )
+        CDSUSP     = CTRL( 'Y' )
+        CRPRNT     = CTRL( 'R' )
+        CSTATUS    = CTRL( 'T' )
+        CWERASE    = CTRL( 'W' )
+        CLNEXT     = CTRL( 'V' )
+        CFLUSH     = CTRL( 'O' )
+
         # Some line disciplines which python doesn't usually define.
         N_AX25     =  5
         N_X25      =  6 # X.25 async
@@ -271,26 +289,26 @@ SPEED = {
 NTOSPEED = { v : k for k, v in SPEED.items() }
 
 CC_PARAM_LIST = (
-    ('intr',     termios.VINTR,    termios.CINTR,   ), # ^C
-    ('quit',     termios.VQUIT,    termios.CQUIT,   ), # ^\
-    ('erase',    termios.VERASE,   termios.CERASE,  ), # ^?
-    ('erase2',  _termios.VERASE2, _termios.CERASE2, ), # ^H
-    ('kill',     termios.VKILL,    termios.CKILL,   ), # ^U
-    ('eof',      termios.VEOF,     termios.CEOF,    ), # ^D
-    ('eol',      termios.VEOL,     termios.CEOL,    ), # ^@
-    ('eol2',     termios.VEOL2,    None,            ),
-    ('swtch',   _termios.VSWTCH,   None,            ),
-    ('start',    termios.VSTART,   termios.CSTART,  ), # ^Q
-    ('stop',     termios.VSTOP,    termios.CSTOP,   ), # ^S
-    ('susp',     termios.VSUSP,    termios.CSUSP,   ), # ^Z
-    ('dsusp',   _termios.VDSUSP,  _termios.CDSUSP,  ), # ^Y
-    ('rprint',   termios.VREPRINT, termios.CRPRNT,  ), # ^R
-    ('status',  _termios.VSTATUS, _termios.CSTATUS, ), # ^T
-    ('werase',   termios.VWERASE,  termios.CWERASE, ), # ^W
-    ('lnext',    termios.VLNEXT,   termios.CLNEXT,  ), # ^V
-    ('discard',  termios.VDISCARD, termios.CFLUSH,  ), # ^O
-    ('min',      termios.VMIN,     None,            ),
-    ('time',     termios.VTIME,    None,            ), )
+    ('intr',     termios.VINTR,    _termios.CINTR,   ), # ^C
+    ('quit',     termios.VQUIT,    _termios.CQUIT,   ), # ^\
+    ('erase',    termios.VERASE,   _termios.CERASE,  ), # ^?
+    ('erase2',  _termios.VERASE2,  _termios.CERASE2, ), # ^H
+    ('kill',     termios.VKILL,    _termios.CKILL,   ), # ^U
+    ('eof',      termios.VEOF,     _termios.CEOF,    ), # ^D
+    ('eol',      termios.VEOL,     _termios.CEOL,    ), # ^@
+    ('eol2',     termios.VEOL2,     None,            ),
+    ('swtch',   _termios.VSWTCH,    None,            ),
+    ('start',    termios.VSTART,   _termios.CSTART,  ), # ^Q
+    ('stop',     termios.VSTOP,    _termios.CSTOP,   ), # ^S
+    ('susp',     termios.VSUSP,    _termios.CSUSP,   ), # ^Z
+    ('dsusp',   _termios.VDSUSP,   _termios.CDSUSP,  ), # ^Y
+    ('rprint',   termios.VREPRINT, _termios.CRPRNT,  ), # ^R
+    ('status',  _termios.VSTATUS,  _termios.CSTATUS, ), # ^T
+    ('werase',   termios.VWERASE,  _termios.CWERASE, ), # ^W
+    ('lnext',    termios.VLNEXT,   _termios.CLNEXT,  ), # ^V
+    ('discard',  termios.VDISCARD, _termios.CFLUSH,  ), # ^O
+    ('min',      termios.VMIN,      None,            ),
+    ('time',     termios.VTIME,     None,            ), )
 
 _Enum( 'CC_PARAM_LIST_NAME',
        'CC_PARAM_LIST_POS',
@@ -709,8 +727,10 @@ class Stty( object ):
 
     tcgets_param = {
         'Linux'   : { 'template'  : '@4I B {}c 2I'.format( termios.NCCS ),
-                      'bufsize'   : 60,
                       'TC_LINE'   : 4, }, }
+    for platform in tcgets_param.values():
+        platform[ 'bufsize' ] = struct.calcsize( platform[ 'template' ] )
+
     # I suspect ESXi supports this to be API-compatible with linux but the
     # c_line field is non-functional, since TIOCGETD returns an error.
     tcgets_param[ 'VMkernel' ] = tcgets_param[ 'Linux' ]
