@@ -150,11 +150,12 @@ my %df_cmd = ( default => 'df',
 
 my %df_arg = ( default => [qw(-a -k)],
                aix     => [qw(-k -P)],
+               darwin  => [qw(-P)],
                hpux    => [],
                linux   => [qw(--all --block-size=1)],
              );
 
-my %df_per = ( darwin  => [qw(-t nodevfs,fdesc)],
+my %df_per = ( darwin  => [qw(-t nodevfs,fdesc,autofs)],
                freebsd => [qw(-t nodevfs,fdescfs,linprocfs,linsysfs,mqueuefs,procfs,tmpfs)],
                linux   => [qw(-x tmpfs -x devtmpfs -x ramfs)],
                netbsd  => [qw(-t nokernfs,procfs,ptyfs)],
@@ -178,7 +179,8 @@ sub get_df
   $data =~ s/\n\s+/ /g; # join continuation lines
 
   my $linuxp = ($^O eq 'linux');
-  map { my @elt  =  split (/\s+/, $_, 6);
+  map { s=^map auto_home=autofs=;  # darwin 19/macos 10.15
+        my @elt  =  split (/\s+/, $_, 6);
         $elt[0]  =  compact_devmapper ($elt[0]);
         for my $n (1..3)
           {
