@@ -150,7 +150,7 @@ my %df_cmd = ( default => 'df',
 
 my %df_arg = ( default => [qw(-a -k)],
                aix     => [qw(-k -P)],
-               darwin  => [qw(-P)],
+               darwin  => [qw(-k -P)],
                hpux    => [],
                linux   => [qw(--all --block-size=1)],
              );
