@@ -17,7 +17,7 @@ cookies=$XDG_DATA_HOME/wget/cookies.txt
 
 # Get major/minor/patch version numbers for wget
 eval `$wget --version \
-        | sed -ne '1s/^.*get \([0-9]*\)\.\([0-9]*\)\.\([0-9]*\).*.*/vmajor=\1 vminor=\2 vpatch=\3/p'`
+        | sed -ne '1s/^.*get \([0-9]*\)\.\([0-9]*\)\.*\([0-9]*\)*.*/vmajor=\1 vminor=\2 vpatch=\3/p'`
 
 case $vmajor:$vminor in
     : | *: | :* ) exit 1 ;;
@@ -27,7 +27,7 @@ atleast()
 {
     { [ $vmajor -gt $1 ]; }                         ||
     { [ $vmajor -eq $1 ] && [ $vminor -gt $2 ]; }   ||
-    { [ $vmajor -eq $1 ] && [ $vminor -eq $2 ] && [ $vpatch -ge ${3-0} ]; }
+    { [ $vmajor -eq $1 ] && [ $vminor -eq $2 ] && [ ${vpatch:-0} -ge ${3-0} ]; }
 }
 
 opts="--wait=0
