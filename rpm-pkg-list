@@ -409,6 +409,8 @@ __DATA__
 ## GPG key fingerprints for RPM signatures
 ######
 
+12c944d0	fedora-32
+3c3359c4	fedora-31
 cfc659b9	fedora-30
 429476b4	fedora-29
 9db62fb1	fedora-28
@@ -453,6 +455,9 @@ fdb36b03	fedora-14-s390x
 f613cbe8	fedora-9/10/11-ia64
 00458545	fedora-9-sparc
 
+a3cc4e62	fedora-modular
+dbbdcf7c	fedora-iot-2019
+
 # These fedora keys were discontinued as of 9/2008
 4f2a6fd2	fedora-core
 1ac70ce6	fedora-extras
@@ -462,6 +467,7 @@ f613cbe8	fedora-9/10/11-ia64
 
 fd431d51	rhel-6
 
+c481937a	rpmfusion-free-f31
 c0aeda6e	rpmfusion-free-f30
 42f19ed0	rpmfusion-free-f29
 09eab3f2	rpmfusion-free-f28
@@ -484,6 +490,7 @@ a3780952	rpmfusion-free-f13
 8fcff4da	rpmfusion-free-f11
 49c8885a	rpmfusion-free-f10-or-earlier
 
+54a86092	rpmfusion-nonfree-f31
 1d14a795	rpmfusion-nonfree-f30
 d6841af8	rpmfusion-nonfree-f29
 7f858107	rpmfusion-nonfree-f28
