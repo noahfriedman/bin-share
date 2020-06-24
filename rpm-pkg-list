@@ -544,6 +544,10 @@ b37b98a9        suse-sles-11.2-ptf
 f14ab620	zfsonlinux.org
 f6777c67	adobe
 66534c2b	atrpms
+
+c2d4e821	brave-core			# brave.com
+6a8a26f9	brave-core-nightly
+
 6b8d79e6	dag
 1aa78495	dries
 e42d547b	freshrpms
@@ -555,6 +559,7 @@ be1229cf	microsoft
 f90c0e97	negativo17
 98ab5139	oracle-virtualbox
 a9464aa9	pidgin
+92563518	ringcentral
 ba392878	splode-internal-2005	# internal reference key; not secure
 dbcccc4b	splode-internal-2015	# internal reference key; not secure
 
