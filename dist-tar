@@ -9,6 +9,24 @@ case ${FIND-nil} in nil ) if cmdp gfind; then FIND=gfind; fi ;; esac
 case ${TAR-nil}  in nil ) if cmdp gtar;  then TAR=gtar;   fi ;; esac
 case ${SORT-nil} in nil ) if cmdp gsort; then SORT=gsort; fi ;; esac
 
+: ${ZLEVEL:=9}
+: ${DIST_TAR_ZIP:=gzip}
+
+while [ $# -gt 0 ]; do
+    case $1 in
+        -gz    ) DIST_TAR_ZIP=gzip  ;;
+        -bz2   ) DIST_TAR_ZIP=bzip2 ;;
+        -gzip | -bzip2 | -lzma | -xz ) DIST_TAR_ZIP=${1#-} ;;
+        -[0-9] ) ZLEVEL=${1#-} ;;
+        -u*    ) TAROPT="$TAROPT --owner=${1#-u}" ;;
+        -g*    ) TAROPT="$TAROPT --group=${1#-g}" ;;
+        -o*    ) TAROPT="$TAROPT --owner=${1#-o} --group=${1#-o}" ;;
+        -m*    ) TAROPT="$TAROPT --mode=${1#-m}"  ;;
+        * ) break ;;
+    esac
+    shift
+done
+
 gnup() { "$1" --version 2>&1 | grep "GNU" > /dev/null; }
 if gnup ${TAR-tar}; then
     gnutar=t
@@ -19,17 +37,18 @@ if gnup ${TAR-tar}; then
     fi
 fi
 
-case $1 in
-    -gzip | -bzip2 | -lzma | -xz ) DIST_TAR_ZIP=${1#-} ; shift ;;
-esac
-
-case ${DIST_TAR_ZIP-gzip} in
-    gzip  ) zip=gzip  z=gz   zargs='-9' ;;
-    bzip2 ) zip=bzip2 z=bz2  zargs='-9' ;;
-    lzma  ) zip=lzma  z=lzma zargs='-9 --extreme --threads=0' ;;
-    xz    ) zip=xz    z=xz   zargs='-9 --extreme --threads=0' ;;
-    *     ) echo "dist-tar: $DIST_TAR_ZIP: unknown compression method" 1>&2
-            exit 1 ;;
+zip=$DIST_TAR_ZIP
+z=${DIST_TAR_ZIP##*/}
+zargs=-$ZLEVEL
+case ${zip##*/} in
+    gzip  ) z=gz  ;;
+    bzip2 ) z=bz2 ;;
+    xz | lzma )
+        if [ $ZLEVEL -gt 3 ]; then
+            zargs="$zargs --threads=0"
+        fi ;;
+    * ) echo "dist-tar: $DIST_TAR_ZIP: unknown compression method" 1>&2
+        exit 1 ;;
 esac
 
 for dir in "$@" ; do
