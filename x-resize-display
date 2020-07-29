@@ -25,13 +25,14 @@ get_res()
 {
     output=${1-$(get_out)}
     xrandr1 | sed -n \
-                  -e "/^$output  */{" \
-                  -e '  :l' \
-                  -e '  n' \
-                  -e '  /^  *\([0-9x]*\)\([@_][0-9@_.]*\)*  *[^*+]*\([*+]*\).*/!d' \
-                  -e '  s//\1 \3/p' \
-                  -e '  b l' \
-                  -e '}'
+                  -e "/^$output  */!d" \
+                  -e ':l' \
+                  -e 'n' \
+                  -e '/[Ss]ync/q' \
+                  -e '/[hv]:/q'  \
+                  -e '/^  *\([0-9x]*\)\([@_][0-9@_.]*\)*  *[^*+]*\([*+]*\).*/!q' \
+                  -e 's//\1 \3/p' \
+                  -e 'b l'
 }
 
 set_res()
@@ -88,7 +89,7 @@ show_avail()
 
             law=$aw lah=$ah
             rat=$(dc -e "2 k $aw $ah / p")
-            fmt="%4sx%-4s  %3s:%-2s %s"
+            fmt="%4sx%-4s  %4s:%-3s  %s"
             case ${xtra:+isset} in isset ) fmt="$fmt  %s" ;; esac
 
             printf "$fmt\n" $w $h $aw $ah $rat ${xtra:+"$xtra"}
