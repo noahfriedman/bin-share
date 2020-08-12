@@ -409,6 +409,7 @@ __DATA__
 ## GPG key fingerprints for RPM signatures
 ######
 
+9570ff31	fedora-33
 12c944d0	fedora-32
 3c3359c4	fedora-31
 cfc659b9	fedora-30
@@ -467,6 +468,7 @@ dbbdcf7c	fedora-iot-2019
 
 fd431d51	rhel-6
 
+100bcd92	rpmfusion-free-f32
 c481937a	rpmfusion-free-f31
 c0aeda6e	rpmfusion-free-f30
 42f19ed0	rpmfusion-free-f29
@@ -490,6 +492,7 @@ a3780952	rpmfusion-free-f13
 8fcff4da	rpmfusion-free-f11
 49c8885a	rpmfusion-free-f10-or-earlier
 
+6dc1be18	rpmfusion-nonfree-f32
 54a86092	rpmfusion-nonfree-f31
 1d14a795	rpmfusion-nonfree-f30
 d6841af8	rpmfusion-nonfree-f29
@@ -560,12 +563,12 @@ f90c0e97	negativo17
 98ab5139	oracle-virtualbox
 a9464aa9	pidgin
 92563518	ringcentral
+bf6a7041	slack-pre412		# versions 4.1.1 and earlier
+8e6c9578	slack			# versions 4.1.2 and above
+61a7c71d	zoom.us
+
 ba392878	splode-internal-2005	# internal reference key; not secure
 dbcccc4b	splode-internal-2015	# internal reference key; not secure
-
-d59097ab	ops@packagecloud.io
-038651bd	slack@packagecloud.io
-bf6a7041	slack.com
 
 598252fb	rockowitz@build.opensuse.org
 
