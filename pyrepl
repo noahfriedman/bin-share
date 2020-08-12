@@ -23,8 +23,8 @@ def pp( *args, **kwargs ):
     for arg in args:
         repl_pp.pprint( arg, **kwargs )
 
-def bt( cmd ):
-    return subprocess.check_output( [cmd] ).rstrip( ' \t\r\n' )
+def bt( *cmd ):
+    return subprocess.check_output( cmd ).decode( sys.stdout.encoding ).rstrip( ' \t\r\n' )
 
 def load( filename ):
     with open( filename, 'r' ) as f:
