@@ -1,45 +1,42 @@
 #!/bin/sh
-# $Id: rsync-mirror,v 1.9 2013/11/27 22:37:02 friedman Exp $
 
-RSYNC_RSH=${RSYNC_RSH-rsh}
+RSYNC_RSH=${RSYNC_RSH-ssh}
 export RSYNC_RSH
 
 case $* in
   *-quiet* ) : ;;
-  *          ) set x --verbose ${1+"$@"} ; shift ;;
+  *          ) set : --verbose "$@" ; shift ;;
 esac
 
 case $* in
   *-inplace* ) : ;;
-  *          ) set x --sparse ${1+"$@"} ; shift ;;
+  *          ) set : --sparse  "$@" ; shift ;;
 esac
 
 case ${RS_UID-${UID-`id -u`}} in
-  0 ) set x --devices   \
-            ${1+"$@"}
-      shift ;;
+  0          ) set : --devices "$@" ; shift ;;
 esac
 
-set x \
-	--owner		\
-	--group		\
-	--perms		\
-	--times		\
+set : \
+    --owner		\
+    --group		\
+    --perms		\
+    --times		\
 			\
-	--hard-links	\
-	--links		\
+    --hard-links	\
+    --links		\
 			\
-	--delete	\
-	--force		\
+    --delete		\
+    --force		\
 			\
-	--recursive	\
-	${1+"$@"}
+    --recursive		\
+    "$@"
 shift
 
 if [ -t 0 ]; then
-    ${RSYNC-rsync} -n ${1+"$@"} | sed -e 's/^/[PROPOSED] /'
+    ${RSYNC-rsync} -n "$@" | sed -e 's/^/[PROPOSED] /'
     echo
-    echo -n "Is this what you want (y/n)? "
+    echo -n "Is this what you want (y/N)? "
     read resp
     case $resp in
         [Yy]* ) : ;;
@@ -47,6 +44,6 @@ if [ -t 0 ]; then
     esac
 fi
 
-exec ${RSYNC-rsync} ${1+"$@"}
+exec ${RSYNC-rsync} "$@"
 
 # eof
