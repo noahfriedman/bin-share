@@ -1,0 +1,183 @@
+#!/usr/bin/env perl
+
+package SourceForge;
+
+use strict;
+use warnings qw(all);
+
+use XML::FeedPP;  # CentOS: dnf install perl-XML-FeedPP
+
+my $rss_template = 'https://sourceforge.net/projects/%s/rss';
+my $dl_template  = 'https://master.dl.sourceforge.net/project/%s%s';
+
+# Mandatory args: project => name
+# Optional args:  crawl => 0|1, verbose => 0|1
+sub new
+{
+  my $type = shift;
+  my $class = ref ($type) || $type;
+  my $self = bless {}, $class;
+
+  map { $self->{$_} = 0  } (qw(crawl verbose));
+  map { $self->{$_} = {} } (qw(_file _dir _seen));
+  while (@_) { my $k = shift; $self->{$k} = shift }
+
+  die "SourceForge: project parameter must be specified\n"
+    unless defined $self->{project};
+
+  return $self;
+}
+
+sub __dirname { (my $s = shift) =~ s=/[^/]*$==; return $s }
+
+sub _crawl
+{
+  my ($self, $rss, $path) = @_;
+
+  my $file  = $self->{_file};
+  my $dir   = $self->{_dir};
+  my $seen  = $self->{_seen};
+  my $recur = $self->{crawl};
+
+  print STDERR "Crawling $path\n" if $self->{verbose};
+
+  my $feed = XML::FeedPP->new( "$rss?path=$path" );
+  for my $item ( $feed->get_item() )
+    {
+      my $p = $item->title();
+      $file->{$p} = undef;
+
+      next unless $recur;
+      while ($p = __dirname( $p )) { $dir->{$p} = undef }
+    }
+
+  return unless $recur;
+  $seen->{$path} = undef;
+  for my $p (keys %$dir)
+    {
+      next if exists $seen->{$p};
+      $self->_crawl( $rss, $p );
+    }
+}
+
+sub fetch
+{
+  my $self = shift;
+  my $rss = sprintf( $rss_template, $self->{project} );
+  $self->_crawl( $rss, '/' );
+}
+
+sub files
+{
+  my $self    = shift;
+  my $project = $self->{project};
+  my $file    = $self->{_file};
+
+  $self->fetch() unless %$file;
+  map { sprintf( $dl_template, $project, $_ ) } keys %$file;
+}
+
+
+package main;
+
+use strict;
+use warnings qw(all);
+
+use Getopt::Long;
+use Pod::Usage;
+
+our %opt = ( crawl   => 0,
+             verbose => 0,
+           );
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help = 0;
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev));
+  my $succ = $parser->getoptions
+    ("h|help+"                  => \$help,
+     "usage"                    => sub { $help = 1 },
+     "v|verbose"                => \$opt{verbose},
+     "c|crawl"                  => \$opt{crawl},
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)         unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help - 1) if $help > 0;
+}
+
+sub main
+{
+  parse_options (\@_);
+
+  for my $project (@_)
+    {
+      my @url = SourceForge->new( %opt, project => $project )->files();
+      map { print $_, "\n" } sort @url;
+    }
+}
+
+main( @ARGV );
+
+1;
+
+__END__
+
+=begin text
+
+=encoding utf8
+
+=end text
+
+=head1 NAME
+
+sourceforge-project-files - list downloadable files for a project
+
+=head1 SYNOPSIS
+
+     {-h|--help|--usage} {-v|--verbose} {-c|--crawl} project1 project2 ...
+
+ The -h option may be repeated up to 3 times for increased verbosity.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-h>, B<--help>
+
+Usage information.
+May be repeated 1-3 times for more verbosity.
+
+=item B<-v>, B<--verbose>
+
+Print informative messages during retrieval.
+They are printed on stderr so they can be redirected independently of output.
+
+=item B<-c>, B<--crawl>>
+
+If set, traverse every directory for a list of files in that directory,
+rather than assuming parent directories return a complete list of all
+directories below them.
+
+It's been observed that the file list trees can be out of date or incomplete.
+Crawling every directory may return more files.
+
+=back
+
+=head1 DESCRIPTION
+
+The resulting list of urls can be downloaded into a local tree via
+
+     sourceforge-project-files foo | wget -r -nH --cut-dirs=1 -i -
+
+=head1 AUTHOR
+
+Noah Friedman <friedman@splode.com>
+
+=head1 COPYRIGHT
+
+This program is donated to the public domain.
+
+=cut
