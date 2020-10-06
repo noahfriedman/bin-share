@@ -1,0 +1,49 @@
+#!/bin/sh
+# Image a cd audio disc into a .bin file, with accompanying toc and cddb info.
+
+vcmd() { (set -x; "$@"); }
+
+cddb_dir()
+{
+    for dir in "${XDG_DATA_HOME-$HOME}" "$HOME"; do
+        if [ -d "$dir/.cddb" ]; then
+            echo "$dir/.cddb"
+            return
+        fi
+    done
+    echo .
+}
+
+_cdrdao()
+{
+    local cmd=$1
+    shift
+    vcmd cdrdao "$cmd" \
+        --cddb-servers "gnudb.gnudb.org:80:/~cddb/cddb.cgi" \
+        --cddb-directory `cddb_dir` \
+        --paranoia-mode 2 \
+        "$@"
+}
+
+main()
+{
+    case $# in
+        0 ) echo "Usage: ${0##*/} [output-name]" 1>&2
+            exit 1 ;;
+    esac
+
+    name=$1
+    basename=${name##*/}
+
+    shift
+    set -e
+
+    vcmd mkdir -p "$name" && cd "$name"
+
+    _cdrdao discid 2>&1 | tee "$basename.cddb"
+    _cdrdao read-cd --datafile "$basename.bin" "$basename.toc"
+}
+
+main "$@"
+
+# eof
