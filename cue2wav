@@ -1,0 +1,15 @@
+#!/bin/sh
+# I can never remember the name of the proper command.
+# TODO: convert toc to cue if toc given (risky, some toc files not parsable)
+
+case $# in
+    3 ) : ;;
+    * ) echo "Usage: ${0##*/} <image.bin> <image.cue> <basename>" 1>&2
+        exit ;;
+esac
+
+# -w : output audio in wav format
+# -s : swap byte order in audio tracks
+exec bchunk -w -s "$@"
+
+# eof
