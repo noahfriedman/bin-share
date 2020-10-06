@@ -1,39 +1,101 @@
-#!/bin/sh
-# $Id$
+#!/usr/bin/env perl
 
-wav_to_flac()
+use strict;
+use warnings qw(all);
+
+use Getopt::Long;
+
+our %opt;
+our @flac_xargs;
+
+(my $progname = $0) =~ s=^.*/==;
+
+sub basename
 {
-  wav=$1
-  shift
-
-  base=`basename "$wav" .wav`
-  flac=$base.flac
-
-  flac \
-      --verify \
-      --compression-level-8 \
-      --exhaustive-model-search \
-      --keep-foreign-metadata \
-      --seekpoint=10s \
-      --output-name="$flac" \
-      "$wav" \
-      "$@"
+  (local $_ = shift) =~ s/\.[^.]+$//;
+  s/^.*\///;
+  return $_;
 }
 
-main()
+sub xsystem
 {
-  case $1 in
-    -1 ) shift
-         wav_to_flac "$@" ;;
-     * )
-         for wav in "$@"; do
-           echo "$wav"
-           wav_to_flac "$wav"
-           echo
-         done ;;
-  esac
+  if ($opt{verbose})
+    {
+      my @xq = @_;  # don't modify original
+      map { s/'/'\\''/sg;
+            s/^(.*)$/'$1'/s if /[][{}\(\)<>\'\"\!\?\|\$&\*;\s\\]/s;
+            $_ } @xq;
+      print STDERR "+ @xq\n";
+    }
+  system( @_ );
+  return if $? == 0;
+
+  my $exit = ($? >> 8) || ($? | 0x80);
+  die "[$progname: Exit $exit]\n";
 }
 
-main "$@"
+sub wav2flac
+{
+  my $outfile = $opt{outfile} || basename( $_[0] ) . '.flac';
+
+  xsystem( qw( flac
+               --verify
+               --compression-level-8
+               --exhaustive-model-search
+               --seekpoint=10s ),
+           @flac_xargs,
+           "--output-name=$outfile",
+           @_ );
+}
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help; # no init; perl 5.8 will treat as REF() instead of SCALAR()
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev gnu_compat no_ignorecase));
+
+  my $succ = $parser->getoptions
+    ('v|verbose'                => \$opt{verbose},
+     'o|outfile|output-name=s'  => \$opt{outfile},
+     'c|cuesheet=s@'            => \$opt{cuesheet},
+     'p|picture=s@'             => \$opt{picture},
+     't|tag=s@'                 => \$opt{tag},
+    );
+
+  for my $flag (qw(cuesheet picture tag))
+    {
+      next unless $opt{$flag};
+      push @flac_xargs, map { "--$flag=$_" } @{$opt{$flag}};
+    }
+}
+
+sub main
+{
+  parse_options (\@_);
+
+  return unless @_;
+  if (@_ == 1)
+    {
+      wav2flac( @_ );
+    }
+  else
+    {
+      my $outfile = $opt{outfile};
+      my $i = 1;
+      for my $input (@_)
+        {
+          ($opt{outfile} = $outfile) =~ s=(\.[^.]+)?$=sprintf( '_%02d%s', $i++, $1 || '.flac')=e
+            if $outfile;
+
+          print $input, "\n";
+          wav2flac( $input );
+          print "\n";
+        }
+    }
+}
+
+main( @ARGV );
 
 # eof
