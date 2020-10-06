@@ -62,8 +62,10 @@ sub parse_options
      'c|cuesheet=s@'            => \$opt{cuesheet},
      'p|picture=s@'             => \$opt{picture},
      't|tag=s@'                 => \$opt{tag},
+     's|silent'                 => \$opt{silent},
     );
 
+  push @flac_xargs, '--silent' if $opt{silent};
   for my $flag (qw(cuesheet picture tag))
     {
       next unless $opt{$flag};
@@ -77,9 +79,7 @@ sub main
 
   return unless @_;
   if (@_ == 1)
-    {
-      wav2flac( @_ );
-    }
+    { wav2flac( @_ ) }
   else
     {
       my $outfile = $opt{outfile};
@@ -88,10 +88,9 @@ sub main
         {
           ($opt{outfile} = $outfile) =~ s=(\.[^.]+)?$=sprintf( '_%02d%s', $i++, $1 || '.flac')=e
             if $outfile;
-
-          print $input, "\n";
+          print $input, "\n" if $opt{silent};
           wav2flac( $input );
-          print "\n";
+          print "\n" unless $opt{silent};
         }
     }
 }
