@@ -22,6 +22,7 @@ while [ $# -gt 0 ]; do
         -g*    ) TAROPT="$TAROPT --group=${1#-g}" ;;
         -o*    ) TAROPT="$TAROPT --owner=${1#-o} --group=${1#-o}" ;;
         -m*    ) TAROPT="$TAROPT --mode=${1#-m}"  ;;
+        -n     ) TAROPT="$TAROPT --numeric-owner" ;;
         * ) break ;;
     esac
     shift
