@@ -1,15 +1,11 @@
-#! /bin/sh
-
-# $Id: wsnarf,v 1.8 2006/09/01 23:55:40 friedman Exp $
+#!/bin/sh
 
 exec wget            \
-  --convert-links    \
-  --backup-converted \
   --no-parent        \
   --recursive        \
   --level=0          \
-  --page-requisites  \
-  --reject 'index.*\??=*' \
-  ${1+"$@"}
+  --reject-regex '\?' \
+  --exclude-directories /cgi-bin \
+  "$@"
 
 # wsnarf ends here
