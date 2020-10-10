@@ -1,0 +1,227 @@
+#!/usr/bin/env perl
+# fix-directory-timestamps --- change dir mtimes according to file mtimes
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2001-01-13
+# Public domain.
+
+use strict;
+use warnings qw(all);
+
+use POSIX qw(strftime);
+use Getopt::Long;
+use Pod::Usage;
+
+(my $progname = $0) =~ s=^.*/==;
+
+my @ignore =
+  (qw(. .. .git .hg .svn .fslckout
+      CVS RCS SCCS _MTN {arch}
+      __pycache__ ));
+
+my @ignore_meta =
+  (qw(MD5        MD5SUM
+      SHA1       SHA1SUM
+      SHA256     SHA256SUM
+      SHA512     SHA512SUM
+      fonts.dir  fonts.scale
+      TRANS.TBL  FETCH_HEAD
+      URL        .md5sum));
+
+my $re_filter;
+my %opt;
+
+sub max { my $m = shift; map { $m = $_ if $_ > $m } @_; return $m }
+sub min { my $m = shift; map { $m = $_ if $_ < $m } @_; return $m }
+
+sub perror
+{
+  print STDERR join( ': ', $progname, @_, "$!\n" ) unless $opt{noerr};
+  return; # void
+}
+
+sub chmtime
+{
+  my ($dir, $ntime) = @_;
+
+  my @st = stat( $dir ) or return perror( 'stat', $dir );
+  my ($atime, $mtime) = ($st[8], $st[9]);
+  return if $ntime == $mtime; # don't disturb ctime for no reason
+
+  unless ($opt{nochange})
+    {
+      utime( $atime, $ntime, $dir ) or return perror( 'utime', $dir );
+    }
+  if ($opt{verbose})
+    {
+      my $fmt = '%Y-%m-%d %H:%M:%S';
+      my $o = strftime( $fmt, localtime( $mtime ));
+      my $n = strftime( $fmt, localtime( $ntime ));
+      print "$o => $n  $dir/\n"
+    }
+}
+
+sub directory_files
+{
+  my $dir = shift;
+
+  if (opendir( my $dfh, $dir ))
+    { return grep { !/$re_filter/ } readdir( $dfh ) }
+  perror( 'opendir', $dir );
+}
+
+sub traverse
+{
+  my $dir = shift;
+
+  my (@subdir, @mtime);
+  for my $ent (sort { $a cmp $b } directory_files( $dir ))
+    {
+      my @st = lstat( "$dir/$ent" ) or next;
+      if    (-d _)
+        { push @subdir, traverse( "$dir/$ent" ) or next }
+      elsif (-f _)
+        { push @mtime, $st[9] }
+    }
+
+  if    (@mtime) { 1 }
+  elsif (@subdir)
+    {
+      # Collect the oldest mtimes under each subdir; those are the times
+      # most closely matching the original creation time of those dirs.
+      # Below, we pick the most recent of those creation times.
+      @mtime = map { $_->[ 0 ] } @subdir;
+    }
+  else
+    {
+      my @st = stat( $dir );
+      return [ $st[9], $st[9] ];
+    }
+
+  my ($min, $max) = (min( @mtime ), max( @mtime ));
+  chmtime( $dir, $max);
+  return [ $min, $max ];
+}
+
+
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help = 0;
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev));
+  my $succ = $parser->getoptions
+    ('h|help+'                  => \$help,
+     'usage'                    => sub { $help = 1 },
+
+     'i|ignore=s@'              => \@ignore,
+     'm|meta'                   => \$opt{meta},
+     'f|fold-case|ignore-case'  => \$opt{nocase},
+     'v|verbose'                => \$opt{verbose},
+     'q|quiet-errors'           => \$opt{noerr},
+     'n|no-change'              => \$opt{nochange},
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)         unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help - 1) if $help > 0;
+
+  $opt{verbose} = 1 if $opt{nochange};
+
+  push @ignore, @ignore_meta if $opt{meta};
+  my $pat = join( '|', map { quotemeta( $_ ) } @ignore);
+  $re_filter = $opt{nocase} ? qr/^(?:$pat)$/i : qr/^(?:$pat)$/;
+}
+
+sub main
+{
+  parse_options (\@_);
+  map { traverse( $_ ) } @_;
+}
+
+main( @ARGV );
+
+1;
+
+__END__
+
+=begin text
+
+=encoding utf8
+
+=end text
+
+=head1 NAME
+
+fix-directory-timestamps - finish documenting me
+
+=head1 SYNOPSIS
+
+     {-h|--help|--usage}
+     {-v|--verbose}
+     {-q|--quiet-errors}
+     {-n|--no-change}
+     {-i|--ignore  FILENAME}
+     {-m|--meta}
+     [dir1 {dir2 {dir3 ...}}]
+
+ The -h option may be repeated up to 3 times for increased verbosity.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-h>, B<--help>
+
+Usage information.
+May be repeated 1-3 times for more verbosity.
+
+=item B<-v>, B<--verbose>
+
+Display prior and new timestamps for directories that are modified.
+
+=item B<-q>, B<--quiet-errors>
+
+Don't print errors when directories cannot be traversed or modified.
+
+=item B<-n>, B<--no-change>
+
+Don't actually do anything; just display what would be done.
+Implies C<--verbose>.
+
+=item B<-i>, B<--ignore>=I<name>
+
+Specify file names which whose timestamps should be ignored or,
+if they are directories, should not be traversed.
+
+The default list includes several version control directories
+(e.g. C<CVS>, C<.git>, C<.hg>)
+and Python cache directories.
+
+=item B<-m>, B<--meta>
+
+Ignore additional files that are usually auto-generated
+such as checksum files,
+iso9660 rock ridge translation tables,
+font indexes,
+etc.
+
+=item B<-f>, B<--fold-case>, B<--ignore-case>
+
+Ignore case in file name matching.
+
+=back
+
+=head1 DESCRIPTION
+
+Finish documenting me
+
+=head1 AUTHOR
+
+Noah Friedman <friedman@splode.com>
+
+=head1 COPYRIGHT
+
+This program is in the public domain.
+
+=cut
