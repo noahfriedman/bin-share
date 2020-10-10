@@ -13,8 +13,9 @@ use Pod::Usage;
 
 (my $progname = $0) =~ s=^.*/==;
 
+# .fslckout is a fossil artifact
 my @ignore =
-  (qw(. .. .git .hg .svn .fslckout
+  (qw(. .. .git .hg .bzr .svn .fslckout
       CVS RCS SCCS _MTN {arch}
       __pycache__ ));
 
@@ -41,21 +42,17 @@ sub perror
 
 sub chmtime
 {
-  my ($dir, $ntime) = @_;
-
-  my @st = stat( $dir ) or return perror( 'stat', $dir );
-  my ($atime, $mtime) = ($st[8], $st[9]);
-  return if $ntime == $mtime; # don't disturb ctime for no reason
+  my ($dir, $atime, $mtime, $cur_mtime) = @_;
 
   unless ($opt{nochange})
     {
-      utime( $atime, $ntime, $dir ) or return perror( 'utime', $dir );
+      utime( $atime, $mtime, $dir ) or return perror( 'utime', $dir );
     }
   if ($opt{verbose})
     {
       my $fmt = '%Y-%m-%d %H:%M:%S';
-      my $o = strftime( $fmt, localtime( $mtime ));
-      my $n = strftime( $fmt, localtime( $ntime ));
+      my $o = strftime( $fmt, localtime( $cur_mtime ));
+      my $n = strftime( $fmt, localtime( $mtime ));
       print "$o => $n  $dir/\n"
     }
 }
@@ -71,14 +68,20 @@ sub directory_files
 
 sub traverse
 {
-  my $dir = shift;
+  my ($dir, $cur_atime, $cur_mtime) = @_;
+
+  unless (defined $cur_mtime)
+    {
+      my @st = lstat( $dir ) or return perror( 'lstat', $dir );
+      ($cur_atime, $cur_mtime) = ($st[8], $st[9]);
+    }
 
   my (@subdir, @mtime);
   for my $ent (sort { $a cmp $b } directory_files( $dir ))
     {
       my @st = lstat( "$dir/$ent" ) or next;
       if    (-d _)
-        { push @subdir, traverse( "$dir/$ent" ) or next }
+        { push @subdir, traverse( "$dir/$ent", $st[8], $st[9] ) or next }
       elsif (-f _)
         { push @mtime, $st[9] }
     }
@@ -98,7 +101,8 @@ sub traverse
     }
 
   my ($min, $max) = (min( @mtime ), max( @mtime ));
-  chmtime( $dir, $max);
+  chmtime( $dir, $cur_atime, $max, $cur_mtime )
+    unless $max == $cur_mtime; # don't disturb ctime for no reason
   return [ $min, $max ];
 }
 
