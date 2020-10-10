@@ -155,7 +155,7 @@ May be repeated 1-3 times for more verbosity.
 Print informative messages during retrieval.
 They are printed on stderr so they can be redirected independently of output.
 
-=item B<-c>, B<--crawl>>
+=item B<-c>, B<--crawl>
 
 If set, traverse every directory for a list of files in that directory,
 rather than assuming parent directories return a complete list of all
