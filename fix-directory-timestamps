@@ -28,8 +28,13 @@ my @ignore_meta =
       TRANS.TBL  FETCH_HEAD
       URL        .md5sum));
 
+my %opt = ( meta    => 1,
+            dirs    => 1,
+            nocase  => 0,
+            verbose => 0,
+            noerr   => 0, );
+
 my $re_filter;
-my %opt;
 
 sub max { my $m = shift; map { $m = $_ if $_ > $m } @_; return $m }
 sub min { my $m = shift; map { $m = $_ if $_ < $m } @_; return $m }
@@ -86,20 +91,10 @@ sub traverse
         { push @mtime, $st[9] }
     }
 
-  if    (@mtime) { 1 }
-  elsif (@subdir)
-    {
-      # Collect the oldest mtimes under each subdir; those are the times
-      # most closely matching the original creation time of those dirs.
-      # Below, we pick the most recent of those creation times.
-      @mtime = map { $_->[ 0 ] } @subdir;
-    }
-  else
-    {
-      my @st = stat( $dir );
-      return [ $st[9], $st[9] ];
-    }
-
+  return [$cur_mtime, $cur_mtime] unless @mtime || @subdir;
+  # Collect the oldest mtimes under each subdir; those are the times
+  # most closely matching the original creation time of those dirs.
+  push @mtime, map { $_->[ 0 ] } @subdir if $opt{dirs} || !@mtime;
   my ($min, $max) = (min( @mtime ), max( @mtime ));
   chmtime( $dir, $cur_atime, $max, $cur_mtime )
     unless $max == $cur_mtime; # don't disturb ctime for no reason
@@ -120,11 +115,17 @@ sub parse_options
      'usage'                    => sub { $help = 1 },
 
      'i|ignore=s@'              => \@ignore,
-     'm|meta'                   => \$opt{meta},
-     'f|fold-case|ignore-case'  => \$opt{nocase},
-     'v|verbose'                => \$opt{verbose},
-     'q|quiet-errors'           => \$opt{noerr},
-     'n|no-change'              => \$opt{nochange},
+     'n|no-change'              =>      \$opt{nochange},
+     'm|meta!'                  =>      \$opt{meta},
+     'M'                        => sub { $opt{meta}    = 0 },
+     'd|dirs!' =>                       \$opt{dirs},
+     'D'                        => sub { $opt{dirs}    = 0 },
+     'f|fold-case|ignore-case!' =>      \$opt{nocase},
+     'F'                        => sub { $opt{nocase}  = 0 },
+     'v|verbose!'               =>      \$opt{verbose},
+     'V'                        => sub { $opt{verbose} = 0 },
+     'q|quiet-errors!'          =>      \$opt{noerr},
+     'Q'                        => sub { $opt{noerr}   = 0 },
     );
 
   pod2usage (-exitstatus => 1, -verbose => 0)         unless $succ;
@@ -180,14 +181,6 @@ fix-directory-timestamps - finish documenting me
 Usage information.
 May be repeated 1-3 times for more verbosity.
 
-=item B<-v>, B<--verbose>
-
-Display prior and new timestamps for directories that are modified.
-
-=item B<-q>, B<--quiet-errors>
-
-Don't print errors when directories cannot be traversed or modified.
-
 =item B<-n>, B<--no-change>
 
 Don't actually do anything; just display what would be done.
@@ -202,7 +195,18 @@ The default list includes several version control directories
 (e.g. C<CVS>, C<.git>, C<.hg>)
 and Python cache directories.
 
+=item B<-v>, B<--verbose>
+(opp. I<-V>, I<--no-verbose>)
+
+Display prior and new timestamps for directories that are modified.
+
+=item B<-q>, B<--quiet-errors>
+(opp. I<-Q>, I<--no-quiet-errors>)
+
+Don't print errors when directories cannot be traversed or modified.
+
 =item B<-m>, B<--meta>
+(opp. I<-M>, I<--no-meta>)
 
 Ignore additional files that are usually auto-generated
 such as checksum files,
@@ -210,7 +214,15 @@ iso9660 rock ridge translation tables,
 font indexes,
 etc.
 
+=item B<-d>, B<--dirs>
+(opp. I<-D>, I<--no-dirs>)
+
+Consider the modification time of subdirectories in addition to files
+within the directory.  When this is disabled, subdirectories are ignored
+unless there are no regular files.
+
 =item B<-f>, B<--fold-case>, B<--ignore-case>
+(opp. I<-F>, I<--no-fold-case>)
 
 Ignore case in file name matching.
 
@@ -219,6 +231,10 @@ Ignore case in file name matching.
 =head1 DESCRIPTION
 
 Finish documenting me
+
+Only directories and regular files are considered.
+Fifos, sockets, block and character special devices, etc. are ignored.
+Symlinks are not traversed except for any listed on the command line.
 
 =head1 AUTHOR
 
