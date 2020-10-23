@@ -1,21 +1,29 @@
-#! /bin/sh
-# $Id: dist-zip,v 1.2 2005/10/29 04:01:47 friedman Exp $
+#!/bin/sh
 
-for dir in ${1+"$@"} ; do
-  # Protect against accidental trailing slash, i.e. if someone does
-  # dist-tar foo/, don't create foo/.tar.gz only to delete foo
-  # afterward.
-  case "$dir" in
-    */ ) dir=`echo "$dir" | sed -e 's=/$==g'` ;;
-  esac
+: ${ZLEVEL:=9}
 
-  echo "dist-tar: packing $dir.zip"
+while [ $# -gt 0 ]; do
+    case $1 in
+        -[0-9] ) ZLEVEL=${1#-} ;;
+        * ) break ;;
+    esac
+    shift
+done
 
-  { ${FIND-find} "$dir" -print \
-     | ${SORT-sort} \
-     | ${ZIP-zip} -9 -y -@ "$dir.zip"
-  } && ${TOUCH-touch} -r "$dir" "$dir.zip" \
-    && ${RM-rm} -rf "$dir"
+for dir in "$@" ; do
+    # Protect against accidental trailing slash, i.e. if someone does
+    # dist-zip foo/, don't create foo/.zip only to delete foo afterward.
+    case "$dir" in
+        */ ) dir=`echo "$dir" | sed -e 's=/$==g'` ;;
+    esac
+
+    echo "dist-tar: packing $dir.zip"
+
+    { ${FIND-find} "$dir" -print \
+          | ${SORT-sort} \
+          | ${ZIP-zip} -$ZLEVEL -y -@ "$dir.zip"
+    } && ${TOUCH-touch} -r "$dir" "$dir.zip" \
+      && ${RM-rm} -rf "$dir"
 done
 
 # eof
