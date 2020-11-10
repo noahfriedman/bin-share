@@ -114,6 +114,7 @@ sub parse_options
     ('h|help+'                  => \$help,
      'usage'                    => sub { $help = 1 },
 
+     'a|all-files|no-ignore'    =>      \$opt{noignore},
      'i|ignore=s@'              => \@ignore,
      'n|no-change'              =>      \$opt{nochange},
      'm|meta!'                  =>      \$opt{meta},
@@ -133,7 +134,8 @@ sub parse_options
 
   $opt{verbose} = 1 if $opt{nochange};
 
-  push @ignore, @ignore_meta if $opt{meta};
+  if    ($opt{noignore}) { @ignore = (qw(. ..)) }
+  elsif ($opt{meta})     { push  @ignore, @ignore_meta }
   my $pat = join( '|', map { quotemeta( $_ ) } @ignore);
   $re_filter = $opt{nocase} ? qr/^(?:$pat)$/i : qr/^(?:$pat)$/;
 }
