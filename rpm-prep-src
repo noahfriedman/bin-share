@@ -1,7 +1,7 @@
 #!/bin/bash
-# $Id: rpm-prep-src,v 1.4 2016/01/16 22:27:07 friedman Exp $
 
 orig_dir=${PWD-`pwd`}
+: ${RPMBUILD:=/usr/bin/rpmbuild}
 
 case $# in
     0 ) : ;;
@@ -42,7 +42,7 @@ for d in SOURCES SPECS; do
 done
 
 
-if rpmbuild --define '_topdir %(pwd)/rpmbuild' --nodeps -bp "$@" *.spec
+if $RPMBUILD --define '_topdir %(pwd)/rpmbuild' --nodeps -bp "$@" *.spec
 then
     mv rpmbuild/BUILD/* $orig_dir
     case $rpm_dir in
