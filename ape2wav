@@ -1,0 +1,28 @@
+#!/bin/sh
+
+ape_to_wav()
+{
+  ape=$1
+  wav=${1%.*}.wav wav=${wav##*/}
+  shift
+
+  mac "$ape" "$wav" -d
+}
+
+main()
+{
+  case $1 in
+    -1 ) shift
+         ape_to_wav "$@" ;;
+     * )
+         for ape in "$@"; do
+           echo "$ape"
+           ape_to_wav "$ape"
+           echo
+         done ;;
+  esac
+}
+
+main "$@"
+
+# eof

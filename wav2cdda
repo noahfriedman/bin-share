@@ -1,0 +1,32 @@
+#!/bin/sh
+
+wav_to_cdda()
+{
+  wav=$1
+  raw=${1%.*}.cdda raw=${raw##*/}
+  shift
+
+  if [ -t 1 ]; then
+      sox -S -V3 --no-clobber "$wav" -t cdda "$raw"
+  else
+      sox --no-clobber "$wav" -t cdda "$raw"
+  fi
+}
+
+main()
+{
+  case $1 in
+    -1 ) shift
+         wav_to_cdda "$@" ;;
+     * )
+         for wav in "$@"; do
+           echo "$wav"
+           wav_to_cdda "$wav"
+           echo
+         done ;;
+  esac
+}
+
+main "$@"
+
+# eof
