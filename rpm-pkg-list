@@ -409,6 +409,9 @@ __DATA__
 ## GPG key fingerprints for RPM signatures
 ######
 
+38ab71f4	fedora-36
+9867c58f	fedora-35
+45719a39	fedora-34
 9570ff31	fedora-33
 12c944d0	fedora-32
 3c3359c4	fedora-31
