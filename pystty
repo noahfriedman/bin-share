@@ -5,8 +5,6 @@
 # Created: 2018-10-30
 # Public domain
 
-# $Id: pystty,v 1.6 2018/12/04 20:36:53 friedman Exp $
-
 # Commentary:
 
 # stuff to do:
@@ -509,10 +507,7 @@ def termios_notrace( fn ):
             if os.getenv( 'PYSTTY_DEBUG' ):
                 raise
             else:
-                try:
-                    errmsg = err.strerror  # python3
-                except AttributeError:
-                    errmsg = err[-1]       # python 2.7
+                errmsg = err.args[-1]
                 fatal( args[0].fd_name, errmsg, fn=fn )
     return wrapper
 
