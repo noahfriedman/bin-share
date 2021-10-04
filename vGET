@@ -1,18 +1,16 @@
 #!/bin/sh
-# $Id: vGET,v 1.1 2017/02/22 20:29:49 friedman Exp $
 
 # Useful output formats: -o [text|ps|links|html|dump]
 # -d disable content
 
 # Choices are Net::SSL or IO:Socket::SSL
-# This default combo avoids requiring cert verification, which is annoying
-# for self-signed certs.
-PERL_NET_HTTPS_SSL_SOCKET_CLASS=${PERL_NET_HTTPS_SSL_SOCKET_CLASS-Net::SSL}
-PERL_LWP_SSL_VERIFY_HOSTNAME=${PERL_LWP_SSL_VERIFY_HOSTNAME-0}
+# Don't verify cert subjects; self-signed certs fail regardless
+: ${PERL_NET_HTTPS_SSL_SOCKET_CLASS:=Net::SSL}
+: ${PERL_LWP_SSL_VERIFY_HOSTNAME:=0}
 export PERL_NET_HTTPS_SSL_SOCKET_CLASS PERL_LWP_SSL_VERIFY_HOSTNAME
 
 # Many websites block requests made by lwp-request with default user agent
-user_agent="Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0"
+user_agent="Mozilla/5.0 (X11; Linux x86_64; rv:92.0) Gecko/20100101 Firefox/92.0"
 
 exec lwp-request -m GET -uUsSeE \
      -H "User-Agent: $user_agent" \
