@@ -1,11 +1,13 @@
 #!/usr/bin/env perl
 
-use 5.10.0;  # Not tested with anything older.  YMMV.
 use strict;
 use Carp;
 use Getopt::Long;
 use Pod::Usage;
 use Socket;
+
+use lib "$ENV{HOME}/lib/perl";
+use NF::PrintObject qw(:all);
 
 our $version = "1.9999";
 
@@ -37,6 +39,9 @@ sub parse_options
     ('h|help|usage+'             =>      \$help,
      'D|debug+'                  =>      \$::debug,
      'W|warnings!'               =>      \$^W,
+     'V|version',                =>      \$opt{show_version},
+
+     "v|verbose"                 =>      \$opt{verbose},
 
      # don't autovivify SSL_options values; wrap them in a delayed eval thunk
      'ssl-ca-file=s'             => sub { $SSL_options{SSL_ca_file} = $_[1] },
@@ -54,7 +59,6 @@ sub parse_options
      '4|ipv4-only'               => sub { $opt{addrfamily} = AF_INET  },
      '6|ipv6-only'               => sub { $opt{addrfamily} = AF_INET6 },
 
-     'V|version',                =>      \$opt{show_version},
     );
 
   pod2usage (-exitstatus => 1, -verbose => 0)     unless $succ;
@@ -70,7 +74,7 @@ sub show_version
   if ($::debug)
     {
       $opt{need_ssl} = 1;
-      net_init();
+      TC::Socket::__init();
       $SOCKLIB     ||= "(none loaded)";
       $SOCKLIB_SSL ||= "(none loaded)";
 
@@ -79,15 +83,6 @@ sub show_version
       print "Socket library (SSL): $SOCKLIB_SSL\n";
     }
   exit (0);
-}
-
-sub net_init
-{
-  @_ = (@ARGV ? @ARGV : default_spool_file()) unless @_;
-  map { $opt{need_net} = 1 if m=^(?:imap|pop3)s?://=;
-        $opt{need_ssl} = 1 if m=^(?:imap|pop3)s://=
-      } @_;
-  From::Socket::__init() if $opt{need_net} || $opt{need_ssl};
 }
 
 sub copy_io_until_close ($$$)
@@ -624,6 +619,7 @@ sub connect
                                   PeerPort => $self->{port},
                                   @_);
   return unless $fh;
+  ::__PP_DEBUG { $fh };
   $self->{fh} = $fh;
 }
 
