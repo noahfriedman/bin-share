@@ -5,18 +5,49 @@
 # Created: 2018-09-05
 # Public domain
 
-# $Id: pyrepl,v 1.1 2018/11/21 01:44:13 friedman Exp $
-
 # Commentary:
 # Code:
 
 from   __future__ import print_function
 
-import sys
-import platform
+import readline
+import rlcompleter
 import code
 import subprocess
+
+import atexit
+import os
+import platform
 import pprint
+import sys
+
+
+# Provide saved history and tab completion on python symbols
+# Shamelessly stolen from Python library manual
+class Repl( code.InteractiveConsole ):
+    def __init__( self, locals=None, histfile=None ):
+        code.InteractiveConsole.__init__( self, locals )
+
+        if histfile is None:
+            histdir  = os.getenv( 'XDG_CACHE_HOME' ) or os.getenv( 'HOME' )
+            histfile = os.path.join( histdir, ".pyrepl_history" )
+        self.init_history( histfile )
+
+    def init_history(self, histfile):
+        readline.parse_and_bind( 'tab: complete')
+        try:
+            readline.read_history_file( histfile )
+        except FileNotFoundError:
+            pass
+        atexit.register( self.save_history, histfile )
+
+    def save_history( self, histfile ):
+        readline.set_history_length( 1024 )
+        readline.write_history_file( histfile )
+
+
+
+repl_locals = {}
 
 repl_pp = pprint.PrettyPrinter( indent=2, width=40 )
 def pp( *args, **kwargs ):
@@ -30,12 +61,9 @@ def load( filename ):
     with open( filename, 'r' ) as f:
         text = f.read()
     text.replace( '\r\n', '\n' )
-    exec( text, globals() )
+    exec( text, globals(), repl_locals )
 
 if __name__ == '__main__':
-    # Don't display 'None' if there is nothing to display.
-    sys.displayhook = lambda arg: (arg is None) or pp( arg )
-
     banner = '{} {}.{}.{} [{}] {}-{}'.format(
         platform.python_implementation(),
         sys.version_info.major,
@@ -44,17 +72,19 @@ if __name__ == '__main__':
         platform.python_build()[1],
         sys.platform,
         platform.machine(), )
-    exitmsg = ''
 
-    # non-builtin symbols to be present at start in the repl
-    local = { 'bt'      : bt,
-              'load'    : load,
-              # having access to repl_pp lets us change _width on occasion
-              'repl_pp' : repl_pp, }
+    # non-builtin symbols to be present at start in the repl.
+    # having access to repl_pp lets us change _width on occasion
+    repl_locals.update( { 'bt'      : bt,
+                          'load'    : load,
+                          'repl_pp' : repl_pp, } )
 
-    try:               # python3
-        code.interact( local=local, banner=banner, exitmsg=exitmsg )
-    except TypeError:  # python2
-        code.interact( local=local, banner=banner )
+    # Don't display 'None' if there is nothing to display.
+    sys.displayhook = lambda arg: (arg is None) or pp( arg )
+    repl = Repl( locals=repl_locals )
+    try:
+        repl.interact( banner=banner, exitmsg='' )
+    except TypeError:
+        repl.interact( banner=banner )  # python2.7
 
-# eof
+# pyrepl ends here
