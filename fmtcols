@@ -1,6 +1,4 @@
-#!/bin/sh
-exec ${PERL-perl} -wSx $0 ${1+"$@"}
-#!perl
+#!/usr/bin/env perl
 
 # fmtcols --- indent columns so they line up
 
@@ -22,21 +20,22 @@ exec ${PERL-perl} -wSx $0 ${1+"$@"}
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with this program; if not, you can either send email to this
-# program's maintainer or write to: The Free Software Foundation,
-# Inc.; 59 Temple Place, Suite 330; Boston, MA 02111-1307, USA.
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # Commentary:
 # Code:
 
-use Getopt::Long;
-use Symbol;
 use strict;
+use warnings qw(all);
+
+use Getopt::Long;
+use Scalar::Util qw(reftype);
+use Symbol;
 
 sub min { return [ sort {   $a <=> $b  } @_ ]->[0]; }
 sub max { return [ sort { -($a <=> $b) } @_ ]->[0]; }
 
-sub openfile ($)
+sub openfile
 {
   my $file = shift;
   my $fh = gensym;
@@ -52,7 +51,7 @@ sub openfile ($)
   return $fh;
 }
 
-sub read_input ($@)
+sub read_input
 {
   my $option = shift;
 
@@ -115,7 +114,7 @@ sub read_input ($@)
          };
 }
 
-sub print_output ($$)
+sub print_output
 {
   my ($input, $option) = @_;
 
@@ -152,12 +151,14 @@ sub print_output ($$)
   my $l;
   foreach $l (@$line)
     {
-      my $refp = ref $l;
-      if ($refp && $refp eq 'ARRAY')
+      if (reftype ($l) eq 'ARRAY')
         {
-          local $^W = 0;
-          my $s = sprintf ($fmtstr, @$l);
-          $s =~ s/\s+$//o;
+          my $s = "";
+          if (@$l)  # empty for blank lines
+            {
+              $s = sprintf ($fmtstr, @$l);
+              $s =~ s/\s+$//;
+            }
           print $s, "\n";
         }
       else
@@ -167,7 +168,7 @@ sub print_output ($$)
     }
 }
 
-sub parse_options ()
+sub parse_options
 {
   my $fieldsep    = "[ \t]+";
   my $outsep      = " ";
@@ -221,7 +222,7 @@ sub parse_options ()
          };
 }
 
-sub usage ()
+sub usage
 {
   $0 =~ s|.*/||;
   print "Usage: $0 {options} [files {...}]\n
