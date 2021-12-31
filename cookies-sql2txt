@@ -1,10 +1,9 @@
 #!/usr/bin/env perl
 # cookies-sql2txt --- generate cookies.txt from sqlite index
+
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2009-02-10
 # Public domain
-
-# $Id: cookies-sql2txt,v 1.2 2019/06/07 08:26:35 friedman Exp $
 
 # Commentary:
 
@@ -33,20 +32,38 @@ sub main
 
   $dbh->do (q{ pragma busy_timeout = 500 });
 
-  my $stm = q{ select host,
-                      replace(replace(substr(host,1,1)='.',1,'TRUE'),0,'FALSE') as flag,
-                      path,
-                      isSecure,
-                      expiry,
-                      name,
-                      value
-               from moz_cookies
-               where expiry >= ?
-               order by baseDomain,
-                        host,
-                        name,
-                        path
-            };
+  # The schema used to include a column baseDomain, but it was dropped years ago.
+  # The ordering below puts all cookies for a given TLD together.
+  my $baseDomain = q{ substr( ltrim( host, '.' ),
+                              instr( ltrim( host, '.' ),
+                              '.' ) +1
+                            )
+                    };
+  my $stm = qq{ SELECT host,
+                       CASE WHEN substr( host, 1, 1) == '.'
+                            THEN 'TRUE'
+                            ELSE 'FALSE'
+                       END
+                    AS flag,
+                       path,
+                       isSecure,
+                       expiry,
+                       name,
+                       value
+
+                  FROM moz_cookies
+
+                 WHERE expiry >= ?
+                   AND length( host ) > 1
+
+              ORDER BY CASE WHEN instr( $baseDomain, '.')
+                            THEN $baseDomain
+                            ELSE ltrim( host, '.' )
+                       END,
+                       host,
+                       name,
+                       path
+             };
   my $sth = $dbh->prepare ($stm) or return 1;
   $sth->execute (time);
   while (my @row = $sth->fetchrow_array)
