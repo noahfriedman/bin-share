@@ -29,25 +29,22 @@ use strict;
 use warnings qw(all);
 
 use Getopt::Long;
+use   List::Util qw(min max);
 use Scalar::Util qw(reftype);
-use Symbol;
 
-sub min { return [ sort {   $a <=> $b  } @_ ]->[0]; }
-sub max { return [ sort { -($a <=> $b) } @_ ]->[0]; }
+sub xreftype { ref( $_[0] ) && reftype( $_[0] ) }
 
 sub openfile
 {
   my $file = shift;
-  my $fh = gensym;
 
-  if ($file eq "-")
+  if (!defined( $file ) || $file eq "-")
     {
-      open ($fh, "<&STDIN");
+      open (my $fh, "<&STDIN") or die "open: stdin: $!\n";
+      return $fh;
     }
-  elsif (!sysopen ($fh, $file, 0))
-    {
-      die join (": ", $file, $!);
-    }
+
+  sysopen( my $fh, $file, 0 ) or die "open: $file: $!\n";
   return $fh;
 }
 
@@ -74,7 +71,7 @@ sub read_input
       my $fh = openfile ($file);
       while (<$fh>)
         {
-          chop;
+          chomp;
           if ($lineno <= $skip_lines
               || (defined $ignore_re && /$ignore_re/o))
             {
@@ -151,7 +148,7 @@ sub print_output
   my $l;
   foreach $l (@$line)
     {
-      if (reftype ($l) eq 'ARRAY')
+      if (xreftype ($l) eq 'ARRAY')
         {
           my $s = "";
           if (@$l)  # empty for blank lines
