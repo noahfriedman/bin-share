@@ -127,8 +127,7 @@ sub print_output
 
   my @fmts;
   my $i = 0;
-  my $width;
-  foreach $width (@$maxwidth)
+  for my $width (@$maxwidth)
     {
       my $w = (defined $width_limit ? min ($width, $width_limit) : $width);
 
@@ -144,15 +143,16 @@ sub print_output
   $fmts[$#fmts] = "%s" if (scalar @fmts > 0
                            && substr ($fmts[$#fmts], 1, 1) eq '-');
   my $fmtstr = join ($outsep, @fmts);
-
-  my $l;
-  foreach $l (@$line)
+  for my $l (@$line)
     {
       if (xreftype ($l) eq 'ARRAY')
         {
           my $s = "";
-          if (@$l)  # empty for blank lines
+          if (@$l)  # non-empty line
             {
+              # If this row is missing a sufficient number of columns,
+              # append blanks to fill them in.
+              push @$l, ('') x (@fmts - @$l) if @$l < @fmts;
               $s = sprintf ($fmtstr, @$l);
               $s =~ s/\s+$//;
             }
