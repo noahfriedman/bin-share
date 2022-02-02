@@ -527,6 +527,9 @@ e74f0522	rpmfusion-free-el5
 5568bbb2	rpmfusion-nonfree-el6
 ab194290	rpmfusion-nonfree-el5
 
+# Fedora EPEL
+2f86d6a1	epel-8
+
 8483c65d	centos-8
 f4a80eb5	centos-7
 c105b9de	centos-6
