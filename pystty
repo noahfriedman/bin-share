@@ -27,28 +27,42 @@ import functools
 
 OS = os.uname()[0]
 
-def CTRL(c): return ord( c.upper() ) - 64
+# flip bit 7 of c; thus CTRL('C')==3, but CTRL('?')==127
+def CTRL(c): return ord( c.upper() ) ^ 1<<6
 
 # This just generates global variables; there are no objects.
 class _Enum():
+    @classmethod
     def __init__( self, *args ):
+        glbl = globals()
         for n, name in enumerate( args ):
-            globals()[ name ] = n
+            glbl[ name ] = n
 
 # Singleton wrapper around termios module to handle differences between
 # operating systems, including potentially known but undefined attributes.
 # Prefer the module attributes if they exist, otherwise try ours, or return
-# None as a last resort.
+# False as a last resort. False means the attribute is not available,
+# whereas None means there may just be no default.
 class PseudoTermios( object ):
     @classmethod
-    def __getattr__( self, attr ):
+    def __dir__( self ):
+        l = dict( vars( self ))
+        # Merge in the members of termios with our own,
+        # since that represents the complete namespace.
+        l.update( vars( termios ))
+        # And sort them, because dir(x) is usally sorted.
+        return sorted( l.keys() )
+
+
+    @classmethod
+    def __getattribute__( self, attr ):
         try:
             return getattr( termios, attr )
         except AttributeError:
             try:
                 return getattr( self, attr )
             except AttributeError:
-                return None
+                return False
 
     # Assigned at class definition time.
     if OS == 'Linux':
@@ -92,8 +106,10 @@ class PseudoTermios( object ):
         N_IRDA     = 11 # http://irda.sourceforge.net/
         N_SMSBLOCK = 12 # SMS block mode for GSM
         N_SYNC_PPP = 14 # synchronous PPP
+        N_HCI      = 15 # Bluetooth HCI UART
         N_SLCAN    = 17 # Serial / USB serial CAN Adaptors
         N_PPS      = 18 # Pulse per Second (GPS, etc)
+        N_NULL     = 27 # Null ldisc used for error handling
 
     elif OS == 'FreeBSD':
         B7200      =   7200
@@ -126,11 +142,19 @@ class PseudoTermios( object ):
         CDSR_OFLOW = 0x00080000	# DSR flowctl of output
         CCAR_OFLOW = 0x00100000	# DCD flowctl of output
 
+        # Line disciplines from sys/ttycom.h
+        # The actual macros don't start with `N_' and *do* end with `DISC'.
+        N_TTY      =  0 # TTYDISC      - termios tty
+        N_SLIP     =  4 # SLIPDISC     - serial IP
+        N_PPP      =  5 # PPPDISC      - PPP
+        N_NETGRAPH =  6 # NETGRAPHDISC - Netgraph tty node
+        N_H4       =  7 # H4DISC       - Netgraph Bluetooth H4
+
 _termios = _t = PseudoTermios()
 
 POSIX = True
 
-_Enum( 'TC_IFLAG',	# tc*etattr fields
+_Enum( 'TC_IFLAG',	# tc*etattr fields, and values in FLL_XFLAG/FL_XFLAG slots
        'TC_OFLAG',
        'TC_CFLAG',
        'TC_LFLAG',
@@ -138,6 +162,30 @@ _Enum( 'TC_IFLAG',	# tc*etattr fields
        'TC_OSPEED',
        'TC_CC', )
 
+FLAG_LABEL = { TC_IFLAG  : 'iflags',
+               TC_OFLAG  : 'oflags',
+               TC_CFLAG  : 'cflags',
+               TC_LFLAG  : 'lflags',
+               TC_ISPEED : 'ispeed',
+               TC_OSPEED : 'ospeed',
+               TC_CC     : 'cchars', }
+# Add inverse of the above
+FLAG_LABEL.update( { v : k for k, v in FLAG_LABEL.items() } )
+
+_Enum( 'FLL_NAME',	# fields in FLAG_LIST
+       'FLL_XFLAG',
+       'FLL_FIELD',
+       'FLL_FIELD_VALUE',
+       'FLL_SANE_SETTING',
+       'FLL_POSIX',
+       'FLL_HELP', )
+
+
+# This table is ordered the same as their numeric bit values on Linux,
+# and by ancestral heredity is mostly the same on other platforms too.
+# They are displayed in *this* order regardless.
+# (Some native versions of stty have a different order that doesn't match
+# either this or their native bit order.)
 FLAG_LIST = (
     ( 'ignbrk',     TC_IFLAG,  termios.IGNBRK,     None,     False, POSIX, 'ignore break chars' ),
     ( 'brkint',     TC_IFLAG,  termios.BRKINT,     None,     True,  POSIX, 'breaks cause an interrupt signal' ),
@@ -172,14 +220,14 @@ FLAG_LIST = (
     ( 'tab0',       TC_OFLAG, _termios.TABDLY,     _t.TAB0,  True,  'tabN', 'horizontal tab delay style, N in [0..3]' ),
     ( 'tab1',       TC_OFLAG, _termios.TABDLY,     _t.TAB1,  None,  False, None ),
     ( 'tab2',       TC_OFLAG, _termios.TABDLY,     _t.TAB2,  None,  False, None ),
-    ( 'tab3',       TC_OFLAG, _termios.TABDLY,     _t.TAB3,  None,  False, None ),
+    ( 'tab3',       TC_OFLAG, _termios.TABDLY,     _t.TAB3,  None,  False, 'expand tabs to spaces' ),
     ( 'xtabs',      TC_OFLAG, _termios.TABDLY,     _t.XTABS, None,  False, None ),
-    ( 'bs0',        TC_OFLAG, _termios.BSDLY,      _t.BS0,   True,  'bsN', 'backspace delay style, N in [0..1]' ), # not impl
+    ( 'bs0',        TC_OFLAG, _termios.BSDLY,      _t.BS0,   True,  'bsN', 'backspace delay style, N in [0..1]' ), # linux: not impl
     ( 'bs1',        TC_OFLAG, _termios.BSDLY,      _t.BS1,   None,  False, None ),
-    ( 'ff0',        TC_OFLAG, _termios.FFDLY,      _t.FF0,   True,  'ffN', 'form feed delay style, N in [0..1]' ),
-    ( 'ff1',        TC_OFLAG, _termios.FFDLY,      _t.FF1,   None,  False, None ),
     ( 'vt0',        TC_OFLAG, _termios.VTDLY,      _t.VT0,   True,  'vtN', 'vertical tab delay style, N in [0..1]' ),
     ( 'vt1',        TC_OFLAG, _termios.VTDLY,      _t.VT1,   None,  False, None ),
+    ( 'ff0',        TC_OFLAG, _termios.FFDLY,      _t.FF0,   True,  'ffN', 'form feed delay style, N in [0..1]' ),
+    ( 'ff1',        TC_OFLAG, _termios.FFDLY,      _t.FF1,   None,  False, None ),
 
     ( 'cs5',        TC_CFLAG, _termios.CSIZE,      _t.CS5,   None,  'crN', 'carriage return delay style, N in [0..3]' ),
     ( 'cs6',        TC_CFLAG, _termios.CSIZE,      _t.CS6,   None,  False, None ),
@@ -191,13 +239,13 @@ FLAG_LIST = (
     ( 'parodd',     TC_CFLAG,  termios.PARODD,     None,     None,  POSIX, "set odd parity (or even parity with '-')" ),
     ( 'hupcl',      TC_CFLAG,  termios.HUPCL,      None,     None,  POSIX, 'send hangup signal when last process closes tty' ),
     ( 'clocal',     TC_CFLAG,  termios.CLOCAL,     None,     None,  POSIX, 'disable modem control signals' ),
-    ( 'crtscts',    TC_CFLAG, _termios.CRTSCTS,    None,     None,  False, 'enable RTS/CTS handshaking' ),
-    ( 'cdtrcts',    TC_CFLAG, _termios.CDTRCTS,    None,     None,  False, 'enable DTR/CTS handshaking' ), # netbsd
     ( 'cmspar',     TC_CFLAG, _termios.CMSPAR,     None,     None,  False, 'use "stick" (mark/space) parity' ),
+    ( 'crtscts',    TC_CFLAG, _termios.CRTSCTS,    None,     None,  False, 'enable RTS/CTS handshaking' ),
+    ( 'cdtrcts',    TC_CFLAG, _termios.CDTRCTS,    None,     None,  False, 'enable DTR/CTS handshaking' ),           # netbsd
     ( 'loblk',      TC_CFLAG, _termios.LOBLK,      None,     None,  False, 'block output from non-current layers' ), # solaris
-    ( 'dsrflow',    TC_CFLAG, _termios.CDSR_OFLOW, None,     None,  False, 'start/stop output on DSR' ), # freebsd
-    ( 'dtrflow',    TC_CFLAG, _termios.CDTR_IFLOW, None,     None,  False, 'start/stop input on DTR' ),  # freebsd
-    ( 'mdmbuf',     TC_CFLAG, _termios.CCAR_OFLOW, None,     None,  False, 'start/stop on carrier' ),    # bsd
+    ( 'dtrflow',    TC_CFLAG, _termios.CDTR_IFLOW, None,     None,  False, 'start/stop input on DTR' ),              # freebsd
+    ( 'dsrflow',    TC_CFLAG, _termios.CDSR_OFLOW, None,     None,  False, 'start/stop output on DSR' ),             # freebsd
+    ( 'mdmbuf',     TC_CFLAG, _termios.CCAR_OFLOW, None,     None,  False, 'start/stop on carrier' ),                # bsd
 
     ( 'isig',       TC_LFLAG,  termios.ISIG,       None,     True,  POSIX, 'enable interrupt, quit, and suspend special chars' ),
     ( 'icanon',     TC_LFLAG,  termios.ICANON,     None,     True,  POSIX, 'enable special chars: erase, kill, werase, rprnt' ),
@@ -215,37 +263,23 @@ FLAG_LIST = (
     ( 'pendin',     TC_LFLAG, _termios.PENDIN,     None,     None,  False, 'retype pending input' ),
     ( 'iexten',     TC_LFLAG,  termios.IEXTEN,     None,     True,  POSIX, 'enable non-POSIX special chars' ),
     ( 'extproc',    TC_LFLAG, _termios.EXTPROC,    None,     False, False, 'enable "line mode"; useful with high latency links' ),
-    ( 'defecho',    TC_LFLAG, _termios.DEFECHO,    None,     None,  False, 'echo only when a process is reading' ), # solaris
-    ( 'altwerase',  TC_LFLAG, _termios.ALTWERASE,  None,     None,  False, 'Use alternate word erase algorithm' ),  # bsd
+    ( 'defecho',    TC_LFLAG, _termios.DEFECHO,    None,     None,  False, 'echo only when a process is reading' ),          # solaris
+    ( 'altwerase',  TC_LFLAG, _termios.ALTWERASE,  None,     None,  False, 'Use alternate word erase algorithm' ),           # bsd
     ( 'nokerninfo', TC_LFLAG, _termios.NOKERNINFO, None,     None,  False, 'Enable status line when STATUS char detected' ), # bsd
 )
+# If you really wanted to sort the output, you could do so here.
+# Some sort key options: 0 for alphabetic, 2 for bit order
+#FLAG_LIST = sorted( FLAG_LIST, key=lambda row: row[2] )
 
-FLAG = { elt[ 0 ] : elt[ 1: ] for elt in FLAG_LIST }
 
-FLAG_LABEL = { TC_IFLAG  : 'iflags',
-               TC_OFLAG  : 'oflags',
-               TC_CFLAG  : 'cflags',
-               TC_LFLAG  : 'lflags',
-               TC_ISPEED : 'ispeed',
-               TC_OSPEED : 'ospeed',
-               TC_CC     : 'cchars', }
-# Add inverse of the above
-FLAG_LABEL.update( { v : k for k, v in FLAG_LABEL.items() } )
-
-_Enum( 'FLL_NAME',	# fields in FLAGS_LIST
-       'FLL_XFLAG',
-       'FLL_FIELD',
-       'FLL_FIELD_VALUE',
-       'FLL_SANE_SETTING',
-       'FLL_POSIX',
-       'FLL_HELP', )
-
-_Enum( 'FL_XFLAG',	# fields in FLAGS value
+_Enum( 'FL_XFLAG',	# fields in FLAG
        'FL_FIELD',
        'FL_FIELD_VALUE',
        'FL_SANE_SETTING',
        'FL_POSIX',
        'FL_HELP', )
+
+FLAG = { elt[ 0 ] : elt[ 1: ] for elt in FLAG_LIST }
 
 SPEED = {
           '0' : _termios.B0,
@@ -286,6 +320,10 @@ SPEED = {
 
 NTOSPEED = { v : k for k, v in SPEED.items() }
 
+_Enum( 'CC_PARAM_LIST_NAME',
+       'CC_PARAM_LIST_POS',
+       'CC_PARAM_LIST_DFLT', )
+
 CC_PARAM_LIST = (
     ('intr',     termios.VINTR,    _termios.CINTR,   ), # ^C
     ('quit',     termios.VQUIT,    _termios.CQUIT,   ), # ^\
@@ -301,16 +339,15 @@ CC_PARAM_LIST = (
     ('susp',     termios.VSUSP,    _termios.CSUSP,   ), # ^Z
     ('dsusp',   _termios.VDSUSP,   _termios.CDSUSP,  ), # ^Y
     ('rprint',   termios.VREPRINT, _termios.CRPRNT,  ), # ^R
-    ('status',  _termios.VSTATUS,  _termios.CSTATUS, ), # ^T
     ('werase',   termios.VWERASE,  _termios.CWERASE, ), # ^W
     ('lnext',    termios.VLNEXT,   _termios.CLNEXT,  ), # ^V
     ('discard',  termios.VDISCARD, _termios.CFLUSH,  ), # ^O
-    ('min',      termios.VMIN,      None,            ),
-    ('time',     termios.VTIME,     None,            ), )
+    ('status',  _termios.VSTATUS,  _termios.CSTATUS, ), # ^T
+    ('min',      termios.VMIN,      1,               ),
+    ('time',     termios.VTIME,     0,               ), )
 
-_Enum( 'CC_PARAM_LIST_NAME',
-       'CC_PARAM_LIST_POS',
-       'CC_PARAM_LIST_DFLT', )
+# Would sorting these alphabetically be easier to read?
+#CC_PARAM_LIST = sorted( CC_PARAM_LIST, key=lambda k: k[0] )
 
 _Enum( 'CC_PARAM_POS',
        'CC_PARAM_DFLT', )
@@ -320,7 +357,9 @@ CC_PARAM[ 'swtc' ] = CC_PARAM[ 'swtch' ]
 
 STDKEYS = []
 for elt in CC_PARAM_LIST:
-    if elt[1] is not None and elt[2] is not None:
+    if (     elt[1] is not None
+         and elt[1] is not False
+         and elt[2] is not None):
         STDKEYS.extend( elt[0:3:2] )
 
 def cc_dflt( name ):
@@ -341,7 +380,7 @@ ALIAS = {
                      'eof',    cc_dflt( 'eof' ),
                      'eol',    cc_dflt( 'eol' ), ],
 
-     'crt'      : [  'echoe', 'echoctl', 'echok' ],
+     'crt'      : [  'echoe', 'echoctl', 'echoke' ],
 
      'crterase' : [  'echoe' ],
     '-crterase' : [ '-echoe' ],
@@ -353,8 +392,8 @@ ALIAS = {
     '-ctlecho'  : [ '-echoctl' ],
 
      'dec'      : [  'echoe',
-                     'echoctl'
-                     'echok',
+                     'echoctl',
+                     'echoke',
                     '-ixany',
                      'intr',   cc_dflt( 'intr'  ),
                      'erase',  cc_dflt( 'erase' ),
@@ -379,7 +418,7 @@ ALIAS = {
     '-litout'   : [  'parenb'   'istrip'   'opost'  'cs7', ],
 
      'nl'       : [ '-icrnl', '-onlcr', ],
-    '-nl'       : [  'icrnl',  'onlcr', '-inlcr', '-igncr', '-ocrnl', '-onlret', ],
+    '-nl'       : [  'icrnl', '-inlcr', '-igncr',  'onlcr', '-ocrnl', '-onlret', ],
 
      'oddp'     : [  'cs7',  'parenb',  'parodd', ],
     '-oddp'     : [  'cs8', '-parenb', ],
@@ -415,53 +454,49 @@ ALIAS = {
                      'time',   0, ],
 
      # We ought to be able to compute this one from CC_PARAM_LIST
-     'sane'     : [  'cread',  # cflags
-
-                     # iflags
-                    '-ignbrk',
+     'sane'     : [ '-ignbrk',		# iflags
                      'brkint',
                     '-inlcr',
                     '-igncr',
                      'icrnl',
-                    '-ixoff',
-                    '-iutf8',
                     '-iuclc',
                     '-ixany',
+                    '-ixoff',
                      'imaxbel',
-                    '-xcase',
-                     'bs0',
-                     'cr0',
-                     'ff0',
-                     'nl0',
-                     'tab0',
-                     'vt0',
+                    '-iutf8',
 
-                     # oflags
+                     'opost',		# oflags
                     '-olcuc',
-                    '-ocrnl',
-                     'opost',
-                    '-ofill',
                      'onlcr',
+                    '-ocrnl',
                     '-onocr',
                     '-onlret',
+                    '-ofill',
                     '-ofdel',
-                    '-extproc',
-                    '-flusho',
+                     'nl0',
+                     'cr0',
+                     'tab0',
+                     'bs0',
+                     'vt0',
+                     'ff0',
 
-                     # lflags
-                     'isig',
+                     'cread',		# cflags
+
+                     'isig',		# lflags
                      'icanon',
-
+                    '-xcase',
                      'echo',
                      'echoe',
                      'echok',
                     '-echonl',
-                    '-echoprt',
-                     'echoctl',
-                     'echoke',
-                     'iexten',
                     '-noflsh',
-                    '-tostop', ], # +STDKEYS
+                    '-tostop',
+                     'echoctl',
+                    '-echoprt',
+                     'echoke',
+                    '-flusho',
+                     'iexten',
+                    '-extproc', ], # +STDKEYS below
 
      'tabs'     : [  'tab0' ],
     '-tabs'     : [  'tab3' ],
@@ -480,35 +515,56 @@ _Enum( 'WS_ROW',	# TIOC*WINSZ fields
        'WS_XPIXEL',
        'WS_YPIXEL', )
 
-TERMSZ_LIST = (
-    ( 'rows',     WS_ROW    ),
-    ( 'cols',     WS_COL    ),
-    ( 'columns',  WS_COL    ),
-    ( 'xpixels',  WS_XPIXEL ),
-    ( 'ypixels',  WS_YPIXEL ), )
+termsz_rows = ('rows', 'height')
+termsz_cols = ('cols', 'width', 'columns')
+termsz_xpix = ('xpixels', 'xpixel', 'xpix' )
+termsz_ypix = ('ypixels', 'ypixel', 'ypix' )
 
-TERMSZ = { elt[ 0 ] : elt[ 1: ] for elt in TERMSZ_LIST }
+TERMSZ = {}
+TERMSZ.update( (label, WS_ROW)    for label in termsz_rows )
+TERMSZ.update( (label, WS_COL)    for label in termsz_cols )
+TERMSZ.update( (label, WS_XPIXEL) for label in termsz_xpix )
+TERMSZ.update( (label, WS_YPIXEL) for label in termsz_ypix )
 
-def fatal( *args, **kwargs ):
-    msg = list( args )
-    if 'fn' in kwargs:
-        msg.insert( 0, kwargs[ 'fn' ].__name__ )
-    prog = sys.argv[0][ sys.argv[0].rfind( '/' ) + 1 : ]
-    msg.insert( 0, prog )
-    print( *msg, sep=': ', file=sys.stderr )
-    sys.exit( 1 )
 
-def termios_notrace( fn ):
+# character used to disable a cchar; usually 0 or 255
+try:
+    PC_VDISABLE = os.fpathconf( 0, 'PC_VDISABLE' )
+except ValueError:
+    PC_VDISABLE = 0
+
+
+def debugtrace_only( fn ):
+    def debug_excepthook( exc, val, sta ):
+        sys.excepthook = sys.__excepthook__
+        if os.getenv( 'PYSTTY_DEBUG' ):
+            return sys.__excepthook__( exc, val, sta )
+        else:
+            tb = sta
+            while tb.tb_next:
+                tb = tb.tb_next
+            fr = tb.tb_frame     # last (innermost) frame
+            if isinstance( val, (termios.error, IOError) ):
+                args = [ fr.f_locals[ 'self' ].fd_name ]
+                args.extend( val.args[1:] )
+            else:
+                args = list( val.args )
+            print( os.path.basename( sys.argv[0] ) or exc.__name__,
+                   fr.f_code.co_name,
+                   *args,
+                   sep  = ': ',
+                   file = sys.stderr )
+
     @functools.wraps( fn )
     def wrapper( *args, **kwargs ):
-        try:
-            return fn( *args, **kwargs )
-        except Exception as err:
-            if os.getenv( 'PYSTTY_DEBUG' ):
-                raise
-            else:
-                errmsg = err.args[-1]
-                fatal( args[0].fd_name, errmsg, fn=fn )
+        # Do not use an exception handler to save and restore excepthook;
+        # it should only be restored if no exception occurs.
+        prior_excepthook = sys.excepthook
+        sys.excepthook = debug_excepthook
+        result = fn( *args, **kwargs )
+        sys.excepthook = prior_excepthook
+        return result
+
     return wrapper
 
 class Stty( object ):
@@ -528,8 +584,8 @@ class Stty( object ):
                 '^-'      : '\x00',
                 'NUL'     : '\x00',
                 'NULL'    : '\x00',
-                'UNDEF'   : '\x00',
-                '<UNDEF>' : '\x00',
+                'UNDEF'   : chr( PC_VDISABLE ),
+                '<UNDEF>' : chr( PC_VDISABLE ),
                 'BS'      : '\x08',
                 'TAB'     : '\x09',
                 'NL'      : '\x0a',
@@ -555,8 +611,8 @@ class Stty( object ):
                       '{:#05o}'.format( c ),  # 0o007
                       '{:#03x}'.format( c ),  # 0xa
                       '{:#04x}'.format( c ),  # 0x0a
-                      '^'  + chr( c + 64 ),
-                      'C-' + chr( c + 64 ), ]
+                      '^'  + chr( c ^ 1<<6 ),
+                      'C-' + chr( c ^ 1<<6 ), ]
             char = chr( c )
             for seq in xlate:
                 self.cctrans[ seq ] = char
@@ -566,7 +622,7 @@ class Stty( object ):
                 except AttributeError:
                     pass # 'int' object has no attribute 'upper'
 
-    @termios_notrace
+    @debugtrace_only
     def open( self, _file ):
         if hasattr( _file, 'fileno' ):
             self.fd_name = _file.name
@@ -583,16 +639,16 @@ class Stty( object ):
         except KeyError:
             sp = None
         if sp is None:
-            fatal( speed, 'unsupported speed' )
+            raise OSError( speed + ': unsupported speed' )
         return sp
 
-    @termios_notrace
+    @debugtrace_only
     def tcgetattr( self, reset=False ):
         if reset or self._attr is None:
             self._attr = termios.tcgetattr( self.fd )
         return self._attr
 
-    @termios_notrace
+    @debugtrace_only
     def tcsetattr( self, when=termios.TCSANOW ):
         self.tcgetattr()
         return termios.tcsetattr ( self.fd, when, self._attr )
@@ -621,14 +677,16 @@ class Stty( object ):
             data = FLAG[ arg ]
         return data[ FL_SANE_SETTING ]
 
+    @debugtrace_only
     def setflag( self, arg ):
         try:
             if arg[0] == '-':
                 data = FLAG[ arg[1:] ]
             else:
                 data = FLAG[ arg ]
-        except KeyError:
-            fatal( arg, 'invalid argument' )
+        except KeyError as e:
+            e.args = ( e.args[0], 'Unknown or unsupported argument' )
+            raise
         if data[ FL_FIELD_VALUE ] is None:
             val = bool( arg[0] != '-' )
         else:
@@ -655,31 +713,37 @@ class Stty( object ):
         self.tcgetattr()
         return self._attr[ TC_CC ][ key ]
 
-    @termios_notrace
+    @debugtrace_only
     def setcc( self, key, char ):
         self.tcgetattr()
         if key in [termios.VMIN, termios.VTIME]:
-            try:
-                char = int( char )
-            except ValueError:
-                raise
+            char = int( char )
         else:
             if isinstance( char, int ):
-                # Make sure data is binary for python3
-                char = str.encode( chr( char & 0xff ) )
+                if bytes is str:  # python2
+                    char = chr( char & 0xff )
+                else:
+                    # data must be binary for python3
+                    char = bytes( (char,) )
             elif len( char ) > 2 and char[0] == '^':
                 char = char[0:2]
 
             self._cctrans_init()
             try:
                 char = self.cctrans[ char ]
-            except KeyError:
+            except KeyError as err:
                 if len( char ) > 1:
-                    raise KeyError( '"{}": unrecognized character alias'.format( char ) )
+                    # KeyError.args will be forced into a tuple,
+                    # so we can't modify anything assigned to it.
+                    # Some baroque machinations here to accomodate python2.
+                    nargs = list( err.args )
+                    nargs.append( 'unrecognized character sequence' )
+                    err.args = nargs
+                    raise
         self._attr[ TC_CC ][ key ] = char
         return char
 
-    @termios_notrace
+    @debugtrace_only
     def getwinsz( self, fd=None ):
         raw = fcntl.ioctl ( fd or self.fd, termios.TIOCGWINSZ, '  ' * 4 )
         winsz = list( struct.unpack( '@4H', raw ) )
@@ -687,24 +751,23 @@ class Stty( object ):
             self._winsz = winsz
         return winsz
 
-    @termios_notrace
+    @debugtrace_only
     def setwinsz( self, fd=None, winsz=None ):
         if not winsz:
             winsz = self._winsz
         raw = struct.pack( '@4H', *winsz )
         return fcntl.ioctl( fd or self.fd, termios.TIOCSWINSZ, raw )
 
-    @termios_notrace
+    @debugtrace_only
     def getldisc( self ):
         try:
             raw = fcntl.ioctl( self.fd, termios.TIOCGETD, '\x00' * 4 )
             self._ldisc = struct.unpack( '@i', raw )[0]
             return self._ldisc
         except (OSError, AttributeError):
-            pass    # termios.TIOCGETD is not defined on cygwin
+            pass # TIOCGETD undefined/unimplemented on cygwin, VMkernel, etc.
 
-
-    @termios_notrace
+    @debugtrace_only
     def setldisc( self, n ):
         try:
             raw = struct.pack( '@i', n )
@@ -713,13 +776,16 @@ class Stty( object ):
         return fcntl.ioctl( self.fd, termios.TIOCSETD, raw )
 
     def ldisc_name_maps( self ):
-        filt = lambda x: list( n for n in dir( x ) if n.find( 'N_' ) == 0 )
-        names = filt( _termios )
-        names.extend( filt( termios ) )
+        names = list( n for n in dir( _termios ) if n.find( 'N_' ) == 0 )
         formap = { name[2:].lower() : getattr( _termios, name ) for name in names }
         revmap = { v : k for k, v in formap.items() }
         return (formap, revmap)
 
+    # Some platforms have an additional line discipline flag in the termios
+    # structure which may be different from that returned by TIOCGETD.
+    # `template' is a template string representing the termios C struct.
+    # 'TC_LINE' is the index into the unpacked struct of the `c_line' member.
+    # See python `struct' class for further details.
     tcgets_param = {
         'Linux'   : { 'template'  : '@4I B {}c 2I'.format( termios.NCCS ),
                       'TC_LINE'   : 4, }, }
@@ -727,14 +793,15 @@ class Stty( object ):
         platform[ 'bufsize' ] = struct.calcsize( platform[ 'template' ] )
 
     # I suspect ESXi supports this to be API-compatible with linux but the
-    # c_line field is non-functional, since TIOCGETD returns an error.
+    # c_line field is non-functional, since there are no tty line disciplines
+    # on ESXi; in fact using TIOCGETD returns an error.
     tcgets_param[ 'VMkernel' ] = tcgets_param[ 'Linux' ]
 
     tcsets_when = { termios.TCSANOW   : getattr( termios, 'TCSETS',  None ),
                     termios.TCSADRAIN : getattr( termios, 'TCSETSW', None ),
                     termios.TCSAFLUSH : getattr( termios, 'TCSETSF', None ), }
 
-    @termios_notrace
+    @debugtrace_only
     def _tcgets( self, reset=False ):
         try:
             param = self.tcgets_param[ OS ]
@@ -744,7 +811,7 @@ class Stty( object ):
         except (KeyError, AttributeError):
             pass
 
-    @termios_notrace
+    @debugtrace_only
     def _tcsets( self, attr ):
         template = self.tcgets_param[ OS ][ 'template' ]
         raw  = struct.pack( template, *attr )
@@ -756,8 +823,12 @@ class Stty( object ):
         if attr:
             return attr[ self.tcgets_param[ OS ][ 'TC_LINE' ] ]
 
-    @termios_notrace
+    @debugtrace_only
     def setcline( self, line ):
+        # note: setting the c_line field is permitted, at least on linux,
+        # but doing so doesn't change any functional behavior so it's a
+        # frivolous thing to do. You have to use setldisc to affect the
+        # line discipline, like any other unix system.
         attr = self._tcgets()
         if attr:
             attr[ self.tcgets_param[ OS ][ 'TC_LINE' ] ] = line
@@ -793,7 +864,7 @@ class Stty( object ):
             if n in [ TC_CC ]:
                 for elt in CC_PARAM_LIST:
                     cc_pos  = elt[ CC_PARAM_LIST_POS  ]
-                    if cc_pos is None:
+                    if cc_pos is None or cc_pos is False:
                         continue
                     cc_name = elt[ CC_PARAM_LIST_NAME ]
                     try:
@@ -841,13 +912,13 @@ class Stty( object ):
         return self.tcsetattr()
 
 
-stdowidth = 78
+stdowidth = 75
 
 def stdocols( fd=sys.stdout ):
     tty = Stty( fd=fd )
     try:
         width = tty.getwinsz( fd=fd )[1]
-        return width or stdowidth
+        return width if width > 0 else stdowidth
     except (IOError, IndexError):
         return stdowidth
 
@@ -873,14 +944,10 @@ def fold( flags, maxlen=stdowidth, indent=0, sep=' ' ):
 
 def dispchar( c, args=None ):
     n = ord( c )
-    if n < 1 and args and (args.wide or args.align or args.bsd):
-        return '<undef>'
-    if n < 31:
-        return '^' + chr( n + 64 )
-    if n == 0x7f:
-        return '^?'
-    else:
-        return c
+    if n == PC_VDISABLE: return '<undef>'
+    if n < 31:           return '^' + chr( n ^ 1<<6 )
+    if n == 0x7f:        return '^?'
+    else:                return c
 
 def make_display_values( tty, args ):
     ispeed = NTOSPEED[ tty.getispeed() ]
@@ -903,32 +970,26 @@ def make_display_values( tty, args ):
         except IOError:
             pass
 
-    cline = tty.getcline()
+    _, ldisc_iton = tty.ldisc_name_maps()
     ldisc = tty.getldisc()
-    ntoi, iton = tty.ldisc_name_maps()
-    if cline is None:
-        if ldisc is None:
-            pass
-        elif ldisc > 0 and ldisc in iton:
-            line1.append( ('line', ldisc, iton[ ldisc ]) )
+    if ldisc is not None:
+        if ldisc > 0 and ldisc in ldisc_iton:
+            line1.append( ('line', ldisc, ldisc_iton[ ldisc ]) )
         else:
             line1.append( ('line', ldisc) )
-    else:
-        if cline > 0 and cline in iton:
-            line1.append( ('line', cline, iton[ cline ]) )
+    # Don't report cline unless it actually differs from ldisc,
+    # because it's not functional anyway. (see tty.setcline)
+    cline = tty.getcline()
+    if cline is not None and cline != ldisc:
+        if cline > 0 and cline in ldisc_iton:
+            line1.append( ('c_line', cline, ldisc_iton[ cline ]) )
         else:
-            line1.append( ('line', cline) )
-
-        if args.all or ldisc != cline:
-            if ldisc is None:
-                pass
-            elif ldisc > 0 and ldisc in iton:
-                line1.append( ('disc', ldisc, iton[ ldisc]) )
-            else:
-                line1.append( ('disc', ldisc) )
+            line1.append( ('c_line', cline) )
 
     char = []
     for elt in CC_PARAM_LIST:
+        if elt[ CC_PARAM_LIST_POS ] is False:
+            continue  # not defined on this platform
         name = elt[ CC_PARAM_LIST_NAME ]
         try:
             val = tty.getcc( elt[ CC_PARAM_LIST_POS ] )
@@ -953,16 +1014,15 @@ def make_display_values( tty, args ):
         tc_xflag    = elt[ FLL_XFLAG ]
         xflag_value = values[ tc_xflag ]
         mask        = elt[ FLL_FIELD ]
-        if mask is None:  # not defined on this platform
-            continue
-
-        masked_val = elt[ FLL_FIELD_VALUE ]
-        if masked_val is None: # just binary flag
+        masked_val  = elt[ FLL_FIELD_VALUE ]
+        if mask is False or masked_val is False:
+            continue # not defined on this platform
+        if masked_val is None: # boolean flag
             if tty.Xflag( tc_xflag, mask ):
                 xflag_value.append( name )
             else:
                 xflag_value.append( '-' + name )
-        else: # non-binary field value
+        else:                  # bit flag
             current = tty.Xflag( tc_xflag, mask )
             if current == masked_val:
                 xflag_value.append( name )
@@ -988,7 +1048,8 @@ def format_display_values( data, args ):
         char = [ fmt( elt[0], str( elt[1] ) + ';' ) for elt in char ]
 
     if args.align:
-        l = max( max( len( f ) for f in flag ) for flag in values )
+        # for diff_against_sane, some slots in values may be empty
+        l = max( max( len( f ) for f in flag ) for flag in values if flag)
         fmt = '{{:<{}}}'.format( l ).format
         for i, xflag in enumerate( values ):
             new = []
@@ -1125,6 +1186,10 @@ def main():
     args = get_args()
     tty = Stty( fd=args.device )
 
+    showable_args = [ 'size', 'speed', 'ispeed', 'ospeed',
+                      'line', 'ldisc', 'cline', 'c_line', ]
+    showable_args.extend( TERMSZ.keys() )
+
     try:
         arg1 = args.setting[ 0 ]
         slen = len( args.setting )
@@ -1139,21 +1204,46 @@ def main():
         display_bsd( tty, args )
     elif args.save:
         print( tty.save( verbose=args.verbose ) )
+
     elif not args.setting:
         diff_against_sane( tty, args )
-    elif slen == 1 and arg1 == 'size':
-        winsz = tty.getwinsz()
-        print( winsz[ WS_ROW ], winsz[ WS_COL ] )
-    elif slen == 1 and arg1 == 'speed':
-        ispeed = NTOSPEED[ tty.getispeed() ]
-        ospeed = NTOSPEED[ tty.getospeed() ]
-        if ispeed == ospeed:
-            print( ospeed )
-        else:
-            print( ispeed, ospeed )
+
     elif arg1.find( 'gpystty' ) == 0:
         tty.restore( arg1 )
+
+    elif slen == 1 and arg1 in showable_args:
+        if arg1 in ('size') or arg1 in TERMSZ.keys():
+            winsz = tty.getwinsz()
+            if arg1 in ('size'):
+                res = [ winsz[ WS_ROW ], winsz[ WS_COL ] ]
+                if winsz[ WS_XPIXEL ] or winsz[ WS_YPIXEL ]:
+                    res.extend( winsz[ WS_XPIXEL ], winsz[ WS_YPIXEL ] )
+                print( *res )
+            elif arg1 in termsz_rows: print( winsz[ WS_ROW ] )
+            elif arg1 in termsz_cols: print( winsz[ WS_COL ] )
+            elif arg1 in termsz_xpix: print( winsz[ WS_XPIXEL ] )
+            elif arg1 in termsz_ypix: print( winsz[ WS_YPIXEL ] )
+
+        elif arg1 in ('line', 'ldisc'):
+            line = tty.getldisc()
+            print( line )
+        elif arg1 in ('cline', 'c_line'):
+            cline = tty.getcline()
+            if cline is None:
+                cline = tty.getldisc()
+                print( cline )
+
+        elif arg1.find( 'speed' ) in (0, 1):
+            ispeed = NTOSPEED[ tty.getispeed() ]
+            ospeed = NTOSPEED[ tty.getospeed() ]
+            if   arg1 in ('ispeed'): print( ispeed )
+            elif arg1 in ('ospeed'): print( ospeed )
+            elif ispeed == ospeed:   print( ospeed )
+            else:                    print( ispeed, ospeed )
+        else:
+            raise Exception # shouldn't ever get here
     else:
+        tty.tcgetattr( reset=True )
         # Expand any aliases
         settings = []
         for arg in args.setting:
@@ -1167,30 +1257,34 @@ def main():
             if arg in SPEED:
                 tty.setispeed( arg )
                 tty.setospeed( arg )
-            elif arg in ['ispeed', 'ospeed', 'speed']:
+            elif arg in ('ispeed', 'ospeed', 'speed'):
                 speed = settings.pop( 0 )
-                if arg[0] in ['i', 's']: tty.setispeed( speed )
-                if arg[0] in ['o', 's']: tty.setospeed( speed )
+                if arg[0] in ('i', 's'): tty.setispeed( speed )
+                if arg[0] in ('o', 's'): tty.setospeed( speed )
+
             elif arg in CC_PARAM:
                 param = CC_PARAM[ arg ]
                 tty.setcc ( param[ 0 ], settings.pop( 0 ) )
+
             elif arg in TERMSZ:
                 size = int( settings.pop( 0 ) )
                 winsz = tty.getwinsz()
                 winsz[ TERMSZ[ arg ][0] ] = size
                 tty.setwinsz()
-            elif arg in [ 'line', 'disc' ]:
-                ldisc = settings.pop( 0 )
+
+            elif arg in [ 'line', 'ldisc', 'cline', 'c_line' ]:
+                disc = settings.pop( 0 )
                 try:
-                    ldisc = int( ldisc )
+                    disc = int( disc )
                 except (TypeError, ValueError):
                     ntoi, iton = tty.ldisc_name_maps()
-                    if ldisc.lower() in ntoi:
-                        ldisc = ntoi[ ldisc.lower() ]
-                if arg == 'line' and tty.getcline() is not None:
-                    tty.setcline( ldisc )
+                    if disc.lower() in ntoi:
+                        disc = ntoi[ disc.lower() ]
+                if arg in ['cline', 'c_line'] and tty.getcline() is not None:
+                    tty.setcline( disc )
                 else:
-                    tty.setldisc( ldisc )
+                    tty.setldisc( disc )
+
             else:
                 tty.setflag( arg )
         tty.tcsetattr()
