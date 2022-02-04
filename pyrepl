@@ -8,7 +8,8 @@
 # Commentary:
 # Code:
 
-from   __future__ import print_function
+# Copy namespace now, before any modules are imported.
+repl_locals = dict( locals() )
 
 import readline
 import rlcompleter
@@ -46,16 +47,14 @@ class Repl( code.InteractiveConsole ):
         readline.write_history_file( histfile )
 
 
-
-repl_locals = {}
-
-repl_pp = pprint.PrettyPrinter( indent=2, width=40 )
+repl_pp = pprint.PrettyPrinter( indent=2, width=60 )
 def pp( *args, **kwargs ):
     for arg in args:
         repl_pp.pprint( arg, **kwargs )
 
 def bt( *cmd ):
-    return subprocess.check_output( cmd ).decode( sys.stdout.encoding ).rstrip( ' \t\r\n' )
+    output = subprocess.check_output( cmd ).decode( sys.stdout.encoding )
+    return output.rstrip( ' \t\r\n' )
 
 def load( filename ):
     with open( filename, 'r' ) as f:
@@ -75,9 +74,10 @@ if __name__ == '__main__':
 
     # non-builtin symbols to be present at start in the repl.
     # having access to repl_pp lets us change _width on occasion
-    repl_locals.update( { 'bt'      : bt,
-                          'load'    : load,
-                          'repl_pp' : repl_pp, } )
+    repl_locals.update( { '__name__' : '__repl__',
+                          'bt'       : bt,
+                          'load'     : load,
+                          'repl_pp'  : repl_pp, } )
 
     # Don't display 'None' if there is nothing to display.
     sys.displayhook = lambda arg: (arg is None) or pp( arg )
