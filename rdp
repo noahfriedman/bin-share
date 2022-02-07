@@ -87,6 +87,11 @@ run_xfreerdp()
         /cert-ignore
         /log-level:ERROR )
 
+    case `${RDP_PROG-xfreerdp} --version` in
+        *'version 1.'*       ) : ;;
+        *'version 2.'[0123]* ) : ;;
+        * ) apush args /kbd-remap:0x3a=0x1d  ;; # caps=lctrl
+    esac
     case $1 in
         -fs ) shift; apush args /f -decorations ;;
         #*  ) apush args size=/size:${RDP_GEOM-$geom} ;;
