@@ -55,17 +55,17 @@ read_dmi()
 
 customize()
 {
+
+    xkb_model=${XKB_MODEL-pc105}
+
     case $product_version in
         ThinkPad* )
             xkb_model=${XKB_MODEL-thinkpad}
 
             case $product_version in
-                ThinkPad*60*  ) xkb_model=${XKB_MODEL-thinkpad60} ;;
-                ThinkPad*701* ) xkb_model=${XKB_MODEL-thinkpad60} ;;
-                *Tablet       ) xkb_model=${XKB_MODEL-thinkpad60} ;;
+                ThinkPad*W70[01]* ) xkb_model=${XKB_MODEL-thinkpad60} ;;
+                ThinkPad*T4?0*    ) xkb_model=${XKB_MODEL-thinkpad60} ;;
             esac ;;
-
-        *"Ideapad S10"* ) : ;;
     esac
 }
 
