@@ -46,8 +46,37 @@ class Repl( code.InteractiveConsole ):
         readline.set_history_length( 1024 )
         readline.write_history_file( histfile )
 
+class ReplPrettyPrinter( pprint.PrettyPrinter ):
+    # This method override adds padding so that all keys in a dict are
+    # aligned to the same column. That is, they are all indented to the
+    # length of the longest key.
+    def _format_dict_items( self, items, stream, indent, allowance, context, level ):
+        items_repr = [ (self._repr( key, context, level), ent) for key, ent in items ]
+        max_keylen = max( len( elt[0] ) for elt in items_repr ) + 1
+
+        write      = stream.write
+        indent    += self._indent_per_level
+        delimnl    = ',\n' + ' ' * indent
+        last_index = len( items_repr ) - 1
+
+        for i, (rep, ent) in enumerate( items_repr ):
+            last = i == last_index
+            write( rep )
+            write( ' ' * (max_keylen - len( rep )))
+            write( ': ' )
+            self._format( ent,
+                          stream,
+                          indent + max_keylen + 2,
+                          allowance if last else 1,
+                          context,
+                          level )
+            if last:
+                write( delimnl[ 0 : -self._indent_per_level ])
+            else:
+                write( delimnl )
+
 
-repl_pp = pprint.PrettyPrinter( indent=2, width=60 )
+repl_pp = ReplPrettyPrinter( indent=2, width=60 )
 def pp( *args, **kwargs ):
     for arg in args:
         repl_pp.pprint( arg, **kwargs )
@@ -60,9 +89,9 @@ def load( filename ):
     with open( filename, 'r' ) as f:
         text = f.read()
     text.replace( '\r\n', '\n' )
-    exec( text, globals(), repl_locals )
+    exec( text, repl_locals )
 
-if __name__ == '__main__':
+def pyrepl():
     banner = '{} {}.{}.{} [{}] {}-{}'.format(
         platform.python_implementation(),
         sys.version_info.major,
@@ -72,9 +101,12 @@ if __name__ == '__main__':
         sys.platform,
         platform.machine(), )
 
-    # non-builtin symbols to be present at start in the repl.
-    # having access to repl_pp lets us change _width on occasion
-    repl_locals.update( { '__name__' : '__repl__',
+    # Keep the initial namespace of the repl fairly clean,
+    # except for some convenience functions.
+    # (having access to repl_pp lets us change _width on occasion.
+    # Set the current namespace to __pyrepl__ so loading random
+    # scripts doesn't fire off their "if __main__" blocks.
+    repl_locals.update( { '__name__' : '__pyrepl__',
                           'bt'       : bt,
                           'load'     : load,
                           'repl_pp'  : repl_pp, } )
@@ -86,5 +118,8 @@ if __name__ == '__main__':
         repl.interact( banner=banner, exitmsg='' )
     except TypeError:
         repl.interact( banner=banner )  # python2.7
+
+if __name__ == '__main__':
+    pyrepl()
 
 # pyrepl ends here
