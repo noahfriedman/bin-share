@@ -38,9 +38,11 @@ class Repl( code.InteractiveConsole ):
         readline.parse_and_bind( 'tab: complete')
         try:
             readline.read_history_file( histfile )
-        except FileNotFoundError:
+            atexit.register( self.save_history, histfile )
+        except IOError:           # python2
             pass
-        atexit.register( self.save_history, histfile )
+        except FileNotFoundError: # python3, undef in python2
+            pass
 
     def save_history( self, histfile ):
         readline.set_history_length( 1024 )
