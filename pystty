@@ -28,7 +28,7 @@ import functools
 OS = os.uname()[0]
 
 # flip bit 7 of c; thus CTRL('C')==3, but CTRL('?')==127
-def CTRL(c): return ord( c.upper() ) ^ 1<<6
+def CTRL(c): return ord( c.upper() ) ^ 0b01000000
 
 # This just generates global variables; there are no objects.
 class _Enum():
@@ -46,13 +46,12 @@ class _Enum():
 class PseudoTermios( object ):
     @classmethod
     def __dir__( self ):
-        l = dict( vars( self ))
+        d = dict( vars( self ))
         # Merge in the members of termios with our own,
         # since that represents the complete namespace.
-        l.update( vars( termios ))
+        d.update( vars( termios ))
         # And sort them, because dir(x) is usally sorted.
-        return sorted( l.keys() )
-
+        return sorted( d.keys() )
 
     @classmethod
     def __getattribute__( self, attr ):
@@ -66,6 +65,7 @@ class PseudoTermios( object ):
 
     # Assigned at class definition time.
     if OS == 'Linux':
+        # n.b linux ignores ispeed; ospeed sets both
         B500000    = termios.CBAUDEX | 0o05
         B576000    = termios.CBAUDEX | 0o06
         B921600    = termios.CBAUDEX | 0o07
@@ -537,23 +537,31 @@ except ValueError:
 def debugtrace_only( fn ):
     def debug_excepthook( exc, val, sta ):
         sys.excepthook = sys.__excepthook__
-        if os.getenv( 'PYSTTY_DEBUG' ):
+        debug = os.getenv( 'PYSTTY_DEBUG' ) or '0'
+        if debug.lower() not in ('0', 'no', 'off', 'false', 'disable'):
             return sys.__excepthook__( exc, val, sta )
         else:
+            tblist = []
             tb = sta
             while tb.tb_next:
+                tblist.append( tb )
                 tb = tb.tb_next
             fr = tb.tb_frame     # last (innermost) frame
-            if isinstance( val, (termios.error, IOError) ):
+            f_name = fr.f_code.co_name
+            if f_name in ('_chkspeed',):
+                # skip over wrapper
+                f_name = tblist[-2].tb_frame.f_code.co_name
+            if 'self' in fr.f_locals:
                 args = [ fr.f_locals[ 'self' ].fd_name ]
                 args.extend( val.args[1:] )
             else:
                 args = list( val.args )
             print( os.path.basename( sys.argv[0] ) or exc.__name__,
-                   fr.f_code.co_name,
+                   f_name,
                    *args,
                    sep  = ': ',
                    file = sys.stderr )
+
 
     @functools.wraps( fn )
     def wrapper( *args, **kwargs ):
@@ -570,57 +578,62 @@ def debugtrace_only( fn ):
 class Stty( object ):
     cctrans = None
 
+
     def __init__( self, fd=sys.stdin, when=termios.TCSANOW ):
         self.open( fd )
         self.when    = when
         self._attr   = None
 
+
+    @classmethod
+    def _byteconv( self, c ):
+        'Convert ints to str and then str to bytes (binary str) if necessary.'
+        if bytes is str:                 # python2
+            if   isinstance( c, int ):   return chr( c )
+            else:                        return c
+        else:                            # python3
+            if   isinstance( c, bytes ): return c
+            elif isinstance( c, int ):   return bytes( (c,) )
+            else:                        return bytes( ord( x ) for x in c )
+
+
     @classmethod
     def _cctrans_init( self ):
         if self.cctrans: return
-
-        self.cctrans = {}
-        seq = { ''        : '\x00',
-                '^-'      : '\x00',
-                'NUL'     : '\x00',
-                'NULL'    : '\x00',
-                'UNDEF'   : chr( PC_VDISABLE ),
-                '<UNDEF>' : chr( PC_VDISABLE ),
-                'BS'      : '\x08',
-                'TAB'     : '\x09',
-                'NL'      : '\x0a',
-                'LF'      : '\x0a',
-                'LFD'     : '\x0a',
-                'CR'      : '\x0d',
-                'RET'     : '\x0d',
-                'ESC'     : '\x1b',
-                'SP'      : '\x20',
-                'SPC'     : '\x20',
-                'DEL'     : '\x7f', }
+        b = self._byteconv  # for brevity
+        cctrans = self.cctrans = {}
+        cctrans[ 'C-?' ]  = b( '\x7f' )
+        seq = { ''        : b( PC_VDISABLE ),
+                'NUL'     : b( '\x00' ),
+                'NULL'    : b( '\x00' ),
+                'undef'   : b( PC_VDISABLE ),
+                '<undef>' : b( PC_VDISABLE ),
+                'BS'      : b( '\x08' ),
+                'TAB'     : b( '\x09' ),
+                'NL'      : b( '\x0a' ),
+                'LF'      : b( '\x0a' ),
+                'LFD'     : b( '\x0a' ),
+                'CR'      : b( '\x0d' ),
+                'RET'     : b( '\x0d' ),
+                'ESC'     : b( '\x1b' ),
+               #'SP'      : b( '\x20' ),
+               #'SPC'     : b( '\x20' ),
+                'DEL'     : b( '\x7f' ),
+                '^?'      : b( '\x7f' ), }
         for s in seq:
-            self.cctrans[ s.upper() ] = seq[ s ]
-            self.cctrans[ s.lower() ] = seq[ s ]
-        for c in range( 0, 31 ):
-            xlate = [ c,
-                      chr( c ),
-                      '0{:01o}'.format( c ),  # 07
-                      '0{:02o}'.format( c ),  # 007
-                      '0{:03o}'.format( c ),  # 0007
-                      '{:#03o}'.format( c ),  # 0o7
-                      '{:#04o}'.format( c ),  # 0o07
-                      '{:#05o}'.format( c ),  # 0o007
-                      '{:#03x}'.format( c ),  # 0xa
-                      '{:#04x}'.format( c ),  # 0x0a
-                      '^'  + chr( c ^ 1<<6 ),
-                      'C-' + chr( c ^ 1<<6 ), ]
-            char = chr( c )
-            for seq in xlate:
-                self.cctrans[ seq ] = char
-                try:
-                    self.cctrans[ seq.upper() ] = char
-                    self.cctrans[ seq.lower() ] = char
-                except AttributeError:
-                    pass # 'int' object has no attribute 'upper'
+            cctrans[ s.upper() ] = seq[ s ]
+            cctrans[ s.lower() ] = seq[ s ]
+        for c in range( 0, 32 ):
+            hi = chr( c | 1<<6 )  # uppercase
+            xlate = [ chr( c ), '^'+hi, 'C-'+hi ]
+            # after ^Z, don't set bit 5 for lowercase
+            if 0 < c < 27:
+                lo = chr( c | 3<<5 )
+                xlate.extend( ('^'+lo, 'C-'+lo,) )
+            char = b( c )
+            for s in xlate:
+                cctrans[ s ] = char
+
 
     @debugtrace_only
     def open( self, _file ):
@@ -632,15 +645,18 @@ class Stty( object ):
             self.fd_name = _file
             self.fd = os.open( _file, fl)
 
+
     @staticmethod
+    @debugtrace_only
     def _chkspeed( speed ):
         try:
             sp = SPEED[ speed ] # might be None
         except KeyError:
             sp = None
         if sp is None:
-            raise OSError( speed + ': unsupported speed' )
+            raise OSError( '"{}": unsupported speed'.format( speed ))
         return sp
+
 
     @debugtrace_only
     def tcgetattr( self, reset=False ):
@@ -648,10 +664,12 @@ class Stty( object ):
             self._attr = termios.tcgetattr( self.fd )
         return self._attr
 
+
     @debugtrace_only
     def tcsetattr( self, when=termios.TCSANOW ):
         self.tcgetattr()
         return termios.tcsetattr ( self.fd, when, self._attr )
+
 
     def Xflag( self, c_elt, flag=None, set=None ):
         self.tcgetattr()
@@ -670,12 +688,14 @@ class Stty( object ):
             self._attr[ c_elt ] |= set
         return self._attr[ c_elt ]
 
+
     def sane_default( self, arg ):
         if arg[0] == '-':
             data = FLAG[ arg[1:] ]
         else:
             data = FLAG[ arg ]
         return data[ FL_SANE_SETTING ]
+
 
     @debugtrace_only
     def setflag( self, arg ):
@@ -693,25 +713,31 @@ class Stty( object ):
             val = data[ FL_FIELD_VALUE ]
         return self.Xflag( data[ FL_XFLAG ], data[ FL_FIELD ], val )
 
+
     def getispeed( self ):
         self.tcgetattr()
         return self._attr[ TC_ISPEED ]
+
 
     def setispeed( self, speed ):
         self.tcgetattr()
         self._attr[ TC_ISPEED ] = self._chkspeed( speed )
 
+
     def getospeed( self ):
         self.tcgetattr()
         return self.Xflag( TC_OSPEED )
+
 
     def setospeed( self, speed ):
         self.tcgetattr()
         self._attr[ TC_OSPEED ] = self._chkspeed( speed )
 
+
     def getcc( self, key ):
         self.tcgetattr()
         return self._attr[ TC_CC ][ key ]
+
 
     @debugtrace_only
     def setcc( self, key, char ):
@@ -720,28 +746,33 @@ class Stty( object ):
             char = int( char )
         else:
             if isinstance( char, int ):
-                if bytes is str:  # python2
-                    char = chr( char & 0xff )
-                else:
-                    # data must be binary for python3
-                    char = bytes( (char,) )
-            elif len( char ) > 2 and char[0] == '^':
-                char = char[0:2]
-
+                char = chr( char )
             self._cctrans_init()
             try:
                 char = self.cctrans[ char ]
             except KeyError as err:
                 if len( char ) > 1:
-                    # KeyError.args will be forced into a tuple,
-                    # so we can't modify anything assigned to it.
-                    # Some baroque machinations here to accomodate python2.
-                    nargs = list( err.args )
-                    nargs.append( 'unrecognized character sequence' )
-                    err.args = nargs
-                    raise
+                    c2 = char[0:2]
+                    if   c2 in ( '0x', '\\x' ):
+                        char = int( char[2:], base=16 )
+                    elif c2 in ( '0o', '\\0' ):
+                        char = int( char[2:], base=8  )
+                    elif c2[0] == '\\' and len( char ) == 4:
+                        char = int( char[1:], base=8 )
+                    elif all( c in '0123456789' for c in char ):
+                        char = int( char )
+                    else:
+                        # KeyError.args will be forced into a tuple,
+                        # so we can't modify anything assigned to it.
+                        # Some baroque machinations here to accomodate python2.
+                        nargs = list( err.args )
+                        nargs.append( 'unrecognized character sequence' )
+                        err.args = nargs
+                        raise
+                char = self._byteconv( char )
         self._attr[ TC_CC ][ key ] = char
         return char
+
 
     @debugtrace_only
     def getwinsz( self, fd=None ):
@@ -751,12 +782,14 @@ class Stty( object ):
             self._winsz = winsz
         return winsz
 
+
     @debugtrace_only
     def setwinsz( self, fd=None, winsz=None ):
         if not winsz:
             winsz = self._winsz
         raw = struct.pack( '@4H', *winsz )
         return fcntl.ioctl( fd or self.fd, termios.TIOCSWINSZ, raw )
+
 
     @debugtrace_only
     def getldisc( self ):
@@ -767,6 +800,7 @@ class Stty( object ):
         except (OSError, AttributeError):
             pass # TIOCGETD undefined/unimplemented on cygwin, VMkernel, etc.
 
+
     @debugtrace_only
     def setldisc( self, n ):
         try:
@@ -774,6 +808,7 @@ class Stty( object ):
         except struct.error as err:
             raise OSError( self, 'unknown line discipline "{}"'.format( n ))
         return fcntl.ioctl( self.fd, termios.TIOCSETD, raw )
+
 
     def ldisc_name_maps( self ):
         names = list( n for n in dir( _termios ) if n.find( 'N_' ) == 0 )
@@ -801,6 +836,7 @@ class Stty( object ):
                     termios.TCSADRAIN : getattr( termios, 'TCSETSW', None ),
                     termios.TCSAFLUSH : getattr( termios, 'TCSETSF', None ), }
 
+
     @debugtrace_only
     def _tcgets( self, reset=False ):
         try:
@@ -811,6 +847,7 @@ class Stty( object ):
         except (KeyError, AttributeError):
             pass
 
+
     @debugtrace_only
     def _tcsets( self, attr ):
         template = self.tcgets_param[ OS ][ 'template' ]
@@ -818,10 +855,12 @@ class Stty( object ):
         when = self.tcsets_when[ self.when ]
         return fcntl.ioctl( self.fd, when, raw )
 
+
     def getcline( self ):
         attr = self._tcgets()
         if attr:
             return attr[ self.tcgets_param[ OS ][ 'TC_LINE' ] ]
+
 
     @debugtrace_only
     def setcline( self, line ):
@@ -837,11 +876,13 @@ class Stty( object ):
             except struct.error as err:
                 raise OSError( self, 'unknown line discipline "{}"'.format( line ))
 
+
     def save( self, verbose=False ):
         if verbose:
             return self._save_gpysttyv()
         else:
             return self._save_gpysttyc()
+
 
     def _save_gpysttyc( self ):
         g = [ 'gpysttyc' ]
@@ -856,6 +897,7 @@ class Stty( object ):
             else:
                 g.append( '{:x}'.format( data ) )
         return str.join( ':', g )
+
 
     def _save_gpysttyv( self ):
         g = [ 'gpysttyv' ]
@@ -878,12 +920,14 @@ class Stty( object ):
                 g.append( '{}={:x}'.format( name, data ))
         return str.join( ':', g )
 
+
     def restore( self, saved ):
         ga = saved.split( ':' )
         fn_name = '_restore_{}'.format( ga.pop( 0 ) )
         fn = getattr( self, fn_name, None )
         if callable( fn ):
             fn( ga )
+
 
     def _restore_gpysttyc( self, ga ):
         attr = self.tcgetattr()
@@ -894,6 +938,7 @@ class Stty( object ):
             else:
                 attr[ n ] = int( data, base=16 )
         return self.tcsetattr()
+
 
     def _restore_gpysttyv( self, ga ):
         attr = self.tcgetattr()
@@ -922,6 +967,7 @@ def stdocols( fd=sys.stdout ):
     except (IOError, IndexError):
         return stdowidth
 
+
 def fold( flags, maxlen=stdowidth, indent=0, sep=' ' ):
     lines   = []
     current = []
@@ -942,12 +988,39 @@ def fold( flags, maxlen=stdowidth, indent=0, sep=' ' ):
     linesep = '\n' + ' ' * indent
     return linesep.join( lines )
 
+
+dispchar_special = {
+    0x09  :   'TAB', # '\\t',
+    0x1d  :   'RET', # '\\r', 'CR',
+    0x1b  :   'ESC', # '\\e',
+    0x20  :   'SPC', # less ambiguous than a blank
+    0x7f  :   'DEL',
+    0x89  : 'M-TAB',
+    0x8d  : 'M-RET',
+    0x9b  : 'M-ESC',
+    0xa0  : 'M-SPC',
+    0xff  : 'M-DEL',
+}
+
 def dispchar( c, args=None ):
+    cm = 'C-M-' # "C-M-a" - Emacs convention
+    disp_special = dispchar_special
+    try:
+        if not args.emacs:
+            disp_special = {}
+            cm  = 'M-^' # "M-^A"  - BSD and GNU stty convention
+    except AttributeError:
+        pass
     n = ord( c )
-    if n == PC_VDISABLE: return '<undef>'
-    if n < 31:           return '^' + chr( n ^ 1<<6 )
-    if n == 0x7f:        return '^?'
-    else:                return c
+    if n == PC_VDISABLE  : return '<undef>'
+    if n in disp_special : return disp_special[ n ]
+    if        n  < 0x20  : return '^'  + chr( n ^ 0b01000000 )
+    if        n == 0x7f  : return '^'  + chr( n ^ 0b01000000 )
+    if 0x7f < n  < 0xa0  : return cm   + chr( n ^ 0b11000000 )
+    if 0x9f < n  < 0xff  : return 'M-' + chr( n ^ 0b10000000 )
+    if        n == 0xff  : return cm   + chr( n ^ 0b11000000 )
+    else                 : return chr( n )
+
 
 def make_display_values( tty, args ):
     ispeed = NTOSPEED[ tty.getispeed() ]
@@ -1111,6 +1184,22 @@ def display_bsd( tty, args ):
             print( pair[1] )
 
 
+def display_flags( tty, args, flag_group ):
+    _, _, values = make_display_values( tty, args )
+    flagset = values[ FLAG_LABEL[ flag_group ] ]
+    for elt in flagset:
+        if elt[0] == '-':  print(     elt )
+        else:              print( '', elt )
+
+
+def display_cchars( tty, args ):
+    args.all = True
+    _, cchars, _ = make_display_values( tty, args )
+    width = max( len( elt[0] ) for elt in cchars )
+    for elt in cchars:
+        print( '{:<{width}} = {}'.format( *elt, width=width ))
+
+
 def diff_against_sane( tty, args ):
     line1, char, values = make_display_values( tty, args )
     sanelist = ALIAS[ 'sane' ]
@@ -1169,15 +1258,31 @@ class ArgParser( argparse.ArgumentParser ):
 
 
 def get_args():
+    help = {
+        'file'     : 'open and use the specified DEVICE instead of stdin',
+        'all'      : 'print all current settings in human-readable form',
+        'bsd'      : 'print all current settings in traditional BSD'
+                     ' "all" and "everything" formats',
+        'save'     : 'print all current settings in stty-readable form',
+        'emacs'    : 'Display characters in Emacs notation',
+        'ctlchars' : 'Display characters in control char notation',
+        'align'    : 'Align output into columns',
+        'wide'     : 'Do not wrap lines',
+        'verbose'  : 'Extended output', }
+
     p = ArgParser( description='Print or change terminal characteristics.' )
-    p.add_argument( '-F', '-f', '--file', dest='device', default=sys.stdin, help='open and use the specified DEVICE instead of stdin')
+    p.add_argument( '-F', '-f', '--file', dest='device', default=sys.stdin,    help=help['file'])
     p_x = p.add_mutually_exclusive_group()
-    p_x.add_argument( '-a', '--all',     action='store_true', default=False, help='print all current settings in human-readable form' )
-    p_x.add_argument( '-e', '--bsd',     action='store_true', default=False, help='print all current settings in traditional BSD "all" and "everything" formats' )
-    p_x.add_argument( '-g', '--save',    action='store_true', default=False, help='print all current settings in stty-readable form' )
-    p.add_argument(   '-c', '--align',   action='store_true', default=False, help='Align output into columns' )
-    p.add_argument(   '-w', '--wide',    action='store_true', default=False, help='Do not wrap lines' )
-    p.add_argument(   '-v', '--verbose', action='store_true', default=False, help='Extended output' )
+    p_x.add_argument( '-a',  '--all',      action='store_true', default=False, help=help['all'] )
+    p_x.add_argument( '-e',  '--bsd',      action='store_true', default=False, help=help['bsd'] )
+    p_x.add_argument( '-g',  '--save',     action='store_true', default=False, help=help['save'] )
+    p_x2 = p.add_mutually_exclusive_group()
+    p_x2.add_argument( '-E', '--emacs',    action='store_true', default=False, help=help['emacs'] )
+    p_x2.add_argument( '-C', '--ctlchars', action='store_true', default=False, help=help['ctlchars'])
+    p.add_argument(    '-c', '--align',    action='store_true', default=False, help=help['align'] )
+    p.add_argument(    '-w', '--wide',     action='store_true', default=False, help=help['wide'] )
+    p.add_argument(    '-v', '--verbose',  action='store_true', default=False, help=help['verbose'] )
+
     args, unknown = p.parse_known_args()
     args.setting = unknown
     return args
@@ -1186,8 +1291,9 @@ def main():
     args = get_args()
     tty = Stty( fd=args.device )
 
-    showable_args = [ 'size', 'speed', 'ispeed', 'ospeed',
-                      'line', 'ldisc', 'cline', 'c_line', ]
+    showable_args = [
+        'speed', 'ispeed', 'ospeed', 'line',   'ldisc',  'cline',  'c_line',
+        'size',  'chars',  'cchars', 'iflags', 'oflags', 'cflags', 'lflags', ]
     showable_args.extend( TERMSZ.keys() )
 
     try:
@@ -1212,9 +1318,17 @@ def main():
         tty.restore( arg1 )
 
     elif slen == 1 and arg1 in showable_args:
-        if arg1 in ('size') or arg1 in TERMSZ.keys():
+        if arg1.find( 'speed' ) in (0, 1):
+            ispeed = NTOSPEED[ tty.getispeed() ]
+            ospeed = NTOSPEED[ tty.getospeed() ]
+            if   arg1 in ('ispeed',): print( ispeed )
+            elif arg1 in ('ospeed',): print( ospeed )
+            elif ispeed == ospeed:    print( ospeed )
+            else:                     print( ispeed, ospeed )
+
+        elif arg1 in ('size',) or arg1 in TERMSZ.keys():
             winsz = tty.getwinsz()
-            if arg1 in ('size'):
+            if arg1 in ('size',):
                 res = [ winsz[ WS_ROW ], winsz[ WS_COL ] ]
                 if winsz[ WS_XPIXEL ] or winsz[ WS_YPIXEL ]:
                     res.extend( winsz[ WS_XPIXEL ], winsz[ WS_YPIXEL ] )
@@ -1225,23 +1339,22 @@ def main():
             elif arg1 in termsz_ypix: print( winsz[ WS_YPIXEL ] )
 
         elif arg1 in ('line', 'ldisc'):
-            line = tty.getldisc()
-            print( line )
+            print( tty.getldisc() )
+
         elif arg1 in ('cline', 'c_line'):
             cline = tty.getcline()
             if cline is None:
                 cline = tty.getldisc()
-                print( cline )
+            print( cline )
 
-        elif arg1.find( 'speed' ) in (0, 1):
-            ispeed = NTOSPEED[ tty.getispeed() ]
-            ospeed = NTOSPEED[ tty.getospeed() ]
-            if   arg1 in ('ispeed'): print( ispeed )
-            elif arg1 in ('ospeed'): print( ospeed )
-            elif ispeed == ospeed:   print( ospeed )
-            else:                    print( ispeed, ospeed )
+        elif arg1 in ('iflags', 'oflags', 'cflags', 'lflags'):
+            display_flags( tty, args, arg1 )
+
+        elif arg1 in ('chars', 'cchars' ):
+            display_cchars( tty, args )
+
         else:
-            raise Exception # shouldn't ever get here
+            raise Exception( 'This should not happen' )
     else:
         tty.tcgetattr( reset=True )
         # Expand any aliases
@@ -1269,7 +1382,7 @@ def main():
             elif arg in TERMSZ:
                 size = int( settings.pop( 0 ) )
                 winsz = tty.getwinsz()
-                winsz[ TERMSZ[ arg ][0] ] = size
+                winsz[ TERMSZ[ arg ] ] = size
                 tty.setwinsz()
 
             elif arg in [ 'line', 'ldisc', 'cline', 'c_line' ]:
@@ -1288,6 +1401,9 @@ def main():
             else:
                 tty.setflag( arg )
         tty.tcsetattr()
+        if args.verbose:
+            args.all = args.verbose
+            display_all( tty, args )
 
 
 if __name__ == '__main__':
