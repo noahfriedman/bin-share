@@ -59,7 +59,7 @@ class PseudoTermios( object ):
 
     # Assigned at class definition time.
     if OS == 'Linux':
-        # n.b linux ignores ispeed; ospeed sets both
+        # n.b linux doesn't implement ispeed; ospeed sets both
         B500000    = termios.CBAUDEX | 0o05
         B576000    = termios.CBAUDEX | 0o06
         B921600    = termios.CBAUDEX | 0o07
@@ -1174,6 +1174,34 @@ def display_cchars( tty, args ):
         print( '{:<{width}} = {}'.format( *elt, width=width ))
 
 
+def display_bits( tty, args ):
+    attr = tty.tcgetattr()
+
+    wb = 8
+    while any( (fl != (fl & ((1 << wb) - 1) )) for fl in attr[:-1] ): wb += 8
+    wo = 1 + wb // 3
+    wx = wb // 4
+
+    if args.wide:
+        try:
+            _support = True
+            '{:#_b}'.format( 0 )
+        except ValueError:
+            _support = False
+    if args.wide and _support:
+        wb += (wb//4) - 1
+        wo += (wo//3)
+        wx += (wx//8)
+        fmt = ('{0}', 'b: {1:0{4}_b}', 'o: {1:0{3}_o}', 'x: {1:0{2}_x}')
+    else:
+        fmt = ('{0}', 'b: {1:0{4}b}',  'o: {1:0{3}o}',  'x: {1:0{2}x}' )
+
+    fmt = '    '.join( fmt )
+    for i, fl in enumerate( attr[:-1] ):
+        name = FLAG_LABEL[ i ]
+        print( fmt.format( name, fl, wx, wo, wb ))
+
+
 def diff_against_sane( tty, args ):
     line1, char, values = make_display_values( tty, args )
     sanelist = ALIAS[ 'sane' ]
@@ -1267,7 +1295,8 @@ def main():
 
     showable_args = [
         'speed', 'ispeed', 'ospeed', 'line',   'ldisc',  'cline',  'c_line',
-        'size',  'chars',  'cchars', 'iflags', 'oflags', 'cflags', 'lflags', ]
+        'size',  'chars',  'cchars', 'iflags', 'oflags', 'cflags', 'lflags',
+        'bits', ]
     showable_args.extend( TERMSZ.keys() )
 
     try:
@@ -1327,6 +1356,9 @@ def main():
         elif arg1 in ('chars', 'cchars' ):
             display_cchars( tty, args )
 
+        elif arg1 in ('bits',):
+            display_bits( tty, args )
+
         else:
             raise Exception( 'This should not happen' )
     else:
@@ -1363,7 +1395,7 @@ def main():
                 winsz[ TERMSZ[ arg ] ] = size
                 tty.setwinsz()
 
-            elif arg in [ 'line', 'ldisc', 'cline', 'c_line' ]:
+            elif arg in ( 'line', 'ldisc', 'cline', 'c_line' ):
                 disc = settings.pop( 0 )
                 try:
                     disc = int( disc )
