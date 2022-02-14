@@ -55,13 +55,7 @@ class PseudoTermios( object ):
 
     @classmethod
     def __getattribute__( self, attr ):
-        try:
-            return getattr( termios, attr )
-        except AttributeError:
-            try:
-                return getattr( self, attr )
-            except AttributeError:
-                return False
+        return getattr( termios, attr, getattr( self, attr, False ))
 
     # Assigned at class definition time.
     if OS == 'Linux':
@@ -89,7 +83,7 @@ class PseudoTermios( object ):
         CERASE2    = CTRL( 'H' )
         CKILL      = CTRL( 'U' )
         CEOF       = CTRL( 'D' )
-        CEOL       = CTRL( '@' )
+        CEOL       = CTRL( '@' ) # PC_VDISABLE
         CSTART     = CTRL( 'Q' )
         CSTOP      = CTRL( 'S' )
         CSUSP      = CTRL( 'Z' )
@@ -112,6 +106,7 @@ class PseudoTermios( object ):
         N_NULL     = 27 # Null ldisc used for error handling
 
     elif OS == 'FreeBSD':
+        # Unlike linux, the freebsd speeds are pretty direct.
         B7200      =   7200
         B14400     =  14400
         B28800     =  28800
@@ -172,6 +167,7 @@ FLAG_LABEL = { TC_IFLAG  : 'iflags',
 # Add inverse of the above
 FLAG_LABEL.update( { v : k for k, v in FLAG_LABEL.items() } )
 
+
 _Enum( 'FLL_NAME',	# fields in FLAG_LIST
        'FLL_XFLAG',
        'FLL_FIELD',
@@ -179,7 +175,6 @@ _Enum( 'FLL_NAME',	# fields in FLAG_LIST
        'FLL_SANE_SETTING',
        'FLL_POSIX',
        'FLL_HELP', )
-
 
 # This table is ordered the same as their numeric bit values on Linux,
 # and by ancestral heredity is mostly the same on other platforms too.
@@ -268,8 +263,8 @@ FLAG_LIST = (
     ( 'nokerninfo', TC_LFLAG, _termios.NOKERNINFO, None,     None,  False, 'Enable status line when STATUS char detected' ), # bsd
 )
 # If you really wanted to sort the output, you could do so here.
-# Some sort key options: 0 for alphabetic, 2 for bit order
-#FLAG_LIST = sorted( FLAG_LIST, key=lambda row: row[2] )
+# Some sort key options: FLL_NAME for alphabetic, FLL_FIELD for bit order
+#FLAG_LIST = sorted( FLAG_LIST, key=lambda row: row[FLL_NAME] )
 
 
 _Enum( 'FL_XFLAG',	# fields in FLAG
@@ -281,43 +276,9 @@ _Enum( 'FL_XFLAG',	# fields in FLAG
 
 FLAG = { elt[ 0 ] : elt[ 1: ] for elt in FLAG_LIST }
 
-SPEED = {
-          '0' : _termios.B0,
-         '50' : _termios.B50,
-         '75' : _termios.B75,
-        '110' : _termios.B110,
-        '134' : _termios.B134,
-        '150' : _termios.B150,
-        '200' : _termios.B200,
-        '300' : _termios.B300,
-        '600' : _termios.B600,
-       '1200' : _termios.B1200,
-       '1800' : _termios.B1800,
-       '2400' : _termios.B2400,
-       '4800' : _termios.B4800,
-       '7200' : _termios.B7200,
-       '9600' : _termios.B9600,
-      '14400' : _termios.B14400,
-      '19200' : _termios.B19200,
-      '28800' : _termios.B28800,
-      '38400' : _termios.B38400,
-      '57600' : _termios.B57600,
-      '76800' : _termios.B76800,
-     '115200' : _termios.B115200,
-     '230400' : _termios.B230400,
-     '460800' : _termios.B460800,
-     '500000' : _termios.B500000,
-     '576000' : _termios.B576000,
-     '921600' : _termios.B921600,
-    '1000000' : _termios.B1000000,
-    '1152000' : _termios.B1152000,
-    '1500000' : _termios.B1500000,
-    '2000000' : _termios.B2000000,
-    '2500000' : _termios.B2500000,
-    '3000000' : _termios.B3000000,
-    '3500000' : _termios.B3500000,
-    '4000000' : _termios.B4000000, }
-
+SPEED = { k[1:] : getattr( _termios, k )
+          for k in dir( _termios )
+          if k[0] == 'B' and k[1] in '0123456789' }
 NTOSPEED = { v : k for k, v in SPEED.items() }
 
 _Enum( 'CC_PARAM_LIST_NAME',
@@ -551,9 +512,15 @@ def debugtrace_only( fn ):
             if f_name in ('_chkspeed',):
                 # skip over wrapper
                 f_name = tblist[-2].tb_frame.f_code.co_name
-            if 'self' in fr.f_locals:
-                args = [ fr.f_locals[ 'self' ].fd_name ]
-                args.extend( val.args[1:] )
+            if issubclass( exc, termios.error ):
+                if 'self' in fr.f_locals:
+                    args = [ fr.f_locals[ 'self' ].fd_name ]
+                    if len( val.args ) > 1:
+                        args.extend( val.args[1:] )
+                    else:
+                        args.extend( val.args )
+                else:
+                    args = val.args
             else:
                 args = list( val.args )
             print( os.path.basename( sys.argv[0] ) or exc.__name__,
@@ -576,9 +543,6 @@ def debugtrace_only( fn ):
     return wrapper
 
 class Stty( object ):
-    cctrans = None
-
-
     def __init__( self, fd=sys.stdin, when=termios.TCSANOW ):
         self.open( fd )
         self.when    = when
@@ -596,6 +560,8 @@ class Stty( object ):
             elif isinstance( c, int ):   return bytes( (c,) )
             else:                        return bytes( ord( x ) for x in c )
 
+
+    cctrans = None
 
     @classmethod
     def _cctrans_init( self ):
@@ -705,7 +671,7 @@ class Stty( object ):
             else:
                 data = FLAG[ arg ]
         except KeyError as e:
-            e.args = ( e.args[0], 'Unknown or unsupported argument' )
+            e.args = ( arg, 'Invalid or unsupported argument' )
             raise
         if data[ FL_FIELD_VALUE ] is None:
             val = bool( arg[0] != '-' )
@@ -751,25 +717,16 @@ class Stty( object ):
             try:
                 char = self.cctrans[ char ]
             except KeyError as err:
-                if len( char ) > 1:
-                    c2 = char[0:2]
-                    if   c2 in ( '0x', '\\x' ):
-                        char = int( char[2:], base=16 )
-                    elif c2 in ( '0o', '\\0' ):
-                        char = int( char[2:], base=8  )
-                    elif c2[0] == '\\' and len( char ) == 4:
-                        char = int( char[1:], base=8 )
-                    elif all( c in '0123456789' for c in char ):
-                        char = int( char )
-                    else:
-                        # KeyError.args will be forced into a tuple,
-                        # so we can't modify anything assigned to it.
-                        # Some baroque machinations here to accomodate python2.
-                        nargs = list( err.args )
-                        nargs.append( 'unrecognized character sequence' )
-                        err.args = nargs
-                        raise
-                char = self._byteconv( char )
+                conv_result = intconv( char )
+                if conv_result is None:
+                    # KeyError.args will be forced into a tuple,
+                    # so we can't modify anything assigned to it.
+                    # Some baroque machinations here to accomodate python2.
+                    nargs = list( err.args )
+                    nargs.append( 'unrecognized character sequence' )
+                    err.args = nargs # converted to suple
+                    raise
+                char = self._byteconv( conv_result )
         self._attr[ TC_CC ][ key ] = char
         return char
 
@@ -957,6 +914,20 @@ class Stty( object ):
         return self.tcsetattr()
 
 
+def intconv( arg ):
+    if isinstance( arg, int ): return arg
+    l = len( arg )
+    if l > 1:
+        c2 = arg[0:2]
+        if   c2 in ( '0x', '#x', '\\x' ): return int( arg[2:], base=16 )
+        elif c2 in ( '0o', '#o', '\\0' ): return int( arg[2:], base= 8 )
+        elif c2 in ( '0b', '#b', '\\b' ): return int( arg[2:], base= 2 )
+        elif c2[0] == '\\' and l == 4:    return int( arg[1:], base= 8 )
+        elif all( c in '0123456789' for c in arg ): return int( arg )
+    elif     all( c in '0123456789' for c in arg ): return int( arg )
+    return None
+
+
 stdowidth = 75
 
 def stdocols( fd=sys.stdout ):
@@ -1374,6 +1345,10 @@ def main():
                 speed = settings.pop( 0 )
                 if arg[0] in ('i', 's'): tty.setispeed( speed )
                 if arg[0] in ('o', 's'): tty.setospeed( speed )
+            elif intconv( arg ) is not None:
+                # If it's not in SPEED, it's not valid,
+                # but let this method do the admonition.
+                tty._chkspeed( arg )
 
             elif arg in CC_PARAM:
                 param = CC_PARAM[ arg ]
