@@ -719,13 +719,16 @@ class Stty( object ):
             except KeyError as err:
                 conv_result = intconv( char )
                 if conv_result is None:
-                    # KeyError.args will be forced into a tuple,
-                    # so we can't modify anything assigned to it.
-                    # Some baroque machinations here to accomodate python2.
-                    nargs = list( err.args )
-                    nargs.append( 'unrecognized character sequence' )
-                    err.args = nargs # converted to suple
-                    raise
+                    if len( char ) > 1:
+                        # KeyError.args will be forced into a tuple,
+                        # so we can't modify anything assigned to it.
+                        # Some baroque machinations here to accomodate python2.
+                        nargs = list( err.args )
+                        nargs.append( 'unrecognized character sequence' )
+                        err.args = nargs # converted to suple
+                        raise
+                    else:
+                        conv_result = char
                 char = self._byteconv( conv_result )
         self._attr[ TC_CC ][ key ] = char
         return char
