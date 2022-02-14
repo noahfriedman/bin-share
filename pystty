@@ -725,7 +725,7 @@ class Stty( object ):
                         # Some baroque machinations here to accomodate python2.
                         nargs = list( err.args )
                         nargs.append( 'unrecognized character sequence' )
-                        err.args = nargs # converted to suple
+                        err.args = nargs # converted to tuple
                         raise
                     else:
                         conv_result = char
