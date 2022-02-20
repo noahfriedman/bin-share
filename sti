@@ -50,8 +50,8 @@ def main():
         for line in args.string:
             line = line.replace( '\\n', '\n' )
             sti( args.tty, line )
-        if args.final_newline and line[-1] != '\n':
-            sti( args.tty, '\n' )
+            if args.final_newline and (line == '' or line[-1] != '\n'):
+                sti( args.tty, '\n' )
 
     elif args.file:
         sti( args.tty, args.file.read() )
