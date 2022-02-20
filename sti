@@ -13,7 +13,7 @@ import tty
 
 def get_args():
     help = {
-        'desc' : 'Send data to tty input buffers.'
+        'desc' : 'Send data to tty input buffers.',
         'tty'  : 'full tty path as given by the `tty` command',
         'n'    : 'prevent sending a trailing newline character',
         'r'    : 'raw mode; do not use yet',
