@@ -1,0 +1,97 @@
+#!/usr/bin/env python
+# sti --- stuff input
+
+# 2022-02-19 Noah Friedman <friedman@splode.com>
+# Public domain
+
+import argparse
+import fcntl
+import os
+import sys
+import tty
+
+
+def get_args():
+    help = {
+        'desc' : 'Send data to tty input buffers.'
+        'tty'  : 'full tty path as given by the `tty` command',
+        'n'    : 'prevent sending a trailing newline character',
+        'r'    : 'raw mode; do not use yet',
+        's'    : 'copy input from string to tty',
+        'f'    : 'copy input from file to tty',
+        'i'    : 'copy input from stdin to tty',
+    }
+
+    p = argparse.ArgumentParser( description='Send data to tty input buffers.' )
+    p.add_argument( 'tty', type=argparse.FileType( 'w' ), help=help['tty'] )
+
+    p.add_argument( '-n', dest='final_newline', action='store_false', default=True,  help=help['n'] )
+    p.add_argument( '-r', dest='raw',           action='store_true',  default=False, help=help['r'] )
+
+    p_x = p.add_mutually_exclusive_group( required=True )
+    p_x.add_argument( '-s', dest='string',      action='append',                     help=help['s'] )
+    p_x.add_argument( '-f', dest='file',        type=argparse.FileType( 'r' ),       help=help['f'] )
+    p_x.add_argument( '-i', dest='interactive', action= 'store_true', default=False, help=help['i'] )
+
+    return p.parse_args()
+
+
+def sti( fh, *bufs ):
+    fd  = fh if isinstance( fh, int ) else fh.fileno()
+    req = tty.TIOCSTI
+    for buf in bufs:
+        for c in buf:
+            fcntl.ioctl( fd, req, c )
+
+def main():
+    args = get_args()
+
+    if args.string:
+        for line in args.string:
+            line = line.replace( '\\n', '\n' )
+            sti( args.tty, line )
+        if args.final_newline and line[-1] != '\n':
+            sti( args.tty, '\n' )
+
+    elif args.file:
+        sti( args.tty, args.file.read() )
+
+    elif args.interactive:
+        infile = sys.stdin
+
+        if not os.isatty( infile.fileno() ):
+            sti( args.tty, infile.read() )
+
+        elif args.raw:
+            # FIXME This needs work. This lets you send any character, but
+            # how do you signal to get out of this mode and exit?
+            tcattr = tty.tcgetattr( infile )
+            lnext = chr( ord( tcattr[ -1 ][ tty.VLNEXT ] )) # bytes->str
+            try:
+                tty.setraw( infile )
+                while True:
+                    c = infile.read( 1 )
+                    sti( args.tty, infile.read( 1 ))
+            except EOFError:
+                print("* done")
+            finally:
+                tty.tcsetattr( infile, tty.TCSADRAIN, tcattr )
+
+        else:
+            try:
+                read = raw_input
+            except NameError:
+                read = input
+            try:
+                while True:
+                    sti( args.tty, read(), '\n' )
+            except EOFError:
+                pass
+            except KeyboardInterrupt:
+                sys.exit( 130 ) # WIFSIGNALED(128) + SIGINT(2)
+
+
+if __name__ == '__main__':
+    main()
+
+# eof
