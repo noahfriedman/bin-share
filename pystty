@@ -1044,7 +1044,7 @@ def make_display_values( tty, args ):
             continue
         if not args.all:
             dfl = elt[ CC_PARAM_LIST_DFLT ]
-            if dfl is None or ord( val ) == dfl:
+            if dfl is None or val == dfl or ord( val ) == dfl:
                 continue
         if name in ['time', 'min']:
             try:
