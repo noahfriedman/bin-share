@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+lsfmt='%8i %7k  %M  %2n  %-7u  %-7g  %10s  %TY-%Tm-%Td %TH:%TM:%TS %Tz  %p\n'
+
+find=$( type -p gfind || echo find  )
+args=()
+
+for arg in "$@"; do
+    case $arg in
+        -ls ) args+=( -printf "$lsfmt" ) ;;
+        *   ) args+=( "$arg" ) ;;
+    esac
+done
+
+exec "$find" "${args[@]}"
+
+# eof

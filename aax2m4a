@@ -1,0 +1,226 @@
+#!/usr/bin/env perl
+# aax2m4a --- decode aax files to aac
+
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2021-10-10
+# Public domain
+
+# Commentary:
+# Code:
+
+use strict;
+use Carp;
+use Getopt::Long;
+use Pod::Usage;
+use NF::PrintObject qw(:vars :debug :default);
+
+our %opt =
+  ( container   => 'mp3',
+    extension   => 'mp3',
+    codec       => 'libmp3lame',
+    compress    => undef, # Compression level. Can be given for mp3, flac and opus
+
+    mode        => 'chaptered',
+
+    format_dir  => "%{ALBUM_ARTIST} - %{ALBUM}",
+    format_file => "%{ALBUM_ARTIST} - %{ALBUM}",
+    format_chap => "%{ALBUM_ARTIST} - %{ALBUM} - %{TRACK} - %{TITLE}",
+
+    aax_code    => '21ac7a03',
+  );
+
+my @prog_needed = (qw(ffprobe ffmpeg mp4art mp4chaps mediainfo));
+
+my %compress_range = ( flac       => [0, 12],
+                       libopus    => [0, 10],
+                       libmp3lame => [0,  9],
+                     );
+
+# Using `eval' at runtime is pretty questionable, but there's no other
+# reliable way to honor all the escape sequences that perl understands in
+# interpolated strings, especially unicode escape sequences. Besides, we
+# read (and execute) anything in the .fromrc.pl config.
+sub interpolate
+  {
+    local $_ = shift;
+    return $_ unless /\\/;
+
+    my $result = eval "\"$_\"";
+    _error( "\"$_\"", $@ ) if $@;
+    return $result;
+  }
+
+our $errors_fatal   =  0;
+our $debug          =  0;
+(my $progname = $0) =~ s=.*/==;
+
+sub _verbose
+{
+  return unless $^W;
+  my $msg = join( ": ", $progname, @_ );
+  $msg .= "\n" unless substr( $msg, -1, 1 ) eq "\n";
+  print STDERR $msg;
+  return;
+}
+
+sub _error
+{
+  my $msg = join( ": ", $progname, "error", @_ );
+  $msg .= "\n" unless substr( $msg, -1, 1 ) eq "\n";
+
+  if ( $errors_fatal )
+    {
+      #my $pkg = __PACKAGE__;
+      #local $Carp::CarpInternal{$pkg} = 1; # don't show this pkg in backtrace
+      local $Carp::Verbose = $debug;
+      croak $msg;
+    }
+
+  print STDERR $msg;
+  return;
+}
+
+# For rc file convenience.
+sub command_output
+{
+  chomp( local $_ = `@_` );
+  return $_;
+}
+
+sub progressbar
+{
+  my ($part, $total) = @_;
+  my $pct = 100 * $part / $total;
+  my $pp_pct = sprintf( "%3d", $pct );
+  my $bar = ('#' x int( $pct/5 )) . (' ' x (20 - $pct/5));
+
+  my $msg = sprintf( "Chapter splitting: |%s| %s%% (%d/%d chapters)\r",
+                     $bar, $pp_pct, $part, $total );
+  print STDERR $msg;
+}
+
+sub parse_format_string
+{
+  local $_ = shift;
+  my $fmt;
+  my @header;
+
+  my %format_token = ( '{tmsgno}' => 'd',
+                       '{fmsgno}' => 'd',
+                       '{octets}' => 'd',
+                     );
+  my $start = 0;
+  my $hchars = '[\x21-\x24\x26-\x39\x3b-\x5b\x5d-\x7e]';
+  my $re = qr/(?:(?:|[^%]|(?:%%))*)%-?[\d.]*((?:(?:\\\\)+|(?:%%|$hchars))+)/;
+  while ( /$re/gc )
+    {
+      my $h_orig = $1;
+      ( my $h = lc $h_orig ) =~ s=%%=%=g;
+      push @header, $h;
+
+      my $c = defined $format_token{$h} ? $format_token{$h} : 's';
+      $fmt .= substr( $_, $start, pos( $_ ) - $start - length( $h_orig ) ) . $c;
+      $start = pos( $_ );
+    }
+  $fmt .= substr( $_, pos( $_ ));
+
+  unshift @header, $fmt;
+  map { s/\\(.)/$1/g } @header; # unescape \'d chars
+  return wantarray ? @header : \@header;
+}
+
+sub parse_options
+{
+  my $help = -1;
+
+  # Precedence for defs (highest->lowest):
+  # Try $FROMRCPL and only $FROMRCPL if defined.
+  # Otherwise search $XDG_CONFIG_HOME and $HOME for .fromrc.pl.
+  my @rc = (defined $ENV{FROMRCPL}
+            ? $ENV{FROMRCPL}
+            : map { "$ENV{$_}/.fromrc.pl"
+                  } grep { exists $ENV{$_}
+                         } (qw(XDG_CONFIG_HOME HOME)));
+  for my $fromrc ( @rc )
+    {
+      next unless -f $fromrc;
+      do $fromrc;
+      _error( $fromrc, $@ ) if ( $@ ne "" && $@ !~ /not return a true value/ );
+      last;
+    }
+
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure( qw(bundling autoabbrev no_require_order no_ignore_case) );
+
+  my $succ = $parser->getoptions
+    ( 'h|help|usage+'           => \$help,
+      'D|debug+'                => \$::debug,
+      'W|warnings!'             => \$^W,
+
+      'aac'     => sub { @opt{'codec','container','extension'} = qw( copy        m4a   m4a  ) },
+      'a|m4a'   => sub { @opt{'codec','container','extension'} = qw( copy        mp4   m4a  ) },
+      'b|m4b'   => sub { @opt{'codec','container','extension'} = qw( copy        mp4   m4b  ) },
+      'f|flac'  => sub { @opt{'codec','container','extension'} = qw( flac        flac  flac ) },
+      'o|opus'  => sub { @opt{'codec','container','extension'} = qw( libopus     ogg   opus ) },
+      'm|mp3'   => sub { @opt{'codec','container','extension'} = qw( libmp3lame  mp3   mp3  ) },
+
+      's|single'                      => sub { $opt{mode} = 'single', },
+      'c|chaptered'                   => sub { $opt{mode} = 'chaptered', },
+
+      'O|output-dir=s'                => \$opt{output_dir},
+      'c|complete_dir=s'              => \$opt{complete_dir},
+
+
+      'D|dir-name-format=s'           => \$opt{format_dir},
+      'F|file-name-format=s'          => \$opt{format_file},
+      'C|chaptered-name-format=s'     => \$opt{format_chap},
+
+      'j|use-audible-cli-data:s'      => \$opt{audible_json},
+
+      'A|aax-code|activation-code=s'  => \$opt{aax_code},
+      'clobber'                       => \$opt{clobber},
+      'l|loglevel=i'                  => \$opt{loglevel},
+      'V|validate'                    => \$opt{validate},
+      'continue=i'                    => \$opt{continue},
+      'level|compress-level=i'        => \$opt{compress},
+    );
+
+  pod2usage( -exitstatus => 1, -verbose => 0 )     unless $succ;
+  pod2usage( -exitstatus => 0, -verbose => $help ) if $help >= 0;
+}
+
+sub main
+{
+  parse_options( \@_ );
+}
+
+main( @ARGV );
+
+__END__
+
+# #!/bin/bash
+#
+# : ${LC_CTYPE:=en_US.UTF-8}
+# export LC_CTYPE
+#
+# input_file="foo.aax"
+# output_file=foo.m4a
+# rm -f "$output_file"
+#
+# args=(
+#     -nostats
+#     -hide_banner
+#     -loglevel         error
+#     -activation_bytes xxxxxxxx
+#     -i                "$input_file"
+#     -map              0
+#     -codec            copy
+#     -bitexact
+#     -timestamp        now
+#     -f mp4
+#     "$@"
+#     "$output_file"
+# )
+# exec ffmpeg "${args[@]}"

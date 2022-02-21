@@ -1,0 +1,182 @@
+#!/usr/bin/env perl
+# mvncserver --- my own vncerver wrapper script
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2020-09-16
+# Public domain
+
+# Commentary:
+
+# Since certain vnc distributions seem intent on inflicting as much harm to
+# workflow continuity as they can between minor releases, here's my own
+# startup script in their place.
+
+# Code:
+
+use strict;
+use warnings qw(all);
+
+use Socket;
+use Getopt::Long;
+
+use FindBin;
+use lib "$FindBin::Bin/../../lib/perl";
+use lib "$ENV{HOME}/lib/perl";
+
+use NF::PrintObject qw(:all);
+
+my $vnc_port_base = 5900;
+my $vnc_default_display = 10;
+
+my $vnc_home = ($ENV{XDG_CONFIG_HOME} && -d "$ENV{XDG_CONFIG_HOME}/vnc"
+                ? "$ENV{XDG_CONFIG_HOME}/vnc"
+                : "$ENV{HOME}/.vnc");
+
+my %opt =
+  ( geometry      => "1024x768",
+    xauthority    => $ENV{XAUTHORITY} || "$ENV{HOME}/.Xauthority",
+    config        => "$vnc_home/config",
+    xstartup      => "$vnc_home/xstartup",
+    rfbauth       => "$vnc_home/passwd",
+
+    fp            => [],
+    passthrough   => [],
+    securitytypes => [],
+  );
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help; # no init; perl 5.8 will treat as REF() instead of SCALAR()
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure( qw(
+                         no_autoabbrev
+                         no_bundling
+                         pass_through
+
+                         long_prefix_pattern=--|-|\+
+                        ) );
+
+  my $succ = $parser->getoptions
+    ('help'                     => sub { $help = 3 },
+     'usage'                    => sub { $help = 1 },
+
+     'depth=i'                    => \$opt{depth},
+     'n|name=s'                   => \$opt{name},
+     'g|geometry=s'               => \$opt{geometry},
+     'fp|fontpath=s@'             =>  $opt{fp},  # arrayref
+     'cc|visual=s'                => \$opt{visual},
+     'xstartup=s'                 => \$opt{xstartup},
+     'noxstartup'                 => \$opt{noxstartup},
+     'autokill'                   => \$opt{autokill},
+     'kill:s'                     => \$opt{kill},
+     'list'                       => \$opt{list},
+
+     's|securitytypes|security-types=s@' => \$opt{securitytypes},
+
+     '<>' => sub { push @{$opt{passthrough}}, @_ },
+    );
+
+  $help ||= 0; # but if not set yet, we need to set it here now.
+  pod2usage( -exitstatus => 1, -verbose => 0 )         unless $succ;
+  pod2usage( -exitstatus => 0, -verbose => $help - 1 ) if $help > 0;
+
+  map { $opt{$_} = [ map { split( /[\s,]+/, $_ ) } @{$opt{$_}} ]
+      } (qw(fp securitytypes));
+
+  print_object('%opt', \%opt);
+  print_object('remaining args', \@ARGV);
+}
+
+sub bt
+{
+  my $pid = open( my $fh, "-|" );
+  die "fork: $!\n" unless defined $pid;
+  if ($pid == 0)
+    {
+      open ( STDIN, "/dev/null" );
+      open ( STDERR, ">&1" );
+      exec( @_ );
+    }
+  else
+    {
+      local $/ = undef;
+      local $_ = <$fh>;
+      close( $fh );
+      s/\r//g;
+      s/\n+$//s;
+      return $_;
+    }
+}
+
+sub file_contents
+{
+  open( my $fh, $_[0] ) or die "open: $_[0]: $!\n";
+  local $/ = undef;
+  return <$fh>;
+}
+
+sub parse_config_file
+{
+  my $text = file_contents( $_[0] );
+
+  my %conf;
+  for my $line (split( /[\r\n]+/, $text ))
+    {
+      next if $line =~ /(?:^\s*#|^$)/;
+
+      my ($k, $v);
+      if ($line =~ /^\s*(.+?)\s*=\s*(.*?)\s*$/)
+        { ($k, $v) = (lc( $1 ), $2) }
+      elsif ($line =~ /^\s*(\S+)\s+(.*?)\s*$/)
+        { ($k, $v) = (lc( $1 ), $2) }
+      elsif ($line =~ /^\s*(\S+)\s*$/)
+        { ($k, $v) = (lc( $1 ), $1) }
+
+      $conf{$k} = $v;
+      if ($k eq 'nevershared') { delete $conf{alwaysshared} }
+
+
+    }
+  return %conf;
+}
+
+sub x_display_defaults
+{
+  return unless defined $ENV{DISPLAY};
+
+  my $dpyinfo = bt(qw(xdpyinfo));
+  return unless $dpyinfo;
+
+  my %conf;
+  $conf{geometry} = $1 if $dpyinfo =~ /dimensions:\s+(\d+x\d+)\s+pixels/;
+
+  if ($dpyinfo =~ /default\s+visual\s+id:\s+([0-9x]+)/g)
+    {
+      my $vid = $1;
+      my $class = $1 if $dpyinfo =~ /visual\s+id:\s+$vid\s*\n\s*class:\s*(\S+)/sg;
+    }
+
+  return %conf;
+}
+
+sub main
+{
+  parse_options( \@_ );
+
+  print "\n";
+
+  my %conf = parse_config_file($opt{config}) if -f $opt{config};
+  print_object('conf', \%conf);
+
+  print "\n";
+
+  %conf = x_display_defaults();
+  print_object('display defaults', \%conf);
+
+
+}
+
+main( @ARGV );
+
+# eof

@@ -1,0 +1,328 @@
+#!/usr/bin/env perl
+# fmtcols --- indent columns so they line up
+
+# 1997-08-02 Noah Friedman <friedman@splode.com>
+# Current version: 2022-02-19
+# Public domain
+
+# Commentary:
+# Code:
+
+use strict;
+use warnings qw(all);
+
+use Getopt::Long;
+use   List::Util qw(min max);
+use Scalar::Util qw(reftype);
+
+our %opt =
+  ( fieldsep        => "[ \t]+",
+    outsep          => " ",
+
+    numeric_regexp  => '^[-+]?[\d,.]+%?$',
+    right_justify   => {},
+    rightcols       => [],
+
+    ignore_re       => [],
+    skip_lwspace    => undef,
+  );
+
+
+sub xreftype { ref( $_[0] ) && reftype( $_[0] ) }
+
+sub openfile
+{
+  my $file = shift;
+
+  if (!defined( $file ) || $file eq "-")
+    {
+      open (my $fh, "<&STDIN") or die "open: stdin: $!\n";
+      return $fh;
+    }
+
+  sysopen( my $fh, $file, 0 ) or die "open: $file: $!\n";
+  return $fh;
+}
+
+sub read_input
+{
+  my $option = shift;
+
+  my $fieldsep       = $option->{fieldsep};
+  my $numfields      = $option->{num_fields};
+  my $rj_numeric     = $option->{rj_numeric};
+  my $skip_lines     = $option->{skip_lines} || 0;
+  my $ignore_re      = $option->{ignore_re};
+  my $skip_lwspace   = $option->{skip_lwspace};
+  my $numeric_regexp = $option->{numeric_regexp};
+  my @line;
+  my @maxwidth;
+  my @numeric;
+
+  $numfields = -1 unless (defined $numfields);
+
+  my $lineno = 1;
+  for my $file (@_)
+    {
+      my $fh = openfile ($file);
+      while (<$fh>)
+        {
+          chomp;
+          if ($lineno <= $skip_lines
+              || (defined $ignore_re && /$ignore_re/o))
+            {
+              push @line, $_;
+              $lineno++;
+              next;
+            }
+
+          s/^\s+//o if $skip_lwspace;
+          my @fields = split (/$fieldsep/o, $_, $numfields);
+          my $i = 0;
+
+          push @line, \@fields;
+          for my $f (@fields)
+            {
+              my $l = length $f;
+
+              $maxwidth[$i] = $l
+                if (!defined $maxwidth[$i] || $l > $maxwidth[$i]);
+
+              if (defined $rj_numeric && $lineno > $rj_numeric)
+                {
+                  $numeric[$i] = 1 unless (defined $numeric[$i]);
+                  $numeric[$i] = 0
+                    unless ($numeric[$i] && $f =~ m/$numeric_regexp/o);
+                }
+              $i++;
+            }
+          $lineno++;
+        }
+      close ($fh);
+    }
+
+  return { line     => \@line,
+           maxwidth => \@maxwidth,
+           numeric  => \@numeric,
+         };
+}
+
+sub print_output
+{
+  my ($input, $option) = @_;
+
+  my $line          = $input->{line};
+  my $maxwidth      = $input->{maxwidth};
+  my $numeric       = $input->{numeric};
+
+  my $fieldsep      = $option->{fieldsep};
+  my $outsep        = $option->{outsep};
+  my $width_limit   = $option->{width_limit};
+  my $right_justify = $option->{right_justify};
+  my $rj_numeric    = $option->{rj_numeric};
+
+  my @fmts;
+  my $i = 0;
+  for my $width (@$maxwidth)
+    {
+      my $w = (defined $width_limit ? min ($width, $width_limit) : $width);
+
+      $right_justify->{$i} = 1 if (defined $rj_numeric && $numeric->[$i]);
+
+      push @fmts, join ("",
+                        (exists $right_justify->{$i} ? "%" : "%-"),
+                        $w,
+                        (defined $width_limit ? "." . ($w-1) : ""),
+                        "s");
+      $i++;
+    }
+  $fmts[$#fmts] = "%s" if (scalar @fmts > 0
+                           && substr ($fmts[$#fmts], 1, 1) eq '-');
+  my $fmtstr = join ($outsep, @fmts);
+  for my $l (@$line)
+    {
+      if (xreftype ($l) eq 'ARRAY')
+        {
+          my $s = "";
+          if (@$l)  # non-empty line
+            {
+              # If this row is missing a sufficient number of columns,
+              # append blanks to fill them in.
+              push @$l, ('') x (@fmts - @$l) if @$l < @fmts;
+              $s = sprintf ($fmtstr, @$l);
+              $s =~ s/\s+$//;
+            }
+          print $s, "\n";
+        }
+      else
+        {
+          print $l, "\n";
+        }
+    }
+}
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help = 0;
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev));
+  my $succ = $parser->getoptions
+    ('h|help+'                  => \$help,
+     'usage'                    => sub { $help = 1 },
+
+     'a|all-files|no-ignore'    =>      \$opt{noignore},
+     'i|ignore=s@'              => \@ignore,
+     'n|no-change'              =>      \$opt{nochange},
+     'm|meta!'                  =>      \$opt{meta},
+     'M'                        => sub { $opt{meta}    = 0 },
+     'd|dirs!' =>                       \$opt{dirs},
+     'D'                        => sub { $opt{dirs}    = 0 },
+     'f|fold-case|ignore-case!' =>      \$opt{nocase},
+     'F'                        => sub { $opt{nocase}  = 0 },
+     'v|verbose!'               =>      \$opt{verbose},
+     'V'                        => sub { $opt{verbose} = 0 },
+     'q|quiet-errors!'          =>      \$opt{noerr},
+     'Q'                        => sub { $opt{noerr}   = 0 },
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)         unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help - 1) if $help > 0;
+
+  $opt{verbose} = 1 if $opt{nochange};
+
+  if    ($opt{noignore}) { @ignore = (qw(. ..)) }
+  elsif ($opt{meta})     { push  @ignore, @ignore_meta }
+  my $pat = join( '|', map { quotemeta( $_ ) } @ignore);
+  $re_filter = $opt{nocase} ? qr/^(?:$pat)$/i : qr/^(?:$pat)$/;
+}
+sub parse_options
+{
+  my $fieldsep    = "[ \t]+";
+  my $outsep      = " ";
+  my $num_fields;
+  my $rj_numeric;
+  my $numeric_regexp = '^[-+]?[\d,.]+%?$';
+  my $skip_lines;
+  my @ignore_re;
+  my $width_limit;
+  my $skip_lwspace;
+  my %right_justify;
+  my @rightcols;
+
+  Getopt::Long::config ('bundling', 'autoabbrev');
+  GetOptions ("i|ignore-matching=s@",      \@ignore_re,
+              "k|skip-lines=i",            \$skip_lines,
+              "N|numeric-right-justify:i", \$rj_numeric,
+              "numeric-regexp=s",          \$numeric_regexp,
+              "n|num-fields=i",            \$num_fields,
+              "m|max-field-width=i",       \$width_limit,
+              "r|right-justify=s@",        \@rightcols,
+              "S|output-separator=s",      \$outsep,
+              "s|separator=s",             \$fieldsep,
+              "w|skip-leading-whitespace", \$skip_lwspace,
+              "h|help",                    \&usage);
+
+  my $ignore_re;
+  if (@ignore_re)
+    {
+      $ignore_re = (scalar @ignore_re == 1
+                    ? $ignore_re[0]
+                    : "(?:" . join ("|", @ignore_re) . ")");
+    }
+
+  my $col;
+  foreach $col (split (/\s*,\s*/o, join (",", @rightcols)))
+    {
+      $right_justify{$col} = 1;
+    }
+
+  return { fieldsep       => $fieldsep,
+           outsep         => $outsep,
+           width_limit    => $width_limit,
+           num_fields     => $num_fields,
+           right_justify  => \%right_justify,
+           rj_numeric     => $rj_numeric,
+           skip_lines     => $skip_lines,
+           ignore_re      => $ignore_re,
+           skip_lwspace   => $skip_lwspace,
+           numeric_regexp => $numeric_regexp,
+         };
+}
+
+sub main
+{
+  parse_options( \@_ );
+  push @_, '-' unless @_;
+
+  #my $input = read_input ($options, @ARGV);
+  #print_output ($input, $options);
+}
+
+main( @ARGV );
+
+1;
+
+__END__
+
+=head1 NAME
+
+fmtcols - indent columns so they line up
+
+=head1 SYNOPSIS
+
+    {-h|--help}
+    {-r|--right-justify  F0,F1,...}
+
+    {-N|--numeric-right-justify N}
+
+    {--numeric-regexp       REGEXP}
+
+    {-i|--ignore-matching  REGEXP}
+
+    {-k|--skip-lines       N}
+    -s, --separator        SEP
+
+    -w, --skip-leading-whitespace
+
+    -S, --output-separator SEP      .
+    -n, --num-fields       NUM
+
+    -m, --max-field-width  MAX
+
+
+=head1 OPTIONS
+
+    -h, --help                      You're looking at it.
+    -r, --right-justify  F0,F1,...  Right-justify fields F0, F1, ...
+                                    This option may be specified more than once.
+    -N, --numeric-right-justify N   Right-justify any fields which are all-numeric.
+                                    Optional argument N means skip first N lines of
+                                    input before examining fields for numeric
+                                    compliance (use it to skip column headers).
+                                    First N lines are still column-aligned unless
+                                    \`-skip-lines' option is specified.
+    --numeric-regexp       REGEXP   Use this regular expression to match
+                                    numeric-only fields.
+    -i, --ignore-matching  REGEXP   Do not column-align lines matching REGEXP.
+                                    This option may be specified more than once.
+    -k, --skip-lines       N        Do not column-align first N lines of input.
+    -s, --separator        SEP      Field separator between columns.
+                                    This can be any regular expression.
+                                    The default field separator is any number of
+                                    tabs and spaces, i.e. \"[ \\t]+\".
+    -w, --skip-leading-whitespace   Skip leading whitespace before splitting
+                                    fields.  This option is probably only useful in
+                                    conjunction with the default separator regexp.
+    -S, --output-separator SEP      Output separator between fields.  Default \" \".
+    -n, --num-fields       NUM      Assume there are no more than NUM fields.
+                                    If there are more, last column contains all
+                                    remaining elements.
+    -m, --max-field-width  MAX      Truncate fields on output that are larger than
+                                    this limit.  By default, there is no limit.\n";
+
+
+=head1 DESCRIPTION
+
+=cut
