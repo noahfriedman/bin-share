@@ -543,7 +543,7 @@ def debugtrace_only( fn ):
     return wrapper
 
 class Stty( object ):
-    def __init__( self, fd=sys.stdin, when=termios.TCSANOW ):
+    def __init__( self, fd=sys.stdin, when=termios.TCSADRAIN ):
         self.open( fd )
         self.when    = when
         self._attr   = None
@@ -632,9 +632,10 @@ class Stty( object ):
 
 
     @debugtrace_only
-    def tcsetattr( self, when=termios.TCSANOW ):
-        self.tcgetattr()
-        return termios.tcsetattr ( self.fd, when, self._attr )
+    def tcsetattr( self, when=termios.TCSADRAIN, attr=None ):
+        if attr is None:
+            attr = self.tcgetattr()
+        return termios.tcsetattr ( self.fd, when, attr )
 
 
     def Xflag( self, c_elt, flag=None, set=None ):
@@ -916,6 +917,49 @@ class Stty( object ):
                 attr[ field ] = int( v, base=16 )
         return self.tcsetattr()
 
+
+    def randomize( self, args ):
+        import random
+
+        def report( desc='', skipz=False ):
+            if not args.debug: return
+            if desc: print( desc, ':', sep='' )
+            display_bits( self, args, prefix='    ', skipz=skipz )
+            print()
+
+        report( 'Before' )
+        attr = self.tcgetattr()
+        for n, elt in enumerate( attr ):
+            if isinstance( elt, int ):
+                attr[ n ] = random.randint( 0, 0xffffffff )
+            elif isinstance( elt, list ):
+                for cc in CC_PARAM_LIST:
+                    pos = cc[ CC_PARAM_LIST_POS ]
+                    elt[ pos ] = self._byteconv( random.randint( 0, 0xff ) )
+        if OS == 'Linux':
+            # Linux won't let you set just any arbitrary speed bits
+            for elt in ( TC_ISPEED, TC_OSPEED, ):
+                attr[ elt ] &= termios.CBAUD
+        report( 'Proposed change' )
+
+        oattr = list( attr ) # copy
+        self.tcsetattr()
+        if args.debug:
+            attr = self.tcgetattr( reset=True )
+            report( 'After change' )
+            for n in range( len( attr)-1 ):
+                attr[ n ] = attr[ n ] ^ oattr[ n ]
+            report( 'Delta between proposed and changed', skipz=True )
+
+
+    def abszero( self, args ):
+        attr = self.tcgetattr()
+        for i, elt in enumerate( attr[:-1] ):
+            attr[ i ] = 0
+        for i, elt in enumerate( attr[-1] ):
+            attr[-1][i] = self._byteconv( PC_VDISABLE )
+        self.tcsetattr()
+
 
 def intconv( arg ):
     if isinstance( arg, int ): return arg
@@ -1174,7 +1218,7 @@ def display_cchars( tty, args ):
         print( '{:<{width}} = {}'.format( *elt, width=width ))
 
 
-def display_bits( tty, args ):
+def display_bits( tty, args, prefix='', skipz=False ):
     attr = tty.tcgetattr()
 
     wb = 8
@@ -1198,8 +1242,9 @@ def display_bits( tty, args ):
 
     fmt = '    '.join( fmt )
     for i, fl in enumerate( attr[:-1] ):
+        if fl == 0 and skipz: continue
         name = FLAG_LABEL[ i ]
-        print( fmt.format( name, fl, wx, wo, wb ))
+        print( fmt.format( prefix + name, fl, wx, wo, wb ))
 
 
 def diff_against_sane( tty, args ):
@@ -1270,6 +1315,7 @@ def get_args():
         'ctlchars' : 'Display characters in control char notation',
         'align'    : 'Align output into columns',
         'wide'     : 'Do not wrap lines',
+        'debug'    : argparse.SUPPRESS,
         'verbose'  : 'Extended output', }
 
     p = ArgParser( description='Print or change terminal characteristics.' )
@@ -1284,6 +1330,7 @@ def get_args():
     p.add_argument(    '-c', '--align',    action='store_true', default=False, help=help['align'] )
     p.add_argument(    '-w', '--wide',     action='store_true', default=False, help=help['wide'] )
     p.add_argument(    '-v', '--verbose',  action='store_true', default=False, help=help['verbose'] )
+    p.add_argument(    '-D', '--debug',    action='store_true', default=False, help=help['debug'] )
 
     args, unknown = p.parse_known_args()
     args.setting = unknown
@@ -1322,8 +1369,10 @@ def main():
 
     elif slen == 1 and arg1 in showable_args:
         if arg1.find( 'speed' ) in (0, 1):
-            ispeed = NTOSPEED[ tty.getispeed() ]
-            ospeed = NTOSPEED[ tty.getospeed() ]
+            ris = tty.getispeed()
+            ros = tty.getospeed()
+            ispeed = NTOSPEED[ ris ] if ris in NTOSPEED else ris
+            ospeed = NTOSPEED[ ros ] if ros in NTOSPEED else ros
             if   arg1 in ('ispeed',): print( ispeed )
             elif arg1 in ('ospeed',): print( ospeed )
             elif ispeed == ospeed:    print( ospeed )
@@ -1407,6 +1456,12 @@ def main():
                     tty.setcline( disc )
                 else:
                     tty.setldisc( disc )
+
+            elif arg in ( 'insane', ):
+                tty.randomize( args )
+
+            elif arg in ( 'abszero', ):
+                tty.abszero( args )
 
             else:
                 tty.setflag( arg )
