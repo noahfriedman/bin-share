@@ -543,8 +543,9 @@ def debugtrace_only( fn ):
     return wrapper
 
 class Stty( object ):
-    def __init__( self, fd=sys.stdin, when=termios.TCSADRAIN ):
+    def __init__( self, fd=sys.stdin, options=None, when=termios.TCSADRAIN ):
         self.open( fd )
+        self.option  = options
         self.when    = when
         self._attr   = None
 
@@ -838,8 +839,8 @@ class Stty( object ):
                 raise OSError( self, 'unknown line discipline "{}"'.format( line ))
 
 
-    def save( self, verbose=False ):
-        if verbose:
+    def save( self ):
+        if self.option.verbose:
             return self._save_gpysttyv()
         else:
             return self._save_gpysttyc()
@@ -918,13 +919,14 @@ class Stty( object ):
         return self.tcsetattr()
 
 
-    def randomize( self, args ):
+    def randomize( self ):
         import random
 
+        debug = self.option.debug
         def report( desc='', skipz=False ):
-            if not args.debug: return
+            if not debug: return
             if desc: print( desc, ':', sep='' )
-            display_bits( self, args, prefix='    ', skipz=skipz )
+            display_bits( self, self.option, prefix='    ', skipz=skipz )
             print()
 
         report( 'Before' )
@@ -944,7 +946,7 @@ class Stty( object ):
 
         oattr = list( attr ) # copy
         self.tcsetattr()
-        if args.debug:
+        if debug:
             attr = self.tcgetattr( reset=True )
             report( 'After change' )
             for n in range( len( attr)-1 ):
@@ -952,7 +954,7 @@ class Stty( object ):
             report( 'Delta between proposed and changed', skipz=True )
 
 
-    def abszero( self, args ):
+    def abszero( self ):
         attr = self.tcgetattr()
         for i, elt in enumerate( attr[:-1] ):
             attr[ i ] = 0
@@ -1009,7 +1011,7 @@ def fold( flags, maxlen=stdowidth, indent=0, sep=' ' ):
 
 dispchar_special = {
     0x09  :   'TAB', # '\\t',
-    0x1d  :   'RET', # '\\r', 'CR',
+    0x0d  :   'RET', # '\\r', 'CR',
     0x1b  :   'ESC', # '\\e',
     0x20  :   'SPC', # less ambiguous than a blank
     0x7f  :   'DEL',
@@ -1021,20 +1023,24 @@ dispchar_special = {
 }
 
 def dispchar( c, args=None ):
-    cm = 'C-M-' # "C-M-a" - Emacs convention
+    cm = 'C-M-'         # "C-M-a" - Emacs convention
+    casemask = 0b11100000
     disp_special = dispchar_special
     try:
         if not args.emacs:
-            disp_special = {}
             cm  = 'M-^' # "M-^A"  - BSD and GNU stty convention
+            casemask = 0b11000000
+            disp_special = {}
     except AttributeError:
         pass
-    n = ord( c )
+    n = ord( c ) if isinstance( c, (str, bytes) ) else c
     if n == PC_VDISABLE  : return '<undef>'
     if n in disp_special : return disp_special[ n ]
     if        n  < 0x20  : return '^'  + chr( n ^ 0b01000000 )
     if        n == 0x7f  : return '^'  + chr( n ^ 0b01000000 )
-    if 0x7f < n  < 0xa0  : return cm   + chr( n ^ 0b11000000 )
+    if        n == 0x80  : return cm   + chr( n ^ 0b11000000 )
+    if 0x80 < n  < 0x9c  : return cm   + chr( n ^ casemask   )
+    if 0x9b < n  < 0xa0  : return cm   + chr( n ^ 0b11000000 )
     if 0x9f < n  < 0xff  : return 'M-' + chr( n ^ 0b10000000 )
     if        n == 0xff  : return cm   + chr( n ^ 0b11000000 )
     else                 : return chr( n )
@@ -1216,6 +1222,15 @@ def display_cchars( tty, args ):
     width = max( len( elt[0] ) for elt in cchars )
     for elt in cchars:
         print( '{:<{width}} = {}'.format( *elt, width=width ))
+    if args.debug:
+        print()
+        fmt = '{0:3}    {0:04o}    0x{0:02x}    {1:<8} {2}'
+        for n in range( 256 ):
+            args.emacs = False
+            c = dispchar( n, args )
+            args.emacs = True
+            e = dispchar( n, args )
+            print( fmt.format( n, c, e ))
 
 
 def display_bits( tty, args, prefix='', skipz=False ):
@@ -1338,7 +1353,7 @@ def get_args():
 
 def main():
     args = get_args()
-    tty = Stty( fd=args.device )
+    tty = Stty( fd=args.device, options=args )
 
     showable_args = [
         'speed', 'ispeed', 'ospeed', 'line',   'ldisc',  'cline',  'c_line',
@@ -1359,7 +1374,7 @@ def main():
         args.all = args.bsd = True
         display_bsd( tty, args )
     elif args.save:
-        print( tty.save( verbose=args.verbose ) )
+        print( tty.save() )
 
     elif not args.setting:
         diff_against_sane( tty, args )
@@ -1458,10 +1473,10 @@ def main():
                     tty.setldisc( disc )
 
             elif arg in ( 'insane', ):
-                tty.randomize( args )
+                tty.randomize()
 
             elif arg in ( 'abszero', ):
-                tty.abszero( args )
+                tty.abszero()
 
             else:
                 tty.setflag( arg )
