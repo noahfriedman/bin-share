@@ -24,8 +24,9 @@ alltypes='
     avc csync dlv dname eui48 eui64 keydata l32 l64 lp nid ninfo rkey smimea talink
     a6 gpos isdn maila mailb mb md mf mg minfo mr naptr
     nsap nsap-ptr null nxt px rt sink spf unspec wks x25
+    atma eid gid uid nb nimloc uinfo
 '
-# Unrecognized by dig: 	atma eid gid nb nbstat nimloc uid uinfo
+# Unrecognized by dig: 	nbstat
 
 idig()
 {
