@@ -4,8 +4,6 @@
 # Created: 2010-10-02
 # Public domain
 
-# $Id: osd-msg,v 1.2 2015/10/11 03:40:47 friedman Exp $
-
 kill_prior()
 {
     if [ -f $pidfile ]; then
@@ -60,7 +58,7 @@ _osd_cat()
             --shadow   2 \
             --lines    2 \
             --font   "$font" \
-            ${1+"$@"} > /dev/null &
+            "$@" > /dev/null &
 
     echo $! > $pidfile
 }
@@ -98,11 +96,11 @@ main()
 {
     setup
     case $1 in
-        pct | notify )        ${1+"$@"} ;;
-        *            ) notify ${1+"$@"} ;;
+        pct | notify )        "$@" ;;
+        *            ) notify "$@" ;;
     esac
 }
 
-main ${1+"$@"}
+main "$@"
 
 # eof
