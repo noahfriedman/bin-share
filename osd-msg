@@ -26,11 +26,32 @@ kill_prior()
     fi
 }
 
+find_display_font()
+{
+    # n.b. osd_cat isn't unicode-aware, so use 8bit charsets
+    for attempt in \
+        '-*-dejavu sans-medium-r-*-*-20-*-*-*-*-*-iso8859-1'           \
+        '-*-dejavu sans condensed-medium-r-*-*-24-*-*-*-*-*-iso8859-1' \
+        '-*-bitstream vera sans-medium-r-*-*-24-*-*-*-*-*-iso8859-1'   \
+        '-xos4-terminus-bold-r-normal--20-200-72-72-c-100-iso8859-1'   \
+        '-misc-fixed-medium-r-semicondensed--13-120-75-75-c-60-iso8859-1'
+    do
+        # Examine stderr from xlsfonts and if it's quiet, we have it.
+        # A non-zero exit status from grep means there was error outout
+        if ! xlsfonts -fn "$attempt" 2>&1 >/dev/null | grep . > /dev/null
+        then
+            font=$attempt
+            return
+        fi
+    done
+    echo "${0##*/}: Cannot find any font to use." 1>&2
+    exit 1
+}
+
 _osd_cat()
 {
     kill_prior osd_cat
-
-    font="-*-bitstream vera sans-medium-r-*-*-24-*-*-*-*-*-*-*"
+    find_display_font
     osd_cat --color  green \
             --pos    bottom \
             --offset 100 \
