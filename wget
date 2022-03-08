@@ -1,16 +1,19 @@
 #!/bin/sh
-# $Id: wget,v 1.13 2017/07/17 20:56:05 friedman Exp $
 
 # This is a wrapper because a static .wgetrc file might try to use options
 # which older versions do not support.
 
 wget=`run-next -p "$0" || echo :`
 
-# Many websites block wget based on user agent.  So fabricate a different one.
-user_agent="Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0"
+# Many websites block wget based on its user agent.  So use a different one.
+# On the other hand, they will often do unparsable things if you give it a
+# UA like firefox, preventing downloads from working.  So just don't send
+# any UA at all by default for now.
+#user_agent="Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0"
+user_agent=$WGET_USER_AGENT
 
-XDG_CONFIG_HOME=${XDG_CONFIG_HOME-$HOME/.config}
-XDG_DATA_HOME=${XDG_DATA_HOME-$HOME/.local/share}
+: ${XDG_CONFIG_HOME:=$HOME/.config}
+: ${XDG_DATA_HOME:=$HOME/.local/share}
 
 cookies=$XDG_DATA_HOME/wget/cookies.txt
    hsts=$XDG_DATA_HOME/wget/hsts.txt
@@ -89,20 +92,28 @@ if atleast 1 9; then
          #--dns-cache=off
 fi
 
-#if atleast 1 20 3 ; then
-#    opts="$opts --auth-no-challenge"
-#fi
-
-#if atleast 1 13; then
-#    # use the name specified by the redirection url's last component
-#    opts="$opts --trust-server-names"
-#fi
+false && # disable this section
+if atleast 1 13; then
+    # use the name specified by the redirection url's last component
+    opts="$opts --trust-server-names"
+fi
 
 if atleast 1 17; then
     opts="$opts
           --hsts
           --hsts-file=$hsts
          "
+fi
+
+if atleast 1 19; then
+    opts="$opts
+          --xattr
+         "
+fi
+
+false && # disable this section
+if atleast 1 20 3 ; then
+    opts="$opts --auth-no-challenge"
 fi
 
 conf=$XDG_CONFIG_HOME/wget/wgetrc
@@ -113,7 +124,7 @@ case ${WGETRC+isset} in
         fi ;;
 esac
 
-exec $wget \
+exec ${WGET-$wget} \
      --user-agent="$user_agent" \
      --execute 'robots = off' \
      $opts "$@"
