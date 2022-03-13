@@ -4,15 +4,13 @@
 # Created: 2016-05-21
 # Public domain
 
-# $Id: brcm-firmware-map,v 1.2 2017/08/04 02:30:01 noah Exp $
-
 # Commentary:
 
 # Usage: brcm-firmware-map /path/to/bcbtums.inf another.inf ...
 
 # Debugging output can be enabled/dissabled per function and/or line number, e.g.
-# 	DEBUG=all,!parse:108 brcm-firmware-map ...
-#	DEBUG=bcm_devmap brcm-firmware-map ...
+# 	PP_DEBUG=all,!parse:108 brcm-firmware-map ...
+#	PP_DEBUG=bcm_devmap brcm-firmware-map ...
 #
 # Suggested conversion script:
 #
@@ -39,9 +37,7 @@ use FindBin;
 use lib "$FindBin::Bin/../../lib/perl";
 use lib "$ENV{HOME}/lib/perl";
 
-use NF::PrintObject qw(debug_pp :vars);
-$object_pp_verbose  =  3;
-$object_pp_maxwidth = 80;
+use NF::PrintObject qw(__PP_DEBUG);
 
 # Assumes comments have been completely stripped
 my $ini_grammar
@@ -69,7 +65,7 @@ sub parse
   $text =~ s/\s*\r//g;
   $text =~ s/\s*;.*//g;
 
-  debug_pp (\%/);
+  __PP_DEBUG { \%/ };
   return unless $text =~ $ini_grammar;
 
   my %inf;
@@ -84,10 +80,10 @@ sub parse
               my $val = $inf{$name}->{$key} ||= [];
 
               my @new = split (/\s*,\s*/, $elt->{val}, -1);
-              debug_pp (@new);
+              __PP_DEBUG { \@new };
               if (@new > 1) { push @$val, \@new; }
               else { push @$val, @new; }
-              debug_pp ($val);
+              __PP_DEBUG { $val };
             }
         }
       else
@@ -97,8 +93,7 @@ sub parse
                               } @$data ];
         }
     }
-  debug_pp (\%inf);
-
+  __PP_DEBUG { \%inf };
   return \%inf;
 }
 
@@ -106,9 +101,10 @@ sub get
 {
   my ($obj, $section) = (shift, shift);
 
+  __PP_DEBUG { $section };
   my $data = $obj->{$section};
   return unless $data;
-  debug_pp ($data, @_);
+  __PP_DEBUG { $data, @_ };
   unless (@_)
     {
       if (ref $data eq 'HASH')
@@ -117,9 +113,9 @@ sub get
     }
 
   my @result = (ref $data eq 'HASH'
-                ? map { @{$data->{$_}} } @_
+                ? map { exists $data->{$_} ? @{$data->{$_}} : () } @_
                 : map { @{$data->[$_]} } @_);
-  debug_pp (@result);
+  __PP_DEBUG { \@result };
   return unless @result;
   return wantarray ? @result : \@result;
 }
@@ -128,36 +124,47 @@ sub bcm_devmap
 {
   my $obj = shift;
 
+  my @manuf = get ($obj, 'Manufacturer', '%MfgName%', '%MfgName64%');
+  my $suffix = $manuf[0]->[2];
+  __PP_DEBUG { $suffix, @manuf };
+
   my @sections = map { my $prefix = shift @$_;
                        map { $prefix.'.'.$_ } @$_;
-                     } get ($obj, 'Manufacturer', '%MfgName%', '%MfgName64%');
-  debug_pp (\@sections);
+                     } @manuf;
+  __PP_DEBUG { \@sections };
 
   my %devmap;
   map { my $section = get ($obj, $_);
-        debug_pp ($_, $section);
+        __PP_DEBUG { $_, $section };
         for my $elt (values %$section)
           {
-            debug_pp ($elt);
+            __PP_DEBUG { $elt };
             for my $row (@$elt)
               {
-                debug_pp ($row);
+                __PP_DEBUG { $row };
                 my ($key, $val) = @$row;
                 $devmap{$key} = sprintf ("%s-%s.hcd", lc $1, lc $2)
                   if $val && $val =~ /USB.VID_([\da-f]+).PID_([\da-f]+)/i;
               }
           }
       } @sections;
-  debug_pp (\%devmap);
-  return \%devmap;
+  __PP_DEBUG { \%devmap };
+  return (\%devmap, $suffix);
 }
 
 sub bcm_hexfile
 {
-  my ($obj, $dev) = @_;
+  my ($obj, $dev, $suffix) = @_;
+
+  my @level1;
+  for my $case_suffix ($suffix, uc ($suffix), lc ($suffix))
+    {
+      @level1 = get ($obj, join ('.', $dev, $case_suffix ), "CopyFiles");
+      last if @level1;
+    }
   grep { /\.hex$/
        } map { get ($obj, $_)
-             } get ($obj, "$dev.NT", "CopyFiles");
+             } @level1;
 }
 
 sub main
@@ -168,9 +175,9 @@ sub main
       my $obj = parse ($file);
       next unless $obj;
 
-      my $devmap = bcm_devmap ($obj);
+      my ($devmap, $suffix) = bcm_devmap ($obj);
       push @list, map
-        { my ($hf) = bcm_hexfile ($obj, $_);
+        { my ($hf) = bcm_hexfile ($obj, $_, $suffix);
           if (defined $hf)
             {
               my $prefix = $1 if $hf =~ /^(.*?)_/;
