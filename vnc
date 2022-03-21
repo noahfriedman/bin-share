@@ -1,5 +1,4 @@
-#!/bin/sh
-# $Id: vnc,v 1.4 2018/04/10 18:38:25 friedman Exp $
+#!/usr/bin/env bash
 
 xgeom()
 {
@@ -26,10 +25,17 @@ run_vnc()
 
 tigervnc()
 {
+    declare -a args=(
+        -Shared
+        -FullscreenSystemKeys=0
+        #-DotWhenNoCursor=1
+        -ReconnectOnError=0
+        #-SecurityTypes=TLSPlain,TLSVnc,TLSNone
+    )
     case ${passwd+isset} in
-        isset ) set : -PasswordFile=/dev/stdin "$@"; shift ;;
+        isset ) args+=( -PasswordFile=/dev/stdin ) ;;
     esac
-    run_vnc -Shared -FullscreenSystemKeys=0 "$@"
+    run_vnc "${args[@]}" "$@"
 }
 
 realvnc()
