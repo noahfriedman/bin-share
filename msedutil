@@ -1,0 +1,261 @@
+#!/bin/sh
+
+cmd_arg=
+dev_arg=
+pba_arg=
+
+askpass()
+{
+    stty_g=`stty -g`
+    trap 'stty "$stty_g"' 0 1 2 3 15
+    stty -echo
+    echo -n "$1" 1>&2
+    read pass
+    stty "$stty_g"
+    trap '' 0 1 2 3 15
+    echo "$pass"
+}
+
+getpass_admin1() { adm_pass=`askpass "Admin1 Password:"`; }
+getpass_sid()    { sid_pass=`askpass "SID Password:"`; }
+
+setpass_admin1() { :; }
+setpass_sid()    { :; }
+
+sedutil() { (set -x; sedutil-cli -v "$@"); }
+
+# TPerFunc:ACKNAK=N
+# TPerFunc:ASYNC=N
+# TPerFunc:BufferManagement=N
+# TPerFunc:comIDManagement=N
+# TPerFunc:Streaming=Y
+# TPerFunc:SYNC=Y
+# LockFunc:Locked=N
+# LockFunc:LockingEnabled=N
+# LockFunc:LockingSupported=Y
+# LockFunc:MBRDone=N
+# LockFunc:MBREnabled=N
+# LockFunc:MediaEncrypt=Y
+# GeomFunc:Align=Y
+# GeomFunc:Alignment_Granularity=8_(4096)
+# GeomFunc:Logical_Block_size=512
+# GeomFunc:Lowest_Aligned_LBA=0
+# DataFunc:Max_Tables=9
+# DataFunc:Max_Size_Tables=10485760
+# DataFunc:Table_size_alignment=1
+# DataFunc:Base_comID=0x1004
+# DataFunc:Initial_PIN=0x0
+# DataFunc:Reverted_PIN=0x0
+# DataFunc:comIDs=1
+# DataFunc:Locking_Admins=4
+# DataFunc:Locking_Users=9
+# DataFunc:Range_Crossing=N
+# TPerProp:MaxComPacketSize=66048
+# TPerProp:MaxResponseComPacketSize=66048
+# TPerProp:MaxPacketSize=66028
+# TPerProp:MaxIndTokenSize=65540
+# TPerProp:MaxPackets=1
+# TPerProp:MaxSubpackets=1
+# TPerProp:MaxMethods=1
+# TPerProp:MaxAuthentications=5
+# TPerProp:MaxSessions=1
+# TPerProp:MaxTransactionLimit=1
+# TPerProp:DefSessionTimeout=0
+# HostProp:MaxComPacketSize=2048
+# HostProp:MaxResponseComPacketSize=2048
+# HostProp:MaxPacketSize=2028
+# HostProp:MaxIndTokenSize=1992
+# HostProp:MaxPackets=1
+# HostProp:MaxSubpackets=1
+# HostProp:MaxMethods=1
+sedutil_query()
+{
+    sedutil-cli --query "${1-$dev_arg}" |
+        perl -ne '
+            unless (/=/) {
+                /^(\S{4})\S*\s+(\S{4})/i
+                and $prefix = ucfirst( $1 ) . ucfirst( $2 );
+                next;
+            }
+            s/[\0\r]+//g;
+            s/^\s+//;
+            s/\s+$/\n/;
+            s/(=\s*N)\.(\s)/$1,$2/; # bug
+            s/\s*=\s*/=/g;
+            if (/,/) {
+                s/,\s*/\n/g;
+                s/[ \t]+/_/g;
+            } else {
+                s/\s+/\n/g;
+            }
+            s/^/$prefix:/mg;
+            print $_;'
+}
+
+query_match() { sedutil_query | egrep -i "$@"; }
+
+opal_setup()
+{
+    if [ -n "$pba_arg" ]; then
+        if [ -f "$pba_arg" ]; then
+            :
+        elif [ -f "$pba_arg.gz" ]; then
+            gunzip "$pba_arg.gz"
+        else
+            usage "$pba_arg missing" 1>&2
+        fi
+    fi
+
+    sedutil --initialsetup debug "$dev_arg"
+    # Expected output (not counting timestamps and device):
+    # - 14:06:39.709 INFO: takeOwnership complete
+    # - 14:06:41.703 INFO: Locking SP Activate Complete
+    # - 14:06:42.317 INFO: LockingRange0 disabled
+    # - 14:06:42.694 INFO: LockingRange0 set to RW
+    # - 14:06:43.171 INFO: MBRDone set on
+    # - 14:06:43.515 INFO: MBRDone set on
+    # - 14:06:43.904 INFO: MBREnable set on
+    # - 14:06:43.904 INFO: Initial setup of TPer complete on /dev/sda
+
+    sedutil --enablelockingrange 0 debug "$dev_arg"
+    # - 14:07:24.914 INFO: LockingRange0 enabled ReadLocking,WriteLocking
+
+    sedutil --setlockingrange 0 LK debug "$dev_arg"
+    # - 14:07:46.728 INFO: LockingRange0 set to LK
+
+    if [ -n "$pba_arg" ]; then
+        sedutil --setmbrdone off debug "$dev_arg"
+        # - 14:08:21.999 INFO: MBRDone set off
+
+        sedutil --loadpbaimage debug "$pba_arg" "$dev_arg"
+        # - 14:10:55.328 INFO: Writing PBA to /dev/sda
+        # 33554432 of 33554432 100% blk=1500
+        # - 14:14:04.499 INFO: PBA image  /usr/sedutil/UEFI64.img written to /dev/sda
+    fi
+
+    # The SID and Admin1 passwords do not have to match but it makes things easier.
+    # The SID password is used for initializing and unconfiguring OPAL entirely
+    # The Admin1 password is used for everyday operations.
+    sedutil --setSIDPassword debug "$sid_pass" "$dev_arg"
+    sedutil --setAdmin1Pwd   debug "$adm_pass" "$dev_arg"
+
+    # Your drive is now using OPAL locking.
+    # You now need to COMPLETELY POWER DOWN YOUR SYSTEM
+    # This will lock the drive so that when you restart your system it will
+    # boot the PBA (preboot authentication).
+}
+
+opal_revert()
+{
+    opal_disable
+
+    sedutil --revertNoErase "$adm_pass" "$dev_arg"
+    # Revert LockingSP complete
+
+
+    if query_match LockingEnabled=N; then
+        sedutil --revertTPer "$sid_pass" "$dev_arg"
+        # revertTper completed successfully
+    else
+        fatal "NOT executing --revertTPer as it might erase drive."
+    fi
+}
+
+opal_enable()
+{
+    sedutil --enableLockingRange 0 "$adm_pass" "$dev_arg"
+    # - 14:07:24.914 INFO: LockingRange0 enabled ReadLocking,WriteLocking
+
+    sedutil --setMBREnable      on "$adm_pass" "$dev_arg"
+    # - 14:08:21.999 INFO: MBREnable set on
+}
+
+# If you want to disable Locking and the PBA:
+opal_disable()
+{
+    sedutil --disableLockingRange 0   "$adm_pass" "$dev_arg"
+    # - 14:07:24.914 INFO: LockingRange0 disabled
+    sedutil --setMBREnable        off "$adm_pass" "$dev_arg"
+    # - 14:08:21.999 INFO: MBREnable set off
+}
+
+opal_status()
+{
+    sedutil_query
+}
+
+fatal()
+{
+    echo "${0##*/}:" "$@" 1>&2
+    exit 1
+}
+
+usage()
+{
+    exec 1>&2
+    case $# in
+        0 ) : ;;
+        * ) echo "${0##*/}: $@"; echo ;;
+    esac
+    echo "Usage: ${0##*/} setup   /dev/sdX  [/path/to/pba.img{.gz}]"
+    echo "       ${0##*/} enable  /dev/sdX"
+    echo "       ${0##*/} disable /dev/sdX"
+    echo "       ${0##*/} status  /dev/sdX"
+    exit 1
+}
+
+main()
+{
+    case `uname -s` in
+        Linux )
+            param=/sys/module/libata/parameters/allow_tpm
+            errmsg="libata.allow_tpm is not enabled; cannot continue."
+            if [ -f $param ]; then
+                read allow_tpm < $param
+                case $allow_tpm in
+                    '' | 0 ) fatal "$errmsg" ;;
+                esac
+            else
+                fatal "$errmsg";
+            fi ;;
+    esac
+
+    case $1:$# in
+        setup:3 ) : ;;
+        *:2     ) : ;;
+        *:*     ) usage ;;
+    esac
+
+    case $1 in
+        status )
+            cmd_arg=$1 ; shift
+            dev_arg=$1 ; shift
+            ;;
+
+        enable | disable )
+            cmd_arg=$1 ; shift
+            dev_arg=$1 ; shift
+            getpass_admin1
+            ;;
+
+        setup | revert )
+            cmd_arg=$1 ; shift
+            dev_arg=$1 ; shift
+            if [ -n "$1" ]; then
+                pba_arg=$1
+                shift
+            fi
+            getpass_sid
+            getpass_admin1
+            ;;
+
+        * ) usage "$1: Unknown command" ;;
+    esac
+
+    set -e
+    opal_$cmd_arg "$@"
+}
+
+main "$@"
+
+# eof
