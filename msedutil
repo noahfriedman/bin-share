@@ -4,6 +4,8 @@ cmd_arg=
 dev_arg=
 pba_arg=
 
+: ${SEDUTIL:=sedutil-cli}
+
 askpass()
 {
     stty_g=`stty -g`
@@ -22,58 +24,17 @@ getpass_sid()    { sid_pass=`askpass "SID Password:"`; }
 setpass_admin1() { :; }
 setpass_sid()    { :; }
 
-sedutil() { (set -x; sedutil-cli -v "$@"); }
+sedutil() { $SEDUTIL "$@"; }
 
-# TPerFunc:ACKNAK=N
-# TPerFunc:ASYNC=N
-# TPerFunc:BufferManagement=N
-# TPerFunc:comIDManagement=N
-# TPerFunc:Streaming=Y
-# TPerFunc:SYNC=Y
-# LockFunc:Locked=N
-# LockFunc:LockingEnabled=N
-# LockFunc:LockingSupported=Y
-# LockFunc:MBRDone=N
-# LockFunc:MBREnabled=N
-# LockFunc:MediaEncrypt=Y
-# GeomFunc:Align=Y
-# GeomFunc:Alignment_Granularity=8_(4096)
-# GeomFunc:Logical_Block_size=512
-# GeomFunc:Lowest_Aligned_LBA=0
-# DataFunc:Max_Tables=9
-# DataFunc:Max_Size_Tables=10485760
-# DataFunc:Table_size_alignment=1
-# DataFunc:Base_comID=0x1004
-# DataFunc:Initial_PIN=0x0
-# DataFunc:Reverted_PIN=0x0
-# DataFunc:comIDs=1
-# DataFunc:Locking_Admins=4
-# DataFunc:Locking_Users=9
-# DataFunc:Range_Crossing=N
-# TPerProp:MaxComPacketSize=66048
-# TPerProp:MaxResponseComPacketSize=66048
-# TPerProp:MaxPacketSize=66028
-# TPerProp:MaxIndTokenSize=65540
-# TPerProp:MaxPackets=1
-# TPerProp:MaxSubpackets=1
-# TPerProp:MaxMethods=1
-# TPerProp:MaxAuthentications=5
-# TPerProp:MaxSessions=1
-# TPerProp:MaxTransactionLimit=1
-# TPerProp:DefSessionTimeout=0
-# HostProp:MaxComPacketSize=2048
-# HostProp:MaxResponseComPacketSize=2048
-# HostProp:MaxPacketSize=2028
-# HostProp:MaxIndTokenSize=1992
-# HostProp:MaxPackets=1
-# HostProp:MaxSubpackets=1
-# HostProp:MaxMethods=1
+# n.b. this will echo passwords
+#sedutil() { (set -x; $SEDUTIL "$@"); }
+
 sedutil_query()
 {
     sedutil-cli --query "${1-$dev_arg}" |
         perl -ne '
             unless (/=/) {
-                /^(\S{4})\S*\s+(\S{4})/i
+                /^(\S{4})\S*\s+(?:[\d.]+\s+)?(\S{4})/i
                 and $prefix = ucfirst( $1 ) . ucfirst( $2 );
                 next;
             }
@@ -152,7 +113,6 @@ opal_revert()
     sedutil --revertNoErase "$adm_pass" "$dev_arg"
     # Revert LockingSP complete
 
-
     if query_match LockingEnabled=N; then
         sedutil --revertTPer "$sid_pass" "$dev_arg"
         # revertTper completed successfully
@@ -179,6 +139,16 @@ opal_disable()
     # - 14:08:21.999 INFO: MBREnable set off
 }
 
+opal_lock()
+{
+    sedutil --setlockingrange 0 LK "$adm_pass" "$dev_arg"
+}
+
+opal_unlock()
+{
+    sedutil --setlockingrange 0 RW "$adm_pass" "$dev_arg"
+}
+
 opal_status()
 {
     sedutil_query
@@ -198,14 +168,22 @@ usage()
         * ) echo "${0##*/}: $@"; echo ;;
     esac
     echo "Usage: ${0##*/} setup   /dev/sdX  [/path/to/pba.img{.gz}]"
+    echo "       ${0##*/} revert  /dev/sdX"
     echo "       ${0##*/} enable  /dev/sdX"
     echo "       ${0##*/} disable /dev/sdX"
+    echo "       ${0##*/} lock    /dev/sdX"
+    echo "       ${0##*/} unlock  /dev/sdX"
     echo "       ${0##*/} status  /dev/sdX"
     exit 1
 }
 
 main()
 {
+    case ${UID-`id -u`} in
+        0 ) : ;;
+        * ) exec sudo "$@" ;;
+    esac
+
     case `uname -s` in
         Linux )
             param=/sys/module/libata/parameters/allow_tpm
@@ -232,7 +210,7 @@ main()
             dev_arg=$1 ; shift
             ;;
 
-        enable | disable )
+        lock | unlock | enable | disable )
             cmd_arg=$1 ; shift
             dev_arg=$1 ; shift
             getpass_admin1
