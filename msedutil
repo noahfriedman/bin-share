@@ -6,28 +6,47 @@ pba_arg=
 
 : ${SEDUTIL:=sedutil-cli}
 
+######
+##
+######
+
 askpass()
 {
+    case $# in 0 ) set "Password" ;; esac
+
     stty_g=`stty -g`
     trap 'stty "$stty_g"' 0 1 2 3 15
     stty -echo
-    echo -n "$1" 1>&2
+    echo -n "$*:" 1>&2
     read pass
+    echo 1>&2
     stty "$stty_g"
     trap '' 0 1 2 3 15
     echo "$pass"
 }
 
-getpass_admin1() { adm_pass=`askpass "Admin1 Password:"`; }
-getpass_sid()    { sid_pass=`askpass "SID Password:"`; }
+askpass_new()
+{
+    while :; do
+        pass1=`askpass "New ${1-Password}"`
+        pass2=`askpass "New ${1-Password} (confirm)"`
+        case $pass1 in $pass2 ) break ;; esac
 
-setpass_admin1() { :; }
-setpass_sid()    { :; }
+        echo "Input passwords do not match; please enter again" 1>&2
+        echo 1>&2
+    done
+    echo "$pass2"
+}
+
+getpass_adm() { adm_pass=`askpass "Admin1 Password"`; }
+getpass_sid() { sid_pass=`askpass "SID Password"`; }
+getpass_new() { new_pass=`askpass_new`; }
+
+######
+##
+######
 
 sedutil() { $SEDUTIL "$@"; }
-
-# n.b. this will echo passwords
-#sedutil() { (set -x; $SEDUTIL "$@"); }
 
 sedutil_query()
 {
@@ -54,6 +73,10 @@ sedutil_query()
 }
 
 query_match() { sedutil_query | egrep -i "$@"; }
+
+######
+##
+######
 
 opal_setup()
 {
@@ -149,10 +172,34 @@ opal_unlock()
     sedutil --setlockingrange 0 RW "$adm_pass" "$dev_arg"
 }
 
-opal_status()
+opal_query()
 {
     sedutil_query
 }
+
+opal_status()
+{
+    sedutil_query | sed -ne '/LockFunc:/!d' -e 's///p'
+}
+
+opal_setpass_adm()
+{
+    sedutil --setAdmin1Pwd   "$adm_pass" "$new_pass" "$dev_arg"
+}
+
+opal_setpass_sid()
+{
+    sedutil --setSIDPassword "$sid_pass" "$new_pass" "$dev_arg"
+}
+
+opal_msid()
+{
+    sedutil --printDefaultPassword "$dev_arg" | sed -e 's/^MSID: *//'
+}
+
+######
+##
+######
 
 fatal()
 {
@@ -169,11 +216,11 @@ usage()
     esac
     echo "Usage: ${0##*/} setup   /dev/sdX  [/path/to/pba.img{.gz}]"
     echo "       ${0##*/} revert  /dev/sdX"
-    echo "       ${0##*/} enable  /dev/sdX"
-    echo "       ${0##*/} disable /dev/sdX"
-    echo "       ${0##*/} lock    /dev/sdX"
-    echo "       ${0##*/} unlock  /dev/sdX"
-    echo "       ${0##*/} status  /dev/sdX"
+    echo "       ${0##*/} [enable | disable]  /dev/sdX"
+    echo "       ${0##*/} [lock   | unlock]   /dev/sdX"
+    echo "       ${0##*/} [query  | status]   /dev/sdX"
+    echo "       ${0##*/} setpass [adm | sid] /dev/sdX"
+    echo "       ${0##*/} msid /dev/sdX"
     exit 1
 }
 
@@ -199,13 +246,16 @@ main()
     esac
 
     case $1:$# in
+        setpass:3 | passwd:3 ) : ;;
+        setpass:* | passwd:* ) usage ;;
+
         setup:3 ) : ;;
         *:2     ) : ;;
         *:*     ) usage ;;
     esac
 
     case $1 in
-        status )
+        query | status | msid )
             cmd_arg=$1 ; shift
             dev_arg=$1 ; shift
             ;;
@@ -213,7 +263,7 @@ main()
         lock | unlock | enable | disable )
             cmd_arg=$1 ; shift
             dev_arg=$1 ; shift
-            getpass_admin1
+            getpass_adm
             ;;
 
         setup | revert )
@@ -224,7 +274,26 @@ main()
                 shift
             fi
             getpass_sid
-            getpass_admin1
+            getpass_adm
+            ;;
+
+        setpass | passwd )
+            shift
+            case $1 in
+                adm | admin1 )
+                    cmd_arg=setpass_adm ; shift
+                    getpass_adm
+                    ;;
+
+                sid )
+                    cmd_arg=setpass_sid ; shift
+                    getpass_sid
+                    ;;
+
+                * ) usage "password type must be 'sid' or 'admin1'" ;;
+            esac
+            dev_arg=$1 ; shift
+            getpass_new
             ;;
 
         * ) usage "$1: Unknown command" ;;
