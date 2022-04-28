@@ -90,7 +90,7 @@ opal_setup()
         fi
     fi
 
-    sedutil --initialsetup debug "$dev_arg"
+    sedutil --initialSetup debug "$dev_arg"
     # Expected output (not counting timestamps and device):
     # - 14:06:39.709 INFO: takeOwnership complete
     # - 14:06:41.703 INFO: Locking SP Activate Complete
@@ -101,17 +101,17 @@ opal_setup()
     # - 14:06:43.904 INFO: MBREnable set on
     # - 14:06:43.904 INFO: Initial setup of TPer complete on /dev/sda
 
-    sedutil --enablelockingrange 0 debug "$dev_arg"
+    sedutil --enableLockingRange 0 debug "$dev_arg"
     # - 14:07:24.914 INFO: LockingRange0 enabled ReadLocking,WriteLocking
 
-    sedutil --setlockingrange 0 LK debug "$dev_arg"
+    sedutil --setLockingRange 0 LK debug "$dev_arg"
     # - 14:07:46.728 INFO: LockingRange0 set to LK
 
     if [ -n "$pba_arg" ]; then
         sedutil --setmbrdone off debug "$dev_arg"
         # - 14:08:21.999 INFO: MBRDone set off
 
-        sedutil --loadpbaimage debug "$pba_arg" "$dev_arg"
+        sedutil --loadPBAimage debug "$pba_arg" "$dev_arg"
         # - 14:10:55.328 INFO: Writing PBA to /dev/sda
         # 33554432 of 33554432 100% blk=1500
         # - 14:14:04.499 INFO: PBA image  /usr/sedutil/UEFI64.img written to /dev/sda
@@ -164,12 +164,14 @@ opal_disable()
 
 opal_lock()
 {
-    sedutil --setlockingrange 0 LK "$adm_pass" "$dev_arg"
+    sedutil --setLockingRange 0 LK "$adm_pass" "$dev_arg"
+    sedutil --setMBRDone      off  "$adm_pass" "$dev_arg"
 }
 
 opal_unlock()
 {
-    sedutil --setlockingrange 0 RW "$adm_pass" "$dev_arg"
+    sedutil --setLockingRange 0 RW "$adm_pass" "$dev_arg"
+    sedutil --setMBRDone      on   "$adm_pass" "$dev_arg"
 }
 
 opal_query()
