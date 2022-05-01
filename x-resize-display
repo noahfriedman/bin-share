@@ -40,7 +40,16 @@ set_res()
     res=$1                 ; shift
     output=${1-$(get_out)} ; shift
 
-    xrandr1 --output "$output" --mode "$res" "$@";
+    # Assume 16:9 aspect ratio, since that's what all the manufacturers are
+    # forcing on us these days.  Sigh.
+    case ${res,,} in
+        4k    | uhd  ) res=3840x2160 ;;
+        2k    | qhd  ) res=2560x1440 ;;
+        1080p | fhd  ) res=1920x1080 ;;
+        720p         ) res=1280x720  ;;
+    esac
+
+    xrandr1 --output "$output" --mode "$res" "$@"
 }
 
 gcd()
