@@ -2,6 +2,7 @@
 
 orig_dir=${PWD-`pwd`}
 : ${RPMBUILD:=/usr/bin/rpmbuild}
+: ${LOCATE:=locate}
 
 case $# in
     0 ) : ;;
@@ -9,7 +10,7 @@ case $# in
             inst=`rpm -q --qf '%{SOURCERPM}\n' $1`
             case $inst in
                 *"is not installed" ) : ;;
-                * ) rpm=`locate -n 1 '*'/$inst`
+                * ) rpm=`$LOCATE -n 1 '*'/$inst`
                     case $rpm in
                         '' ) : ;;
                         * )
