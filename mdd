@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# $Id$
 
 # Wrapper around `dd' to join args with `=' where required.
 # This makes it easier to do filename completion on args without changing
@@ -8,17 +7,12 @@
 dd_op=( if ibs iflag    bs cbs conv
         of obs oflag    seek skip count status )
 
-
-apush() { eval "$1=(\"\${$1[@]}\" \"\${@:2}\")"; }
-
 member()
 {
-    eval set : "$1" "\"\${$2[@]}\""
-    shift
-    while [ $# -gt 1 ]; do
-        case $2 in $1 ) return 0 ;; esac
-        set : "$1" "${@:3}"
-        shift
+    declare -n list=$2
+    local arg
+    for arg in "${list[@]}"; do
+        case $arg in $1 ) return 0 ;; esac
     done
     return 1
 }
@@ -28,10 +22,10 @@ main()
     declare -a ddarg=()
     while [ $# -gt 0 ]; do
         if member "$1" dd_op; then
-            apush ddarg "$1=$2"
+            ddarg+=( "$1=$2" )
             shift
         else
-            apush ddarg "$1"
+            ddarg+=( "$1" )
         fi
         shift
     done
