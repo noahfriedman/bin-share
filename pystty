@@ -105,8 +105,9 @@ class PseudoTermios( object ):
         N_PPS      = 18 # Pulse per Second (GPS, etc)
         N_NULL     = 27 # Null ldisc used for error handling
 
-    elif OS == 'FreeBSD':
-        # Unlike linux, the freebsd speeds are pretty direct.
+    elif OS in ('FreeBSD', 'Darwin'):
+        # Darwin's tty line discipline is most similar to FreeBSD's
+
         B7200      =   7200
         B14400     =  14400
         B28800     =  28800
