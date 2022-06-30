@@ -50,7 +50,7 @@ sedutil() { $SEDUTIL "$@"; }
 
 sedutil_query()
 {
-    sedutil-cli --query "${1-$dev_arg}" |
+    sedutil --query "${1-$dev_arg}" |
         perl -ne '
             unless (/=/) {
                 /^(\S{4})\S*\s+(?:[\d.]+\s+)?(\S{4})/i
@@ -74,6 +74,30 @@ sedutil_query()
 
 query_match() { sedutil_query | egrep -i "$@"; }
 
+sedutil_lockingranges()
+{
+    sedutil --listlockingranges "$adm_pass" "${1-$dev_arg}" |
+        perl -ne '
+            if (/^LR(\d+)\s+Begin\s+(\d+)\s+for\s+(\d+)/)
+              { ($lr, $beg, $end) = ( $1, $2, $3, ) }
+            elsif (/=/)
+              {
+                $ena = /=\s*(\S)\s+\S+\s*=\s*(\S)/g && $1 . $2;
+                $ena = ($ena =~ /Y/) ? "Y" : "N";
+                $mode = /=\s*(\S)\s+\S+\s*=\s*(\S)/g && $1 . $2;
+                $mode = { NN => "RW", YY => "LK",
+                          NY => "RO", YN => "WO", }->{$mode};
+                if ($lr == 0)
+                  { print "LR$lr=$ena:$mode\n" }
+                else
+                  {
+                    $st = "$ena:$mode:$beg:$end";
+                    next if $st eq "N:RW:0:0";
+                    print "LR$lr=$st\n";
+                  }
+              }'
+}
+
 ######
 ##
 ######
@@ -90,43 +114,24 @@ opal_setup()
         fi
     fi
 
-    sedutil --initialSetup debug "$dev_arg"
-    # Expected output (not counting timestamps and device):
-    # - 14:06:39.709 INFO: takeOwnership complete
-    # - 14:06:41.703 INFO: Locking SP Activate Complete
-    # - 14:06:42.317 INFO: LockingRange0 disabled
-    # - 14:06:42.694 INFO: LockingRange0 set to RW
-    # - 14:06:43.171 INFO: MBRDone set on
-    # - 14:06:43.515 INFO: MBRDone set on
-    # - 14:06:43.904 INFO: MBREnable set on
-    # - 14:06:43.904 INFO: Initial setup of TPer complete on /dev/sda
-
-    sedutil --enableLockingRange 0 debug "$dev_arg"
-    # - 14:07:24.914 INFO: LockingRange0 enabled ReadLocking,WriteLocking
-
-    sedutil --setLockingRange 0 LK debug "$dev_arg"
-    # - 14:07:46.728 INFO: LockingRange0 set to LK
+    sedutil --initialSetup              debug "$dev_arg"
+    # These are performed already as part of setup.
+    #sedutil --disableLockingRange 0    debug "$dev_arg"
+    #sedutil --setLockingRange     0 RW debug "$dev_arg"
+    #sedutil --setMBRDone         on    debug "$dev_arg"
 
     if [ -n "$pba_arg" ]; then
-        sedutil --setmbrdone off debug "$dev_arg"
-        # - 14:08:21.999 INFO: MBRDone set off
-
+        # n.b. you don't need to set MBRDone `off' before writing the PBA
         sedutil --loadPBAimage debug "$pba_arg" "$dev_arg"
-        # - 14:10:55.328 INFO: Writing PBA to /dev/sda
-        # 33554432 of 33554432 100% blk=1500
-        # - 14:14:04.499 INFO: PBA image  /usr/sedutil/UEFI64.img written to /dev/sda
     fi
 
     # The SID and Admin1 passwords do not have to match but it makes things easier.
     # The SID password is used for initializing and unconfiguring OPAL entirely
     # The Admin1 password is used for everyday operations.
-    sedutil --setSIDPassword debug "$sid_pass" "$dev_arg"
-    sedutil --setAdmin1Pwd   debug "$adm_pass" "$dev_arg"
+    test ".$sid_pass" != ".debug" && sedutil --setSIDPassword debug "$sid_pass" "$dev_arg"
+    test ".$adm_pass" != ".debug" && sedutil --setAdmin1Pwd   debug "$adm_pass" "$dev_arg"
 
-    # Your drive is now using OPAL locking.
-    # You now need to COMPLETELY POWER DOWN YOUR SYSTEM
-    # This will lock the drive so that when you restart your system it will
-    # boot the PBA (preboot authentication).
+    echo "Power-on locking enabled but currently unlocked"
 }
 
 opal_revert()
@@ -134,11 +139,8 @@ opal_revert()
     opal_disable
 
     sedutil --revertNoErase "$adm_pass" "$dev_arg"
-    # Revert LockingSP complete
-
     if query_match LockingEnabled=N; then
         sedutil --revertTPer "$sid_pass" "$dev_arg"
-        # revertTper completed successfully
     else
         fatal "NOT executing --revertTPer as it might erase drive."
     fi
@@ -146,32 +148,27 @@ opal_revert()
 
 opal_enable()
 {
-    sedutil --enableLockingRange 0 "$adm_pass" "$dev_arg"
-    # - 14:07:24.914 INFO: LockingRange0 enabled ReadLocking,WriteLocking
-
-    sedutil --setMBREnable      on "$adm_pass" "$dev_arg"
-    # - 14:08:21.999 INFO: MBREnable set on
+    sedutil --enableLockingRange  0     "$adm_pass" "$dev_arg"
+    sedutil --setMBREnable        on    "$adm_pass" "$dev_arg"
 }
 
-# If you want to disable Locking and the PBA:
 opal_disable()
 {
-    sedutil --disableLockingRange 0   "$adm_pass" "$dev_arg"
-    # - 14:07:24.914 INFO: LockingRange0 disabled
-    sedutil --setMBREnable        off "$adm_pass" "$dev_arg"
-    # - 14:08:21.999 INFO: MBREnable set off
+    sedutil --setlockingrange     0 RW  "$adm_pass" "$dev_arg"
+    sedutil --disableLockingRange 0     "$adm_pass" "$dev_arg"
+    sedutil --setMBREnable        off   "$adm_pass" "$dev_arg"
 }
 
 opal_lock()
 {
-    sedutil --setLockingRange 0 LK "$adm_pass" "$dev_arg"
-    sedutil --setMBRDone      off  "$adm_pass" "$dev_arg"
+    sedutil --setLockingRange     0 LK  "$adm_pass" "$dev_arg"
+    sedutil --setMBRDone          off   "$adm_pass" "$dev_arg"
 }
 
 opal_unlock()
 {
-    sedutil --setLockingRange 0 RW "$adm_pass" "$dev_arg"
-    sedutil --setMBRDone      on   "$adm_pass" "$dev_arg"
+    sedutil --setLockingRange     0 RW  "$adm_pass" "$dev_arg"
+    sedutil --setMBRDone          on    "$adm_pass" "$dev_arg"
 }
 
 opal_query()
@@ -182,6 +179,7 @@ opal_query()
 opal_status()
 {
     sedutil_query | sed -ne '/LockFunc:/!d' -e 's///p'
+    sedutil_lockingranges
 }
 
 opal_setpass_adm()
@@ -235,6 +233,8 @@ main()
 
     case `uname -s` in
         Linux )
+            # Is this necessary for nvme drives?
+            # sedutil might require it even if it isn't.
             param=/sys/module/libata/parameters/allow_tpm
             errmsg="libata.allow_tpm is not enabled; cannot continue."
             if [ -f $param ]; then
@@ -257,12 +257,12 @@ main()
     esac
 
     case $1 in
-        query | status | msid )
+        query | msid )
             cmd_arg=$1 ; shift
             dev_arg=$1 ; shift
             ;;
 
-        lock | unlock | enable | disable )
+        lock | unlock | enable | disable | status )
             cmd_arg=$1 ; shift
             dev_arg=$1 ; shift
             getpass_adm
@@ -276,7 +276,11 @@ main()
                 shift
             fi
             getpass_sid
-            getpass_adm
+            if [ ".$sid_pass" = ".debug" ]; then
+                adm_pass=$sid_pass
+            else
+                getpass_adm
+            fi
             ;;
 
         setpass | passwd )
