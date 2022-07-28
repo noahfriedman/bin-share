@@ -1,0 +1,4 @@
+#!/bin/sh
+
+pyrepl=`run-next -s 0 -p pyrepl`
+exec python3 "$pyrepl" "$@"
