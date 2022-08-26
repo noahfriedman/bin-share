@@ -1,5 +1,4 @@
 #!/bin/sh
-# $Id: elf-needed,v 1.4 2009/03/19 21:56:00 friedman Exp $
 
 # Like `ldd', but just print the immediate shared library dependency names
 # of the specified elf object.  `ldd' does a recursive traversal of the
@@ -8,32 +7,39 @@
 
 needed()
 {
-  readelf=${READELF-readelf}
-  readelf -d "$1" \
-    | sed -e '/RUNPATH/{s/.*runpath: \[\(.*\)\]/RUNPATH=\1/p;}' \
-          -e '/RPATH/{s/.*rpath: \[\(.*\)\]/RPATH=\1/p;}' \
-          -e '/SONAME/{s/.*soname: \[\(.*\)\]/SONAME=\1/p;}' \
-          -e '/NEEDED/!d' \
-          -e 's/^.*NEEDED.*Shared library: *//' \
-          -e 's/\[\(.*\)\]/\1/'
+    $READELF -d "$1" \
+        | sed -e '/RUNPATH/{s/.*runpath: \[\(.*\)\]/RUNPATH=\1/p;}' \
+              -e '/RPATH/{s/.*rpath: \[\(.*\)\]/RPATH=\1/p;}' \
+              -e '/SONAME/{s/.*soname: \[\(.*\)\]/SONAME=\1/p;}' \
+              -e '/NEEDED/!d' \
+              -e 's/^.*NEEDED.*Shared library: *//' \
+              -e 's/\[\(.*\)\]/\1/'
 }
 
 main()
 {
-  case $# in
-    0 ) echo "Usage: $0 [files ...]" 1>&2
-        exit 1 ;;
+    # prefer eu-readelf over readelf;
+    # binutils can be much slower than elfutils.
+    if type eu-readelf > /dev/null 2>&1; then
+        : ${READELF:=eu-readelf}
+    else
+        : ${READELF:=readelf}
+    fi
 
-    1 ) needed "$1" ;;
+    case $# in
+        0 ) echo "Usage: $0 [files ...]" 1>&2
+            exit 1 ;;
 
-    * ) for f in ${1+"$@"}; do
-          echo "$f:"
-          needed "$f" | sed -e 's/^/	/'
-          echo
-        done ;;
-  esac
+        1 ) needed "$1" ;;
+
+        * ) for f in "$@"; do
+                echo "$f:"
+                needed "$f" | sed -e 's/^/	/'
+                echo
+            done ;;
+    esac
 }
 
-main ${1+"$@"}
+main "$@"
 
 # eof
