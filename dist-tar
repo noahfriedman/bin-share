@@ -1,16 +1,23 @@
 #!/bin/sh
-# $Id: dist-tar,v 1.10 2017/09/30 01:09:27 friedman Exp $
 
 LC_COLLATE=C
 export LC_COLLATE
 
 cmdp() { type "$@" > /dev/null 2>&1; }
 case ${FIND-nil} in nil ) if cmdp gfind; then FIND=gfind; fi ;; esac
-case ${TAR-nil}  in nil ) if cmdp gtar;  then TAR=gtar;   fi ;; esac
+case ${TAR-nil}  in nil ) if cmdp gtar;  then  TAR=gtar;  fi ;; esac
 case ${SORT-nil} in nil ) if cmdp gsort; then SORT=gsort; fi ;; esac
 
 : ${ZLEVEL:=9}
 : ${DIST_TAR_ZIP:=gzip}
+
+: ${FIND:=find}
+: ${FPRINT:=print}
+: ${RM:=rm}
+: ${SORT:=sort}
+: ${TAR:=tar}
+: ${TOUCH:=touch}
+
 
 while [ $# -gt 0 ]; do
     case $1 in
@@ -29,9 +36,9 @@ while [ $# -gt 0 ]; do
 done
 
 gnup() { "$1" --version 2>&1 | grep "GNU" > /dev/null; }
-if gnup ${TAR-tar}; then
+if gnup $TAR; then
     gnutar=t
-    if gnup ${FIND-find} && gnup ${SORT-sort}; then
+    if gnup $FIND && gnup $SORT; then
         FPRINT=print0
         SORTOPT="$SORTOPT --zero-terminated"
         TAROPT="$TAROPT --null"
@@ -58,17 +65,17 @@ for dir in "$@" ; do
     dir=${dir%/}
     { case $gnutar in
           t ) echo "dist-tar: (gnu) packing $dir.tar.$z"
-              ${FIND-find} "$dir" -${FPRINT-print} \
-                  | ${SORT-sort} $SORTOPT \
-                  | ${TAR-tar} $TAROPT --no-recursion -T - -cvf - \
+              $FIND "$dir" -$FPRINT \
+                  | $SORT $SORTOPT \
+                  | $TAR $TAROPT --no-recursion -T - -cvf - \
                   | $zip $zargs > "$dir.tar.$z" ;;
 
           * ) echo "dist-tar: packing $dir.tar.$z"
-              ${TAR-tar} $TAROPT -cvf - "$dir" \
+              $TAR $TAROPT -cvf - "$dir" \
                   | $zip $zargs > "$dir.tar.$z" ;;
       esac
-    } && touch -r "$dir" "$dir.tar.$z" \
-      && rm -rf "$dir"
+    } && $TOUCH -r "$dir" "$dir.tar.$z" \
+      && $RM -rf "$dir"
 done
 
 # eof
