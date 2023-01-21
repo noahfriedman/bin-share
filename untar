@@ -142,6 +142,10 @@ extract()
         *initramfs*.img | *initrd*.img | *ramdisk.img )
             extract_initrd "$file" ;;
 
+        *.cramfs )
+            dest=${file##*/}
+            fsck.cramfs -v --extract="${dest%.cramfs}" "$file" ;;
+
         *.squashfs )
             dest=${file##*/}
             unsquashfs -i -d "${dest%.squashfs}" "$file" ;;
