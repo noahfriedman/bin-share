@@ -409,6 +409,10 @@ __DATA__
 ## GPG key fingerprints for RPM signatures
 ######
 
+a15b79cc	fedora-40
+18b8e74c	fedora-39
+eb10b464	fedora-38
+5323552a	fedora-37
 38ab71f4	fedora-36
 9867c58f	fedora-35
 45719a39	fedora-34
@@ -471,7 +475,7 @@ dbbdcf7c	fedora-iot-2019
 
 fd431d51	rhel-6
 
-d651ff2e	rpmfusion-free-2020	# Used for f33-f36 as of 2021-07-17
+d651ff2e	rpmfusion-free-2020	# Used for f33-f37 as of 2023-04-28
 100bcd92	rpmfusion-free-f32
 c481937a	rpmfusion-free-f31
 c0aeda6e	rpmfusion-free-f30
@@ -496,7 +500,7 @@ a3780952	rpmfusion-free-f13
 8fcff4da	rpmfusion-free-f11
 49c8885a	rpmfusion-free-f10-or-earlier
 
-94843c65	rpmfusion-nonfree-2020	# Used for f33-f36 as of 2021-07-17
+94843c65	rpmfusion-nonfree-2020	# Used for f33-f37 as of 2023-04-28
 6dc1be18	rpmfusion-nonfree-f32
 54a86092	rpmfusion-nonfree-f31
 1d14a795	rpmfusion-nonfree-f30
