@@ -314,7 +314,13 @@ CC_PARAM_LIST = (
 _Enum( 'CC_PARAM_POS',
        'CC_PARAM_DFLT', )
 
-CC_PARAM = { elt[ 0 ] : elt[ 1: ] for elt in CC_PARAM_LIST }
+# This will map both cchar name and pos to its default char.
+# For pos entries, the first element in their values will be the name.
+CC_PARAM = {}
+for elt in CC_PARAM_LIST:
+    CC_PARAM[ elt[ 0 ]] = elt[ 1: ]
+    if elt[ 1 ] is not False: # is this cchar defined on this platform?
+        CC_PARAM[ elt[ 1 ]] = elt[ 0:3:2 ]
 CC_PARAM[ 'swtc' ] = CC_PARAM[ 'swtch' ]
 
 STDKEYS = []
@@ -584,6 +590,11 @@ class Stty( object ):
                 'CR'      : b( '\x0d' ),
                 'RET'     : b( '\x0d' ),
                 'ESC'     : b( '\x1b' ),
+                # stty doesn't parse escape chars, so '^\\' is
+                # invalid. But because people get confused about shell
+                # quoting all the time, just handle it.
+                '^\\\\'   : b( '\x1c' ),
+                'C-\\\\'  : b( '\x1c' ),
                #'SP'      : b( '\x20' ),
                #'SPC'     : b( '\x20' ),
                 'DEL'     : b( '\x7f' ),
@@ -713,6 +724,8 @@ class Stty( object ):
         self.tcgetattr()
         if key in [termios.VMIN, termios.VTIME]:
             char = int( char )
+        elif char.lower() in ['dflt', 'default']:
+            char = cc_dflt( key )
         else:
             if isinstance( char, int ):
                 char = chr( char )
