@@ -11,7 +11,7 @@ stty=${STTY-stty}
     # arguments.
 
     $stty icanon tabs
-    $stty intr '^C' kill '^U' quit '^\\' eof '^D'
+    $stty intr '^C' kill '^U' quit '^\' eof '^D'
     $stty susp '^Z'
     $stty -ixon -ixoff -ixany
     $stty onlcr -ocrnl -onlret
