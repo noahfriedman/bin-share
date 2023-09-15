@@ -1,0 +1,81 @@
+#!/usr/bin/env perl
+# zfs-snapshot-sizes --- summarize snapshot sizes and total referenced data
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2022-09-28
+# Public domain
+
+use strict;
+use warnings qw(all);
+
+sub bt
+{
+  open( my $fh, "-|", @_ ) or die "exec: $_[0]: $!\n";
+  local $/ = undef;
+  return <$fh>;
+}
+
+sub scale_size
+{
+  my ($size, $roundp, $fp, $minimize) = @_;
+  return "0" unless $size;
+
+  my $fmtsize = 1024; # no SI handling here
+  my @suffix = (qw(B K M G T P E));
+  my %suffix = map { $_ => undef } @suffix;
+  my $idx    = 0;
+
+  while ($size >= $fmtsize)
+    {
+      $size /= $fmtsize;
+      $idx++;
+    }
+
+  if ($size < 10 && !$minimize) # Prefer 4096M to 4G
+    {
+      $size *= $fmtsize;
+      $idx--;
+    }
+
+  $size = POSIX::round( $size ) if $roundp;
+  $size = int( $size ) if $size == int( $size );
+
+  my $unit;
+  if ($idx == 0) { $unit = '' }
+  else { $unit = $suffix[$idx] }
+
+  my $fmtstr = ($size == int( $size )
+                ? "%d%s"
+                : sprintf( "%%.%df%%s", $fp || 2 ));
+  return sprintf( $fmtstr, $size, $unit );
+}
+
+sub main
+{
+  # Avoid "possible attempt to separate words with commas" warning in qw()
+  my @cmd = (qw(zfs list -r -t snapshot -H -p -o), 'name,used,refer');
+
+  my %elt;
+  my $ncol;
+  for my $line (split( /[\r\n]+/, bt( @cmd, @_ )))
+    {
+      my @f = split( /\s+/, $line );
+      $ncol = scalar @f;  # n.b. should always be the same value
+
+      $f[0] =~ s=/.*?@=@=;
+      my $row = $elt{$f[0]} ||= [];
+      for (my $i = 1; $i < @f; $i++) { $row->[$i-1] += $f[$i] }
+    }
+
+  my $fmt = "%-32s\t" . join("  ", ("%8s") x ($ncol-1)) . "\n";
+  printf( $fmt, "SNAPSHOT", "USED", "REFER" );
+
+  for my $key (sort keys %elt)
+    {
+      my $row = $elt{$key};
+      printf( $fmt, $key, map { scale_size( $_ ) } @$row );
+    }
+}
+
+main( @ARGV );
+
+# eof
