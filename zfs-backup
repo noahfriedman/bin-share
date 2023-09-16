@@ -1,0 +1,108 @@
+#!/bin/bash
+# $Id: zfs-backup,v 1.5 2016/06/11 05:53:28 friedman Exp $
+
+# To initialize iscsi target on freebsd:
+#	iscsictl -A -d wdmc-1.prv.splode.com
+#	iscsictl -A -d obey-chomsky.prv.splode.com
+#
+# To bring iscsi backup pool online:
+# 	zpool import [poolname]
+#
+# To take offline on freebsd:
+# 	zpool export [poolname]
+#	iscsictl -R -p obey-chomsky.prv.splode.com
+
+
+# latest (most recent) common snapshot
+oldsnap()
+{
+    srcpool=${1%%@*}
+    dstpool=${2%%@*}
+
+    zfs list -t snapshot -H -d 1 -o name -S name $srcpool |
+        while read snap; do
+            snap=${snap##*@}
+            if zfs list $dstpool@$snap > /dev/null 2>&1; then
+                echo $snap
+                return 0
+            fi
+        done
+    return 1
+}
+
+newsnap()
+{
+    case $1 in
+        *@* ) newsnap=${1#*@}
+              if ! fslist $srcpool@$newsnap > /dev/null 2>&1; then
+                  echo Snapshot $srcpool@$newsnap does not exist. 1>&2
+                  return 1
+              fi ;;
+
+        *   ) newsnap=`mksnap $srcpool` ;;
+    esac
+
+    echo $newsnap
+}
+
+mksnap()
+{
+    name=backup.`date +"%Y-%m-%d.%H:%M:%S"`
+    zfs snapshot -r $1@$name
+    echo $name
+}
+
+fslist()
+{
+    zfs list -H -r -o name "$@"
+}
+
+backup()
+{
+    srcpool=${1%%@*}
+    dstpool=$2
+
+    newsnap=`newsnap $1`
+    case $newsnap in '' ) return 1 ;; esac
+
+    oldsnap=`oldsnap $srcpool $dstpool`
+    case $oldsnap in
+        $newsnap ) echo "Both pools already have snapshot $oldsnap" 1>&2
+                   return 0 ;;
+    esac
+
+    for fs in `fslist $srcpool`; do
+        date +"[%Y-%m-%d %H:%M:%S%z] Backing up $fs"
+        time { zfs send -e ${oldsnap:+-I $oldsnap} $fs@$newsnap | zfs recv -F -v -d $dstpool; }
+    done
+    date +"[%Y-%m-%d %H:%M:%S%z] Done."
+}
+
+mirror()
+{
+    srcpool=${1%@*}
+    dstpool=$2
+
+    newsnap=`newsnap $1`
+    case $newsnap in '' ) return 1 ;; esac
+
+    date +"[%Y-%m-%d %H:%M:%S%z] Mirroring $srcpool@$newsnap to $dstpool"
+    zfs send -e -R $srcpool@$newsnap | zfs recv -F -v -d $dstpool
+    date +"[%Y-%m-%d %H:%M:%S%z] Done."
+}
+
+main()
+{
+    PATH=/sbin:$PATH
+
+    case $#:$3 in
+        2:      ) backup "$@" ;;
+        3:-full ) mirror "$@" ;;
+        *       ) echo "Usage: ${0##*/} [srcpool] [dstpool]" 1>&2
+                  exit 1 ;;
+    esac
+}
+
+main "$@"
+
+# eof

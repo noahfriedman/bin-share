@@ -1,0 +1,16 @@
+#!/bin/sh
+# $Id: zfs-release-snapshots,v 1.1 2014/12/07 00:07:58 friedman Exp $
+
+for snap in "$@"; do
+    case "$snap" in
+        *@* )
+            echo "$snap"
+            zfs destroy -r "$snap"
+            ;;
+        * )
+            echo "$snap: not a snapshot" 1>&2
+            ;;
+    esac
+done
+
+# eof
