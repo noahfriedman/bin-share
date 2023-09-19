@@ -70,11 +70,11 @@ sub main
       my $from = dereference_symlinks ($to);
       if (-f $from)
         {
+          xunlink ($to);
           if ($opt{hardlink})
             { xlink ($from, $to) }
           else
             {
-              xunlink ($to);
               copy_file ($from, $to, $opt{preserve}, 0);
             }
         }
