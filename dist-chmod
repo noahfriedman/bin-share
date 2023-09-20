@@ -1,9 +1,8 @@
 #!/bin/sh
 # dist-chmod --- fixup file/directory permissions recursively
 # Author: Noah Friedman <friedman@splode.com>
+# Created: 1996-06-03
 # Public domain.
-
-# $Id: dist-chmod,v 1.8 2016/01/17 05:17:58 friedman Exp $
 
 setgid=
 sticky=
@@ -17,6 +16,7 @@ while : ; do
         -1    ) bits=o      ; shift ;;  # legacy dist-chmod1 behavior
         -2    ) bits=og     ; shift ;;  # legacy dist-chmod2 behavior
         -v    ) verbose=-v  ; set -x ; shift ;;
+        -c    ) verbose=-c  ; shift ;;  # gnu chmod -c
         -w    ) bits=$2     ; shift  ; shift ;;
         +s    ) setgid=,g+s ; shift  ;;
         -s    ) setgid=,g-s ; shift  ;;
@@ -28,11 +28,11 @@ while : ; do
         --*   ) :           ; shift  ; break ;;
         -??*  ) opts=$1   # split single-letter options and reparse
                 shift
-                set fnord `echo $opts | sed -e 's/^-//;s/\(.\)/-\1 /g'` ${1+"$@"}
+                set fnord `echo $opts | sed -e 's/^-//;s/\(.\)/-\1 /g'` "$@"
                 shift ;;
         +??*  ) opts=$1   # split single-letter options and reparse
                 shift
-                set fnord `echo $opts | sed -e 's/^\+//;s/\(.\)/+\1 /g'` ${1+"$@"}
+                set fnord `echo $opts | sed -e 's/^\+//;s/\(.\)/+\1 /g'` "$@"
                 shift ;;
         [-+]* ) echo "$1: Unknown option." 1>&2
                 exit 1 ;;
@@ -47,29 +47,35 @@ case $bits in
     *       ) fmode=$fmode,${bits}-w ;;
     [0-9]*  ) fmode=$bits
 esac
-
 dmode=a+x$setgid$sticky,$fmode
-if find --version 2>&1 | grep 'GNU find' > /dev/null ; then
-    find ${1+"$@"} ! -type l -type d -print0 \
-        | xargs --null --no-run-if-empty chmod $verbose $dmode
 
-    find ${1+"$@"} ! -type l -type f -print0 \
-        | xargs --null --no-run-if-empty chmod $verbose $fmode$fexec
+cmdp() { type "$@" > /dev/null 2>&1; }
+case ${FIND-nil}  in nil ) if cmdp gfind;  then  FIND=gfind;  fi ;; esac
+case ${CHMOD-nil} in nil ) if cmdp gchmod; then CHMOD=gchmod; fi ;; esac
+case ${CHOWN-nil} in nil ) if cmdp gchown; then CHOWN=gchown; fi ;; esac
+: ${FIND:=find} ${CHMOD:=chmod} ${CHOWN:=chown} ${GREP:=grep}
+
+if $FIND --version 2>&1 | $GREP 'GNU find' > /dev/null ; then
+    # Assume GNU find supports '{} +' syntax; it has since 2005.
+    $FIND "$@"    \( -type l -prune \) \
+               -o \( -type d -exec $CHMOD $verbose $dmode       '{}' + \) \
+               -o \( -type f -exec $CHMOD $verbose $fmode$fexec '{}' + \)
 else
     case $verbose in
         '' ) print=       ;;
         *  ) print=-print ;;
     esac
-    find ${1+"$@"} ! -type l -type d $print -exec chmod $dmode       '{}' ';'
-    find ${1+"$@"} ! -type l -type f $print -exec chmod $fmode$fexec '{}' ';'
+    $FIND "$@"    \( -type l -prune \) \
+               -o \( -type d $print -exec $CHMOD $dmode       '{}' ';' \) \
+               -o \( -type f $print -exec $CHMOD $fmode$fexec '{}' ';' \)
 fi
 
 case $owner in
     ''  ) exit $? ;;
     *:* ) : ;;
-    *.* ) owner=`echo "$owner" | sed -e 's/\./:/'` ;;
+    *.* ) owner=${owner%%.*}:${owner#*.} ;;
 esac
 
-chown $verbose -h -R $owner ${1+"$@"}
+$CHOWN $verbose -h -R "$owner" "$@"
 
 # eof
