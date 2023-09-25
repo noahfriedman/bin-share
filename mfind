@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 
-lsfmt='%8i %7k  %M  %2n  %-7u  %-7g  %10s  %TY-%Tm-%Td %TH:%TM:%TS %Tz  %p\n'
+base_fmt='%8i %7k  %M  %2n  %-7u  %-7g  %10s  %TY-%Tm-%Td %TH:%TM:%TS %Tz  %p'
+sym_fmt="${base_fmt} -> %l\n"
+std_fmt="${base_fmt}\n"
+
+print=(
+    '('
+        '(' -type l -printf "$sym_fmt" ')'
+      -o
+        '('         -printf "$std_fmt" ')'
+    ')'
+)
+
 
 find=$( type -p gfind || echo find  )
 args=()
 
 for arg in "$@"; do
     case $arg in
-        -ls ) args+=( -printf "$lsfmt" ) ;;
+        -ls ) args+=( "${print[@]}" ) ;;
         *   ) args+=( "$arg" ) ;;
     esac
 done
