@@ -4,131 +4,132 @@
 # Created: 1993-09-26
 # Public domain
 
-# $Id: mkpass,v 1.9 2009/02/10 01:20:47 friedman Exp $
-
 # Commentary:
 # Code:
 
 use strict;
+use warnings qw(all);
+
 use Getopt::Long;
+use Pod::Usage;
 use POSIX;
 
-$^W = 1;  # enable warnings
+(my $progname = $0) =~ s|.*/||;
 
-my $progname;
-($progname = $0) =~ s|.*/||;
-
-my $salt;
-my $cost;
-my $method;
-my $interactivep;
+my %opt = ( interactive => -t STDIN,
+            method      => 'des',
+            salt        => undef,
+            cost        => undef,
+          );
 
 my %crypt_salt
-  = ( des    => { prefix => '',
-                  len    => 2,
-                },
+  = ( yescrypt        => { prefix    => 'y',
+                           salt_size => [ 8, 512, 128 ], # min, max bits, default
+                           cost      => [ 1,  11,   5 ], # min, max, default
+                           gensalt   => \&yescrypt_gensalt,
+                         },
 
-      md5    => { prefix => '$1$',
-                  len    => 8,
-                },
+      'gost-yescrypt' => { prefix    => 'gy',
+                           parent    => 'yescrypt',
+                         },
 
-      # glibc 2.7 and later
-      sha256 => { prefix => '$5$',
-                  len    => sub { 16 }, # default, but exact not required
-                },
+      scrypt          => { prefix    => '7',
+                           parent    => 'yescrypt',
+                         },
 
-      # glibc 2.7 and later
-      sha512 => { prefix => '$6$',
-                  len    => sub { 16 }, # default, but exact not required
-                },
-
+      bcrypt          => { prefix    => '2b',             # or '2y', for legacy reasons
+                           maxpass   =>  72,                # maximum passphrase length
+                           salt_size => [ 128, 128, 128 ],  # min  max, default bits
+                           cost      => [   4,  31,   5 ],  # min, max, default
+                         },
       # NetBSD, FreeBSD, Solaris 9 and later
-      bsdbf  => { prefix => '$2a$',
-                  len    => 16,
-                  cost   => \&bsdbf_cost,
-                  encode => \&base64_encode,
-                },
+      bsdbf           => { prefix    => '2a',
+                           salt_size => 128,
+                           cost      => [ 4, 63, 8 ],
+                         },
+
+      # glibc 2.7 and later
+      sha512          => { prefix    => '6',
+                           salt_size => [ 6, 96, 6 ],
+                           cost      => [ 1000, 999_999_999, 5000 ],
+                         },
+
+      sha256          => { prefix    => '5',
+                           parent    => 'sha512',
+                         },
+
+      sha1            => { prefix    => 'sha1',
+                           salt_size => [ 6, 384, 0 ],
+                           cost      => [ 4, 4_294_963_199,  ],
+                         },
 
       # Solaris.  See /etc/security/crypt.conf
       # The salt can be arbitrarily long for this implementation, but the
       # function fails on larger salts as the number of rounds increases.
-      sunmd5 => { prefix => '$md5$',
-                  len    => sub { 16 },  # default, but exact not required
-                  cost   => sub { sprintf ("rounds=%d\$", $_[0] || 904) },
-                  encode => sub { $_[0] . '$dummy' },
-                },
+      sunmd5          => { prefix    => 'md5',
+                           salt_size => 48,
+                           cost      => [ 4096, 4_294_963_199, undef ],  # 904 default?
+                         },
+
+      md5             => { prefix    => '1',
+                           salt_size => [ 6, 48, undef ],
+                           cost      => 1000,  # is this used?
+                         },
+
+      des             => { prefix    => undef,
+                           salt_size => 2,
+                         },
     );
 
-my $opt_methods = join ("|", sort keys %crypt_salt);
-
-sub usage
-{
-  print STDERR "Usage: $progname {options} {cleartext}
-
-Options are:
--D, --debug                  Enable debugging.
--h, --help                   You're looking at it.
--i, --interactive            Prompt for input and confirmation even if
-                             standard input is not a terminal.
-
--s, --salt     SALT          Use SALT to encode cleartext.
-                             Default is to generate a random sequence.
-                             SALT should be a 2-letter sequence for DES
-                             style encryption, an 8-letter sequence
-                             optionally prefixed by \`\$1\$' for MD5 style,
-                             Or a 16-letter sequence for SHA256/SHA512.
-
--c, --cost     COST          \"Cost\" (e.g. number of rounds) for some algorithms.
-                             This is only used for some algorithms,
-                             e.g. \`bsdbf' or \`sunmd5'.
-
--m, --method   [$opt_methods]
-                             Choose an encryption algorithm.
-                             Default depends on supplied SALT, or \`des'
-                             if no salt is supplied.
---[$opt_methods]	Use corresponding method.
-
-If cleartext is not specified on the command line, it will be prompted for
-interactively.  Specifying the cleartext on the command line is less secure
-since someone may be able to see it with the \`ps' command.
-You can also feed the cleartext password as input using a pipe.\n";
-  exit (1);
-}
+my $opt_methods = join( "|", sort keys %crypt_salt );
 
 sub diag
 {
-  print STDERR join (": ", $progname, @_), "\n";
+  print STDERR join( ": ", $progname, @_ ), "\n";
 }
 
 sub parse_options
 {
-  $interactivep = -t STDIN;
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help = 0;
 
-  Getopt::Long::config ('bundling', 'autoabbrev');
-  GetOptions ("s|salt=s",      \$salt,
-              "c|cost=i",      \$cost,
-              "m|method=s",    \$method,
-              (map { $_, sub { $method = $_[0] }, } keys %crypt_salt),
-              "i|interactive", \$interactivep,
-              "h|help",        \&usage);
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure( qw(bundling autoabbrev) );
+  my $succ = $parser->getoptions
+    ( 'h|help+'        => \$help,
+      'usage'          => sub { $help = 1 },
+      'i|interactive', => \$opt{interactive},
 
-  $method = (defined $salt
-             ? (length ($salt) < 3
-                ? 'des'
-                : 'md5')
-             : 'des')
-    unless defined $method;
+      'm|method=s',    => \$opt{method},
+      's|salt=s',      => \$opt{salt},
+      'c|cost=i',      => \$opt{cost},
+      (map { $_, sub { $opt{method} = $_[0] }, } keys %crypt_salt),
+    );
 
-  unless (exists $crypt_salt{$method})
+  pod2usage (-exitstatus => 1, -verbose => 0)         unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help - 1) if $help > 0;
+
+  unless ($opt{method})
     {
-      diag ($method, "Unknown encryption method.");
+      $opt{method} = (defined $opt{salt}
+                      ? (length( $opt{salt} ) < 3
+                         ? 'des'
+                         : 'md5')
+                      : 'des');
+    }
+
+  unless (exists $crypt_salt{$opt{method}})
+    {
+      diag( $opt{method}, 'Unknown encryption method.' );
       exit (1);
     }
 }
 
 sub input_noecho
 {
-  my ($prompt) = @_;
+  my ($prompt)  = @_;
+  my $fd        = fileno( STDIN );
+  my $isatty    = -t $fd;
   my $tty;
   my $c_lflag;
   my %trap_sigs = ( HUP  =>  1,
@@ -136,36 +137,35 @@ sub input_noecho
                     QUIT =>  3,
                     TERM => 15);
   my %sig_orig;
-  my $fd = fileno (STDIN);
 
   # If stdin is a tty, disable echo while reading password.
-  if (-t STDIN)
+  if ($isatty)
     {
       $tty = POSIX::Termios->new;
-      $tty->getattr ($fd);
+      $tty->getattr( $fd );
       $c_lflag = $tty->getlflag;
 
       # Set up handlers to restore tty on typical signals
       my $restore = sub {
-        $tty->setlflag ($c_lflag);
-        $tty->setattr ($fd);
+        $tty->setlflag( $c_lflag );
+        $tty->setattr( $fd );
         my $signum = $trap_sigs{$_[0]};
         print STDERR "\n";
-        diag ("Exiting on signal $signum (SIG$_[0])");
+        diag( "Aborting on signal $signum (SIG$_[0])" );
         # 7th bit set indicates lower 6 bits represent a
         # signal number (0x80 == 2**7)
-        exit (0x80 | $signum);
+        exit( 0x80 | $signum );
       };
       map { $sig_orig{$_} = $SIG{$_} || 'DEFAULT';
             $SIG{$_} = $restore
           } keys %trap_sigs;
 
-      $tty->setlflag ($c_lflag & ~&POSIX::ECHO);
-      $tty->setattr ($fd);
+      $tty->setlflag( $c_lflag & ~&POSIX::ECHO );
+      $tty->setattr( $fd );
     }
 
   # Temporarily disable buffering on stderr, which is where prompt is printed.
-  my $fh_orig = select (STDERR);
+  my $fh_orig = select( STDERR );
   my $stderr_bufp = $|;
   $| = 1;
   $prompt = "Password:" unless defined $prompt;
@@ -173,20 +173,24 @@ sub input_noecho
   my $input = <STDIN>;
   chomp $input if defined $input;
   $| = $stderr_bufp;
-  select ($fh_orig);
+  select( $fh_orig );
 
   # Restore echo afterward, if it was originally on;
   # and restore signal handlers
-  print STDERR "\n" if $interactivep;
+  print STDERR "\n" if $isatty;
   if ($tty)
     {
-      $tty->setlflag ($c_lflag);
-      $tty->setattr ($fd);
+      $tty->setlflag( $c_lflag );
+      $tty->setattr( $fd );
       map { $SIG{$_} = $sig_orig{$_} } keys %trap_sigs;
     }
 
   return $input;
 }
+
+######
+##  TODO: everything below this point needs an overhaul.
+######
 
 sub gensalt
 {
@@ -217,11 +221,11 @@ sub bsdbf_cost
 
   if ($c < 4 || $c > 63)
     {
-      diag ($c, "Cost out of range [04, 63]");
+      diag ($c, 'Cost out of range [04, 63]');
       exit (1);
     }
 
-  sprintf ("%02d\$", $c);
+  sprintf ('%02d$', $c);
 }
 
 sub crypt_with_method
@@ -229,7 +233,7 @@ sub crypt_with_method
   my ($method, $pass, $salt) = @_;
 
   my $prefix  = $crypt_salt{$method}->{prefix};
-  my $saltlen = $crypt_salt{$method}->{len};
+  my $saltlen = $crypt_salt{$method}->{saltlen};
   my $encfn   = $crypt_salt{$method}->{encode};
   my $costfn  = $crypt_salt{$method}->{cost};
 
@@ -237,7 +241,7 @@ sub crypt_with_method
     {
       if (ref $costfn eq 'CODE')
         {
-          $prefix .= &$costfn ($cost);
+          $prefix .= &$costfn ($opt{cost});
         }
       else
         {
@@ -256,13 +260,15 @@ sub crypt_with_method
 
   $salt = &$encfn ($salt) if defined $encfn;
   $salt = $prefix . $salt;
+  print $salt, "\n";
 
+  $! = 0;
   my $result = crypt ($pass, $salt);
   if (! defined $result
       || (length $result == 13
           && substr ($result, 0, length $prefix) ne $prefix))
     {
-      diag ("error", "$method hashes not supported, or some overflow occured.");
+      diag ("error", "$method hashes not supported, or some overflow occured.", "$!");
       exit (1);
     }
   return $result;
@@ -270,14 +276,14 @@ sub crypt_with_method
 
 sub main
 {
-  parse_options;
+  parse_options (\@_);
 
   my $pass;
-  if (defined $ARGV[0])
+  if (defined $_[0])
     {
-      $pass = shift @ARGV;
+      $pass = shift @_;
     }
-  elsif ($interactivep)
+  elsif ($opt{interactive})
     {
       while (1)
         {
@@ -295,9 +301,152 @@ sub main
       chomp $pass;
     }
 
-  print crypt_with_method ($method, $pass, $salt), "\n";
+  print crypt_with_method ($opt{method}, $pass, $opt{salt}), "\n";
 }
 
 main (@ARGV);
 
-# mkpass ends here
+1;
+
+__END__
+
+=begin text
+
+=encoding utf8
+
+=end text
+
+=head1 NAME
+
+mkpass - prompt for cleartext password and echo crypted result
+
+=head1 SYNOPSIS
+
+     {-h|--help|--usage}
+     {-i|--interactive}
+     {-m|--method  METHOD}
+     {-s|--salt    SALT}
+     {-c|--cost    COST}
+     {plaintext_password}
+
+ The -h option may be repeated up to 3 times for increased verbosity.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-h>, B<--help>
+
+Usage information.
+May be repeated 1-3 times for more verbosity.
+
+=item B<-i>, B<--interactive>
+
+Prompt for input and confirmation even if standard input is not a terminal.
+
+=item B<-m>, B<--method>=I<name>
+
+Choose an encryption algorithm.
+Default depends on supplied SALT, or I<des>
+if no salt is supplied.
+
+=item B<-s>, B<--salt>=I<string>
+
+Use SALT to encode cleartext.
+The default is to generate a random sequence.
+SALT should be a 2-letter sequence for DES
+style encryption, an 8-letter sequence
+optionally prefixed by `$1$' for MD5 style,
+Or a 16-letter sequence for SHA256/SHA512.
+
+=item B<-c>, B<--cost>=I<cost>
+
+"Cost" (e.g. number of rounds) for some algorithms.
+This is only used for some algorithms, e.g. `bsdbf' or `sunmd5'.
+
+=item B<--yescrypt|sha512|bcrypt|md5|des|...>
+
+Use corresponding hashing method.
+
+=back
+
+=head1 DESCRIPTION
+
+Finish documenting me.
+What is here now is horribly out of date and needs to be rewritten:
+
+If cleartext is not specified on the command line, it will be prompted for
+interactively.  Specifying the cleartext on the command line is less secure
+since someone may be able to see it with the `ps' command.
+You can also feed the cleartext password as input using a pipe.
+
+=head1 AUTHOR
+
+Noah Friedman <friedman@splode.com>
+
+=head1 COPYRIGHT
+
+This program is in the public domain.
+
+=cut
+
+
+foo.c
+
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <crypt.h>
+
+int
+main( int argc, char **argv )
+{
+  char *method = argv[1];
+  unsigned long cost_lo = strtoul( argv[2], NULL, 10 );
+  unsigned long cost_hi = strtoul( argv[3], NULL, 10 );
+  unsigned long saltlen = strtoul( argv[4], NULL, 10 );
+  char *plaintext = argv[5];
+
+  char fmt[255];
+  char rbytes[512];
+  sprintf( fmt, "$%s$", method );
+  for (unsigned long i = cost_lo; i <= cost_hi; i++)
+    {
+      char *buf = saltlen ? rbytes : NULL ;
+      const char *salt = crypt_gensalt( fmt, i, buf, saltlen );
+      // printf( "%lu\t%lu\t%s\n", i, saltlen, salt );
+      const char *hash = crypt( plaintext, salt );
+      printf( "%lu\t%lu\t%s\n", i, saltlen, hash );
+    }
+  return 0;
+}
+
+
+
+foo.pl
+
+#!/usr/bin/perl
+
+use strict;
+use warnings qw(all);
+
+use lib "$ENV{HOME}/lib/perl";
+use NF::yescrypt qw(:all);
+use NF::PrintObject qw(:all);
+
+sub main
+{
+  my $salt = $_[1] ? $_[1] : yescrypt_gensalt( 1, 16 );
+  #print "len(salt) = ", length( $salt ) - 7, "\n\n";
+  print( (crypt( $_[0], $salt )||"$!"), "\n");
+
+  my $rbytes = substr( $salt, 7 );
+  __PP_DEBUG { $rbytes };
+  my $leftover = undef;
+  my @d = yescrypt_decode64( $rbytes, \$leftover);
+  __PP_DEBUG { \@d, pack('C*', @d), $leftover };
+}
+
+main( @ARGV );
+
+# eof
