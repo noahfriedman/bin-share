@@ -19,17 +19,17 @@ use POSIX;
 my %opt = ( interactive => -t STDIN,
             method      => 'des',
             salt        => undef,
-            cost        => undef,
+            cost        => undef,  # consider renaming this "rounds"
           );
 
 my %crypt_salt
   = ( yescrypt        => { prefix    => 'y',
-                           salt_size => [ 8, 512, 128 ], # min, max bits, default
+                           salt_bits => [ 8, 512, 128 ], # min, max bits, default
                            cost      => [ 1,  11,   5 ], # min, max, default
                            gensalt   => \&yescrypt_gensalt,
                          },
 
-      'gost-yescrypt' => { prefix    => 'gy',
+      gost_yescrypt   => { prefix    => 'gy',
                            parent    => 'yescrypt',
                          },
 
@@ -37,20 +37,22 @@ my %crypt_salt
                            parent    => 'yescrypt',
                          },
 
-      bcrypt          => { prefix    => '2b',             # or '2y', for legacy reasons
+      bcrypt          => { prefix    => '2b',               # or '2y', for legacy reasons
                            maxpass   =>  72,                # maximum passphrase length
-                           salt_size => [ 128, 128, 128 ],  # min  max, default bits
+                           salt_bits => [ 128, 128, 128 ],  # min  max, default bits
                            cost      => [   4,  31,   5 ],  # min, max, default
                          },
+
       # NetBSD, FreeBSD, Solaris 9 and later
+      # 2a is obsolete; use 2b.
       bsdbf           => { prefix    => '2a',
-                           salt_size => 128,
+                           salt_bits => 128,  # need 22 bytes after encoding
                            cost      => [ 4, 63, 8 ],
                          },
 
       # glibc 2.7 and later
       sha512          => { prefix    => '6',
-                           salt_size => [ 6, 96, 6 ],
+                           salt_bits => [ 6, 96, 6 ],  # 8-16 bytes
                            cost      => [ 1000, 999_999_999, 5000 ],
                          },
 
@@ -59,7 +61,7 @@ my %crypt_salt
                          },
 
       sha1            => { prefix    => 'sha1',
-                           salt_size => [ 6, 384, 0 ],
+                           salt_bits => [ 6, 384, 0 ],
                            cost      => [ 4, 4_294_963_199,  ],
                          },
 
@@ -67,17 +69,26 @@ my %crypt_salt
       # The salt can be arbitrarily long for this implementation, but the
       # function fails on larger salts as the number of rounds increases.
       sunmd5          => { prefix    => 'md5',
-                           salt_size => 48,
+                           salt_bits => 48,  # 16 bytes buffer needed?
                            cost      => [ 4096, 4_294_963_199, undef ],  # 904 default?
+
+                           #costfn   => sub { sprintf ("rounds=%d\$", $_[0] || 904) },
+                           #encode   => sub { $_[0] . '$dummy' },
                          },
 
+      # BSDI extended DES-based crypt(3)
+      #bsdicrypt      => { prefix   => '_',   },
+      #nt             => { prefix   => '$3$', },
+
       md5             => { prefix    => '1',
-                           salt_size => [ 6, 48, undef ],
+                           # 8 bytes
+                           salt_bits => [ 6, 48, undef ],
                            cost      => 1000,  # is this used?
                          },
 
       des             => { prefix    => undef,
-                           salt_size => 2,
+                           # 2 bytes
+                           salt_bits => 16,
                          },
     );
 
@@ -86,43 +97,6 @@ my $opt_methods = join( "|", sort keys %crypt_salt );
 sub diag
 {
   print STDERR join( ": ", $progname, @_ ), "\n";
-}
-
-sub parse_options
-{
-  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
-  my $help = 0;
-
-  my $parser = Getopt::Long::Parser->new;
-  $parser->configure( qw(bundling autoabbrev) );
-  my $succ = $parser->getoptions
-    ( 'h|help+'        => \$help,
-      'usage'          => sub { $help = 1 },
-      'i|interactive', => \$opt{interactive},
-
-      'm|method=s',    => \$opt{method},
-      's|salt=s',      => \$opt{salt},
-      'c|cost=i',      => \$opt{cost},
-      (map { $_, sub { $opt{method} = $_[0] }, } keys %crypt_salt),
-    );
-
-  pod2usage (-exitstatus => 1, -verbose => 0)         unless $succ;
-  pod2usage (-exitstatus => 0, -verbose => $help - 1) if $help > 0;
-
-  unless ($opt{method})
-    {
-      $opt{method} = (defined $opt{salt}
-                      ? (length( $opt{salt} ) < 3
-                         ? 'des'
-                         : 'md5')
-                      : 'des');
-    }
-
-  unless (exists $crypt_salt{$opt{method}})
-    {
-      diag( $opt{method}, 'Unknown encryption method.' );
-      exit (1);
-    }
 }
 
 sub input_noecho
@@ -204,6 +178,14 @@ sub gensalt
                 (1 .. $saltlen));
 }
 
+sub gensalt_urandom
+{
+  my $saltlen = shift;
+  $saltlen = &$saltlen if (ref $saltlen eq 'CODE');
+
+  open( my $fh, "/dev/urandom" ) or die "open: /dev/urandom: $!\n";
+}
+
 sub base64_encode
 {
   local $_ = pack ("u", $_[0]);
@@ -272,6 +254,43 @@ sub crypt_with_method
       exit (1);
     }
   return $result;
+}
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help = 0;
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure( qw(bundling autoabbrev) );
+  my $succ = $parser->getoptions
+    ( 'h|help+'        => \$help,
+      'usage'          => sub { $help = 1 },
+      'i|interactive', => \$opt{interactive},
+
+      'm|method=s',    => \$opt{method},
+      's|salt=s',      => \$opt{salt},
+      'c|cost=i',      => \$opt{cost},
+      (map { $_, sub { $opt{method} = $_[0] }, } keys %crypt_salt),
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)         unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help - 1) if $help > 0;
+
+  unless ($opt{method})
+    {
+      $opt{method} = (defined $opt{salt}
+                      ? (length( $opt{salt} ) < 3
+                         ? 'des'
+                         : 'md5')
+                      : 'des');
+    }
+
+  unless (exists $crypt_salt{$opt{method}})
+    {
+      diag( $opt{method}, 'Unknown encryption method.' );
+      exit (1);
+    }
 }
 
 sub main
