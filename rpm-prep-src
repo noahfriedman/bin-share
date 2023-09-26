@@ -2,7 +2,7 @@
 
 orig_dir=${PWD-`pwd`}
 : ${RPMBUILD:=/usr/bin/rpmbuild}
-: ${LOCATE:=locate}
+: ${LOCATE:=nfs-locate}
 
 case $# in
     0 ) : ;;
