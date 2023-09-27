@@ -1,0 +1,13 @@
+#!/bin/sh
+
+rpm=$1
+shift
+
+if [ $# -eq 0 ]; then
+    rpm2cpio "$rpm" | cpio --quiet -tv
+    exit 1
+fi
+
+rpm2cpio "$rpm" | cpio --quiet -dimv --no-absolute-filenames "$@"
+
+# eof
