@@ -1,5 +1,10 @@
 #!/bin/sh
 
+: ${FIND:=find}
+: ${RM:=rm}
+: ${SORT:=sort}
+: ${TOUCH:=touch}
+: ${ZIP:=zip}
 : ${ZLEVEL:=9}
 
 while [ $# -gt 0 ]; do
@@ -13,17 +18,20 @@ done
 for dir in "$@" ; do
     # Protect against accidental trailing slash, i.e. if someone does
     # dist-zip foo/, don't create foo/.zip only to delete foo afterward.
-    case "$dir" in
-        */ ) dir=`echo "$dir" | sed -e 's=/$==g'` ;;
-    esac
+    while :; do
+        case $dir in
+            */ ) dir=${dir%/} ;;
+            *  ) break ;;
+        esac
+    done
 
-    echo "dist-tar: packing $dir.zip"
+    echo "dist-zip: packing $dir.zip"
 
-    { ${FIND-find} "$dir" -print \
-          | ${SORT-sort} \
-          | ${ZIP-zip} -$ZLEVEL -y -@ "$dir.zip"
-    } && ${TOUCH-touch} -r "$dir" "$dir.zip" \
-      && ${RM-rm} -rf "$dir"
+    { $FIND "$dir" -print \
+          | $SORT \
+          | $ZIP -$ZLEVEL -y -@ "$dir.zip"
+    } && $TOUCH -r "$dir" "$dir.zip" \
+      && $RM   -fr "$dir"
 done
 
 # eof
