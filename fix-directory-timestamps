@@ -85,9 +85,11 @@ sub traverse
   for my $ent (sort { $a cmp $b } directory_files( $dir ))
     {
       my @st = lstat( "$dir/$ent" ) or next;
-      if    (-d _)
+      # Perl cannot presently change the mtime of symlinks, so ignore them.
+      next if -l _;
+      if (-d _)
         { push @subdir, traverse( "$dir/$ent", $st[8], $st[9] ) or next }
-      elsif (-f _)
+      else
         { push @mtime, $st[9] }
     }
 
