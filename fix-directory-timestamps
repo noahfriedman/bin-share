@@ -115,11 +115,11 @@ sub parse_options
      'usage'                    => sub { $help = 1 },
 
      'a|all-files|no-ignore'    =>      \$opt{noignore},
-     'i|ignore=s@'              => \@ignore,
+     'i|ignore=s@'              =>      \@ignore,
      'n|no-change'              =>      \$opt{nochange},
      'm|meta!'                  =>      \$opt{meta},
      'M'                        => sub { $opt{meta}    = 0 },
-     'd|dirs!' =>                       \$opt{dirs},
+     'd|dirs!'                  =>      \$opt{dirs},
      'D'                        => sub { $opt{dirs}    = 0 },
      'f|fold-case|ignore-case!' =>      \$opt{nocase},
      'F'                        => sub { $opt{nocase}  = 0 },
@@ -136,8 +136,15 @@ sub parse_options
 
   if    ($opt{noignore}) { @ignore = (qw(. ..)) }
   elsif ($opt{meta})     { push  @ignore, @ignore_meta }
-  my $pat = join( '|', map { quotemeta( $_ ) } @ignore);
-  $re_filter = $opt{nocase} ? qr/^(?:$pat)$/i : qr/^(?:$pat)$/;
+
+  for my $pat (@ignore)
+    {
+      if    ($pat =~ m=^/(.*)/$=)      { $pat = $1 }
+      elsif ($pat =~ m=^m(.)(.*?)\1$=) { $pat = $2 }
+      else { $pat = sprintf( '^%s$', quotemeta( $pat )) }
+    }
+  my $pat = join( '|', map { "(?:$_)" } @ignore );
+  $re_filter = $opt{nocase} ? qr/(?:$pat)/i : qr/(?:$pat)$/;
 }
 
 sub main
@@ -195,20 +202,29 @@ if they are directories, should not be traversed.
 
 The default list includes several version control directories
 (e.g. C<CVS>, C<.git>, C<.hg>)
-and Python cache directories.
+and Python cache directories
+(C<__pycache__>).
+
+If the parameter is a pattern of the form C</pat/> or C<m=pat=>
+(where the character immediately after C<m> and the last character are any
+character, but must be the same),
+it is treated as a regular expression instead of a literal file name.
+
+Regex patterns are not anchored, so e.g. if you want to match the beginning
+of a file name, use C</^.../>.
 
 =item B<-v>, B<--verbose>
-(opp. I<-V>, I<--no-verbose>)
+(opposite: B<-V>, B<--no-verbose>)
 
 Display prior and new timestamps for directories that are modified.
 
 =item B<-q>, B<--quiet-errors>
-(opp. I<-Q>, I<--no-quiet-errors>)
+(opposite:. B<-Q>, B<--no-quiet-errors>)
 
 Don't print errors when directories cannot be traversed or modified.
 
 =item B<-m>, B<--meta>
-(opp. I<-M>, I<--no-meta>)
+(opposite: B<-M>, B<--no-meta>)
 
 Ignore additional files that are usually auto-generated
 such as checksum files,
@@ -217,14 +233,14 @@ font indexes,
 etc.
 
 =item B<-d>, B<--dirs>
-(opp. I<-D>, I<--no-dirs>)
+(opposite: B<-D>, B<--no-dirs>)
 
 Consider the modification time of subdirectories in addition to files
 within the directory.  When this is disabled, subdirectories are ignored
 unless there are no regular files.
 
 =item B<-f>, B<--fold-case>, B<--ignore-case>
-(opp. I<-F>, I<--no-fold-case>)
+(opposite: B<-F>, B<--no-fold-case>)
 
 Ignore case in file name matching.
 
