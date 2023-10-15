@@ -8,7 +8,6 @@
 # Commentary:
 # Code:
 
-# Copy namespace now, before any modules are imported.
 repl_locals = dict( locals() )
 
 import readline
@@ -20,6 +19,7 @@ import atexit
 import os
 import platform
 import pprint
+import re
 import sys
 
 
@@ -34,8 +34,9 @@ class Repl( code.InteractiveConsole ):
             histfile = os.path.join( histdir, ".pyrepl_history" )
         self.init_history( histfile )
 
-    def init_history(self, histfile):
-        readline.parse_and_bind( 'tab: complete')
+
+    def init_history( self, histfile ):
+        readline.parse_and_bind( 'tab: complete' )
         try:
             readline.read_history_file( histfile )
             atexit.register( self.save_history, histfile )
@@ -44,11 +45,33 @@ class Repl( code.InteractiveConsole ):
         except FileNotFoundError: # python3, undef in python2
             pass
 
+
     def save_history( self, histfile ):
         readline.set_history_length( 1024 )
         readline.write_history_file( histfile )
 
-class ReplPrettyPrinter( pprint.PrettyPrinter ):
+
+# python2 doesn't support super().method call syntax,
+# so instead we use self.super.method
+class _super( object ):
+    super = property( lambda self: super( type( self ), self ) )
+
+# I think I'm inching toward writing another pretty printer from scratch.
+class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
+    _doc_width = 1024
+    _re_nonbinary = re.compile( b'[^\r\t\n\x20-\x7e]' )
+
+
+    def _format( self, items, *rest ):
+        # Intercept dict-like objects before using their non-prettyprinting repr
+        if (  not callable( items ) # class constructors
+              and (    hasattr( items, 'items' )
+                    or hasattr( items, '_asdict' ))):
+            self._pprint_dictlike( items, *rest )
+        else:
+            self.super._format( items, *rest )
+
+
     # This method override adds padding so that all keys in a dict are
     # aligned to the same column. That is, they are all indented to the
     # length of the longest key.
@@ -77,21 +100,157 @@ class ReplPrettyPrinter( pprint.PrettyPrinter ):
             else:
                 write( delimnl )
 
+
+    # This does a better job of formatting dict-like types like os.environ
+    def _pprint_dictlike( self, obj, stream, indent, allowance, context, level ):
+        write = stream.write
+        begstr = '{'
+        endstr = '}'
+        if type( obj ) is not dict:
+            try:
+                begstr = type( obj ).__name__ + '({'
+                endstr = '})'
+            except AttributeError:
+                pass
+
+        if hasattr( obj, '_asdict' ):  # e.g. collections.namedtuple
+            obj = obj._asdict()
+
+        if hasattr( self, '_sort_dicts' ):
+            if self._sort_dicts:
+                items = sorted( obj.items(), key=pprint._safe_tuple)
+            else:
+                items = obj.items()
+        else:
+            items = sorted( obj.items(), key=lambda k: repr( k ))
+
+        write( begstr )
+        if len( items ):
+            if self._indent_per_level > 1:
+                write( (self._indent_per_level - 1) * ' ' )
+            indent += len( begstr ) - 1
+            self._format_dict_items(items, stream, indent, allowance + 1, context, level)
+        write( endstr )
+
+
+    def _pprint_list(self, obj, stream, indent, allowance, context, level):
+        write = stream.write
+        write( '[' )
+        self._format_items( obj, stream, indent, allowance + 1, context, level )
+        if len( obj ) > 1:
+            write( ',\n' + ' ' * indent + ']' )
+        else:
+            stream.write( ']' )
+
+
+    def _pprint_set(self, obj, stream, indent, allowance, context, level):
+        write = stream.write
+        if not len( obj ):
+            write( repr( obj ))
+            return
+        begstr = '{'
+        endstr = '}'
+        if type( obj ) is not set:
+            begstr = type( obj ).__name__ + '({'
+            endchar = '})'
+            indent += len( begstr ) - 2
+        write( begstr )
+        obj = sorted( obj, key=pprint._safe_key )
+        self._format_items( obj, stream, indent, allowance + len( endstr ), context, level)
+        if len( obj ) > 1:
+            write( ',\n' + ' ' * indent + endstr )	# close on new line
+        else:
+            write( ' ' + endstr )			# close on final line
+
+
+    def _maxwidth( self, width=None ):
+        if width is None:
+            width = self._width
+        return max( width, self._doc_width )
+
+
+    # If a string is multiline, extend width so any breaks are at line endings
+    def _pprint_str( self, obj, *rest ):
+        nl = obj.find( '\n' )
+        if len( obj ) > nl+1 > 0: # first nl is not at very end of str
+            try:
+                _width = self._width
+                self._width = self._maxwidth()
+                self.super._pprint_str( obj, *rest )
+            finally:
+                self._width = _width
+        else:
+            self.super._pprint_str( obj, *rest )
+
+
+    def _pprint_bytes( self, obj, stream, indent, *rest ):
+        if ( len( obj ) < self._maxwidth()
+             and not self._re_nonbinary.search( obj )):
+            try:
+                saved_width = self._width
+                self._width = self._maxwidth() + indent
+                self._pprint_readable_bytes( obj, stream, indent, *rest )
+            finally:
+                self._width = saved_width
+        else:
+            self.super._pprint_bytes( obj, stream, indent, *rest )
+
+
+    # If a binary string is apparently regular ascii, extend
+    # width so any breaks are at line endings.
+    def _pprint_readable_bytes( self, obj, stream, indent, allowance, context, level ):
+        write = stream.write
+        nl = obj.find( b'\n' )
+        if not (len( obj ) > nl+1 > 0): # first nl is at very end of obj
+            write( self._repr( obj, context, level ) )
+            return
+        indent += 1
+        deliml = '\n' + ' ' * indent
+        lines = obj.splitlines( True )
+        write( '(' )
+        for i, row in enumerate( lines ):
+            write( repr( row ))
+            if i+1 < len( lines ):
+                write( deliml )
+            else:
+                write( ')' )
+
+
+    def _pprint_site_Printer( self, obj, *args ):
+        self._pprint_str( str( obj ), *args )
+
+
+    try:
+        _dispatch = pprint.PrettyPrinter._dispatch.copy()
+        _dispatch[                str.__repr__] = _pprint_str
+        _dispatch[              bytes.__repr__] = _pprint_bytes
+        _dispatch[               list.__repr__] = _pprint_list
+        _dispatch[                set.__repr__] = _pprint_set
+        _dispatch[          frozenset.__repr__] = _pprint_set
+        _dispatch[        os._Environ.__repr__] = _pprint_dictlike
+        _dispatch[copyright.__class__.__repr__] = _pprint_site_Printer
+        _dispatch[     help.__class__.__repr__] = _pprint_site_Printer
+    except AttributeError:
+        pass
+
 
-repl_pp = ReplPrettyPrinter( indent=2, width=60 )
+repl_pp = ReplPrettyPrinter( indent=2, width=72 )
 def pp( *args, **kwargs ):
     for arg in args:
         repl_pp.pprint( arg, **kwargs )
 
+
 def bt( *cmd ):
     output = subprocess.check_output( cmd ).decode( sys.stdout.encoding )
     return output.rstrip( ' \t\r\n' )
+
 
 def load( filename ):
     with open( filename, 'r' ) as f:
         text = f.read()
     text.replace( '\r\n', '\n' )
     exec( text, repl_locals )
+
 
 def pyrepl():
     banner = '{} {}.{}.{} [{}] {}-{}'.format(
@@ -120,6 +279,7 @@ def pyrepl():
         repl.interact( banner=banner, exitmsg='' )
     except TypeError:
         repl.interact( banner=banner )  # python2.7
+
 
 if __name__ == '__main__':
     pyrepl()
