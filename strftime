@@ -4,14 +4,12 @@
 # Created: 2006-08-08
 # Public domain.
 
-# $Id: strftime,v 1.5 2011/11/21 08:12:57 friedman Exp $
-
 # Commentary:
 # Code:
 
-$^W = 1;  # enable warnings
-
 use strict;
+use warnings qw(all);
+
 use POSIX qw(strftime localtime);
 use Time::Local;
 use Getopt::Long;
@@ -226,17 +224,21 @@ sub strftime_iso8601
 
 sub parse_options
 {
-  my $help = -1;
-
   local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
-  Getopt::Long::config (qw(bundling auto_abbrev require_order));
-  GetOptions ("h|help|usage+"  => \$help,
-              "l|localtime"    => sub { $utc_p = 0 },
-              "g|gmtime|u|utc" => sub { $utc_p = 1 },
-              "f|fmt|format=s" => \$fmt,
-             );
+  my $help = 0;
 
-  pod2usage(-exitstatus => 0, -verbose => $help) if $help >= 0;
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling auto_abbrev require_order));
+  my $succ = $parser->getoptions
+    ('h|help+'        => \$help,
+     'usage'          => sub { $help = 1 },
+     "l|localtime"    => sub { $utc_p = 0 },
+     "g|gmtime|u|utc" => sub { $utc_p = 1 },
+     "f|fmt|format=s" => \$fmt,
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)         unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help - 1) if $help > 0;
 }
 
 sub main
