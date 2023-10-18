@@ -53,7 +53,10 @@ case ${zip##*/} in
     bzip2 ) z=bz2 ;;
     xz | lzma )
         if [ $ZLEVEL -gt 3 ]; then
-            zargs="$zargs --threads=0"
+            # xz will limit to 4 cores if there are more when -T=0
+            nthreads=0
+            if type nproc > /dev/null 2>&1; then nthreads=`nproc`; fi
+            zargs="$zargs --threads=$nthreads"
         fi ;;
     * ) echo "dist-tar: $DIST_TAR_ZIP: unknown compression method" 1>&2
         exit 1 ;;
