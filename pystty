@@ -724,7 +724,7 @@ class Stty( object ):
         self.tcgetattr()
         if key in [termios.VMIN, termios.VTIME]:
             char = int( char )
-        elif char.lower() in ['dflt', 'default']:
+        elif isinstance( char, str ) and char.lower() in ['dflt', 'default']:
             char = cc_dflt( key )
         else:
             if isinstance( char, int ):
