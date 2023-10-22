@@ -8,6 +8,7 @@
 # Commentary:
 # Code:
 
+# Copy namespace now, before any modules are imported.
 repl_locals = dict( locals() )
 
 import readline
@@ -26,29 +27,32 @@ import sys
 # Provide saved history and tab completion on python symbols
 # Shamelessly stolen from Python library manual
 class Repl( code.InteractiveConsole ):
-    def __init__( self, locals=None, histfile=None ):
+    def __init__( self, locals=None, history_file=None, history_size_max=1024 ):
         code.InteractiveConsole.__init__( self, locals )
-
-        if histfile is None:
-            histdir  = os.getenv( 'XDG_CACHE_HOME' ) or os.getenv( 'HOME' )
-            histfile = os.path.join( histdir, ".pyrepl_history" )
-        self.init_history( histfile )
-
-
-    def init_history( self, histfile ):
         readline.parse_and_bind( 'tab: complete' )
-        try:
-            readline.read_history_file( histfile )
-            atexit.register( self.save_history, histfile )
-        except IOError:           # python2
-            pass
-        except FileNotFoundError: # python3, undef in python2
-            pass
 
+        if history_file is None:
+            histdir  = os.getenv( 'XDG_CACHE_HOME' ) or os.getenv( 'HOME' )
+            self.history_file = os.path.join( histdir, ".pyrepl_history" )
+        else:
+            self.history_file = history_file
+        self.history_size_max = history_size_max
+        self.history_import()
+        atexit.register( self.history_export )
 
-    def save_history( self, histfile ):
-        readline.set_history_length( 1024 )
-        readline.write_history_file( histfile )
+    def history_import( self ):
+        if self.history_file:
+            try:
+                readline.read_history_file( self.history_file )
+            except IOError:           # python2
+                pass
+            except FileNotFoundError: # python3, undef in python2
+                pass
+
+    def history_export( self ):
+        if self.history_file:
+            readline.set_history_length( self.history_size_max )
+            readline.write_history_file( self.history_file )
 
 
 # python2 doesn't support super().method call syntax,
