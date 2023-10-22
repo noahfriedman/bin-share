@@ -475,7 +475,7 @@ dbbdcf7c	fedora-iot-2019
 
 fd431d51	rhel-6
 
-d651ff2e	rpmfusion-free-2020	# Used for f33-f37 as of 2023-04-28
+d651ff2e	rpmfusion-free-2020	# Used for f33-f39 as of 2023-10-19
 100bcd92	rpmfusion-free-f32
 c481937a	rpmfusion-free-f31
 c0aeda6e	rpmfusion-free-f30
@@ -500,7 +500,7 @@ a3780952	rpmfusion-free-f13
 8fcff4da	rpmfusion-free-f11
 49c8885a	rpmfusion-free-f10-or-earlier
 
-94843c65	rpmfusion-nonfree-2020	# Used for f33-f37 as of 2023-04-28
+94843c65	rpmfusion-nonfree-2020	# Used for f33-f38 as of 2023-10-19
 6dc1be18	rpmfusion-nonfree-f32
 54a86092	rpmfusion-nonfree-f31
 1d14a795	rpmfusion-nonfree-f30
@@ -525,14 +525,24 @@ a3a882c1	rpmfusion-nonfree-f12
 8dc43844	rpmfusion-nonfree-f11
 b1981b68	rpmfusion-nonfree-f10-or-earlier
 
+296458f3	rpmfusion-free-el9
+158b3811	rpmfusion-free-el8
+f5cf6c1e	rpmfusion-free-el7
 849c449f	rpmfusion-free-el6
 e74f0522	rpmfusion-free-el5
 
+aab212ea	rpmfusion-nonfree-el9
+bdda8475	rpmfusion-nonfree-el8
+a3108f6c	rpmfusion-nonfree-el7
 5568bbb2	rpmfusion-nonfree-el6
 ab194290	rpmfusion-nonfree-el5
 
 # Fedora EPEL
+3228467c	epel-9
 2f86d6a1	epel-8
+352c64e5	epel-7
+0608b895	epel-6
+217521f6	epel-5			# also used for epel-4
 
 8483c65d	centos-8
 f4a80eb5	centos-7
@@ -546,6 +556,8 @@ fe837f6f	centos-security-6
 f2ee9d55	centos-sc
 
 3dbdc284	opensuse
+
+350d275d	rocky-release-2022
 
 39db7c82	suse-sles-12.0
 50a3dd1c	suse-sles-12.0-reserve
