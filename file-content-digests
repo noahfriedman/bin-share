@@ -1,0 +1,310 @@
+#!/usr/bin/perl
+# file-content-digests --- fingerprint file contents
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2023-10-20
+# Public domain.
+
+# Commentary:
+
+# Look for files that are identical in uncompressed contents.
+# A table of checksums are saved for repeated runs, and entries are updated
+# if the size or timestamp changes.
+# From this table, a list of all but the smallest compressed duplicates can
+# be generated as an exclude list for mirroring scripts.
+
+# Code:
+
+use strict;
+use warnings qw(all);
+
+use POSIX qw(strftime);
+use Digest::MD5;
+use Getopt::Long;
+use Pod::Usage;
+
+use lib "$ENV{HOME}/lib/perl";
+use NF::FileUtil qw(:all xeval);
+
+(my $progname = $0) =~ s=.*/==;
+
+my %opt = ( verbose    => 0,
+            gen_excl   => undef,
+            cachefile  => undef,
+          );
+
+my %zcat = ( Z    => 'zcat',
+             z    => 'zcat',
+             gz   => 'zcat',
+             bz2  => 'bzcat',
+             lzma => 'xzcat',
+             xz   => 'xzcat',
+           );
+
+my $re_ext = sprintf( '\.(%s)$', join( '|', sort keys %zcat ));
+
+
+sub msg
+{
+  my $timestr = strftime( '%H:%M:%S', localtime( time ));
+  printf( STDERR "[%s] %s\n", $timestr, join( ': ', @_ ));
+  return;
+}
+
+sub verbose
+{
+  msg( @_ ) if $opt{verbose};
+  return;
+}
+
+
+sub open_file
+{
+  my $file = shift;
+  my $fh;
+  if ($file =~ /$re_ext/o)
+    {
+      my $cmd = $zcat{$1} or die "$1: unknown file extension\n";
+      open( $fh, "-|", $cmd, $file ) or die "$cmd: $!\n";
+    }
+  else
+    {
+      open( $fh, '<', $file ) or die "$file: $!\n";
+    }
+  return $fh;
+}
+
+sub file_digest
+{
+  my $file = shift;
+  my $fh = xeval { open_file( $file ) } or return;
+
+  verbose( "computing digest", $file );
+
+  my $ctx = Digest::MD5->new;
+  $ctx->addfile( $fh );
+  my $digest = $ctx->hexdigest;
+  close( $fh );
+  return $digest;
+}
+
+sub read_digest_cache
+{
+  my %data;
+
+  my $file = shift;
+  my $fh = xopen( '<', $file ) or return \%data;
+
+  verbose( 'reading prior saved data' );
+
+  local $_;
+  while (<$fh>)
+    {
+      next if /^\s*#/;
+      chomp;
+      s/^\s+//;
+      my ($digest, $mtime, $size, $name) = split( /\s+/, $_, 4 );
+      $data{$name} = { digest => $digest,
+                       mtime  => $mtime,
+                       size   => $size,
+                     };
+    }
+  return wantarray ? %data : \%data;
+}
+
+sub update_digest_cache
+{
+  my $data = ref $_[0] eq 'HASH' ? shift : {};
+  my $changed = 0;
+
+  my $regex = $opt{regex} ? qr/$opt{regex}/i : undef ;
+
+  my $fn = sub
+    { my ($node, $st, $where) = @_;
+      return if -d $node;
+      return if defined( $regex ) && $node !~ $regex;
+
+      my $path = $where ? join( '/', $where, $node ) : $node;
+
+      unless (@$st)
+        {
+          if ($opt{purge})
+            {
+              verbose( "purging", $path );
+              delete $data->{$path};
+              $changed++;
+            }
+          return;
+        }
+
+      my $elt = $data->{$path};
+      if ( $elt
+           && $elt->{mtime} == $st->[ST_MTIME]
+           && $elt->{size}  == $st->[ST_SIZE] )
+        {
+          verbose( "no change", $path );
+          return;
+        }
+
+      my $digest = $st->[ST_SIZE] > 0 ? file_digest( $node ) : '-';
+      $data->{$path} = { digest => $digest || '?',
+                         mtime  => $st->[ST_MTIME],
+                         size   => $st->[ST_SIZE],
+                       };
+      $changed++;
+    };
+
+  @_ = sort keys %$data unless @_;
+  map { walk_dirtree( $_, $fn ) } @_;
+
+  $opt{__changed__} = $changed;
+  return wantarray ? %$data : $data;
+}
+
+my $print_digest_fmt = "%-32s  %-10s  %12s  %s\n";
+
+sub print_digest_cache
+{
+  my ($fh, $data) = @_;
+  my $fmt = $print_digest_fmt;
+
+  for my $node (sort keys %$data)
+    {
+      my $elt = $data->{$node};
+      printf( $fh $fmt, $elt->{digest}, $elt->{mtime}, $elt->{size}, $node );
+    }
+}
+
+sub write_digest_cache
+{
+  my ($file, $data) = @_;
+
+  if (-f $file) { backup_file( $file ) or return }
+  my $fh = xopen( '>', $file ) or return;
+  msg( 'saving updated data' );
+
+  my $datestr = strftime( '%Y-%m-%d %H:%M:%S %z', localtime( time ));
+  my @exts = sort { lc( $a ) cmp lc( $b ) } keys %zcat;
+  my $ext_list = join( ', ', map { "'.$_'" } @exts );
+  $ext_list =~ s/^(.*),/$1, or/;
+
+  printf( $fh "# %s\n#\n", $datestr );
+  printf( $fh "# For files ending in %s,\n", $ext_list );
+  printf( $fh "# the MD5 digest is the value for the uncompressed contents.\n#\n" );
+  printf( $fh $print_digest_fmt, '# MD5', 'MTIME', 'SIZE', 'FILE' );
+  print_digest_cache( $fh, $data );
+  close( $fh );
+  return 1;
+}
+
+sub generate_exclude_list
+{
+  my $data = shift;
+  my %mult_digest;
+  my %seen_digest;
+
+  # multi_digest will contain all the hashes with multiple hits
+  # seen_digest is just used to track which ones have already been seen once.
+  map { my $md5  = $data->{$_}->{digest};
+        my $mult = $mult_digest{$md5};
+        my $seen = $seen_digest{$md5};
+
+        if    ($mult) { push @$mult, $_ }
+        elsif ($seen) { $mult_digest{$md5} = [$seen, $_] }
+        else          { $seen_digest{$md5} = $_ }
+      } keys %$data;
+  undef %seen_digest; # no longer needed, gc
+
+  # for each of the hashes with duplicates, print the paths of all but the
+  # one with the smallest size.
+  my @exclude;
+  for my $set (values %mult_digest)
+    {
+      my @file = sort { $data->{$a}->{size} <=> $data->{$b}->{size} } @$set;
+      shift @file; # drop the first, smallest element
+      push @exclude, @file;
+    }
+
+  return wantarray ? @exclude : \@exclude ;
+}
+
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help = 0;
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling auto_abbrev require_order));
+  my $succ = $parser->getoptions
+    ( 'h|help+'                => \$help,
+      'usage'                  => sub { $help = 1 },
+      'v|verbose+'             => \$opt{verbose},
+
+      'r|regex=s'              => \$opt{regex},
+
+      'f|cachefile=s'          => \$opt{cachefile},
+      'u|update-cachefile'     => \$opt{update},
+      'p|purge-deleted'        => \$opt{purge},
+      'g|gen-excludes'         => \$opt{gen_excludes},
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)         unless ($succ || @_);
+  pod2usage (-exitstatus => 0, -verbose => $help - 1) if $help > 0;
+
+  $ENV{VERSION_CONTROL} //= 'numbered';  # for backup_file
+}
+
+sub main
+{
+  parse_options (\@_);
+
+  my %data = read_digest_cache( $opt{cachefile} ) if $opt{cachefile} && -f $opt{cachefile};
+  update_digest_cache( \%data, @_ ) if @_ || $opt{update};
+
+  if ($opt{gen_excludes})
+    {
+      my @exclude = generate_exclude_list( \%data );
+      map { print $_, "\n" } sort @exclude;
+    }
+  elsif ($opt{update} && $opt{cachefile})
+    {
+      if ($opt{__changed__})
+        { write_digest_cache( $opt{cachefile}, \%data) }
+      else
+        { msg( 'no changes to save' ) }
+    }
+  else
+    { print_digest_cache( *STDOUT{IO}, \%data ) }
+}
+
+main( @ARGV );
+
+__END__
+
+=head1 NAME
+
+archive-file-digests --- fingerprint .tar.{gz,bz2,xz} contents
+
+=head1 SYNOPSIS
+
+ file-content-digests {-h|--help}
+ ...
+
+ The -h option may be repeated up to 3 times for increased verbosity.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<-h>, B<--help>
+
+Usage information.
+May be repeated 1-3 times for more verbosity.
+
+=back
+
+=head1 DESCRIPTION
+
+...
+
+=cut
