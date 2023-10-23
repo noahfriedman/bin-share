@@ -37,6 +37,7 @@ my %zcat = ( Z    => 'zcat',
              gz   => 'zcat',
              bz2  => 'bzcat',
              lzma => 'xzcat',
+             lz   => 'xzcat',
              xz   => 'xzcat',
            );
 
@@ -204,24 +205,37 @@ sub generate_exclude_list
 
   # multi_digest will contain all the hashes with multiple hits
   # seen_digest is just used to track which ones have already been seen once.
+  #
+  # Filter duplicates in each directory separately.  The problem with
+  # deleting arbitrary files all over the filesystem is that there will be
+  # no obvious reason why they are missing or where else to find them.
+  # If an archive file is redundant with another in the same directory,
+  # there's no surprise or guesswork.
   map { my $md5  = $data->{$_}->{digest};
-        my $mult = $mult_digest{$md5};
-        my $seen = $seen_digest{$md5};
+        my $dir  = $_ =~ m=/= ? dirname( $_ ) : '' ;
+        my $key  = join( ':', $md5, $dir );
+
+        my $mult = $mult_digest{$key};
+        my $seen = $seen_digest{$key};
 
         if    ($mult) { push @$mult, $_ }
-        elsif ($seen) { $mult_digest{$md5} = [$seen, $_] }
-        else          { $seen_digest{$md5} = $_ }
+        elsif ($seen) { $mult_digest{$key} = [$seen, $_] }
+        else          { $seen_digest{$key} = $_ }
       } keys %$data;
   undef %seen_digest; # no longer needed, gc
 
-  # for each of the hashes with duplicates, print the paths of all but the
-  # one with the smallest size.
+  # for each of the hashes with duplicates, print the paths of all
+  # but the one with the smallest size.
   my @exclude;
   for my $set (values %mult_digest)
     {
-      my @file = sort { $data->{$a}->{size} <=> $data->{$b}->{size} } @$set;
+      my @file = sort { $data->{$a}->{size} <=> $data->{$b}->{size}
+                          || $a cmp $b;
+                      } @$set;
       shift @file; # drop the first, smallest element
       push @exclude, @file;
+      # exclude any corresponding signature files
+      push @exclude, map { "$_.sig", "$_.asc" } @file;
     }
 
   return wantarray ? @exclude : \@exclude ;
