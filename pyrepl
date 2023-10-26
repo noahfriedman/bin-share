@@ -60,18 +60,24 @@ class Repl( code.InteractiveConsole ):
 class _super( object ):
     super = property( lambda self: super( type( self ), self ) )
 
-# I think I'm inching toward writing another pretty printer from scratch.
+# I think I'm inching toward just writing another pretty printer from scratch.
 class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
-    _doc_width = 1024
-    _re_nonbinary = re.compile( b'[^\r\t\n\x20-\x7e]' )
-
+    def __init__( self, *args, **kwargs ):
+        self._re_nonbinary = None
+        self._max_width    = 1024
+        self.show_class    = True
+        self.super.__init__( *args, **kwargs )
 
     def _format( self, items, *rest ):
         # Intercept dict-like objects before using their non-prettyprinting repr
-        if (  not callable( items ) # class constructors
-              and (    hasattr( items, 'items' )
-                    or hasattr( items, '_asdict' ))):
+        if callable( items ): # class constructors
+            self.super._format( items, *rest )
+        elif hasattr( items, 'items' ) or hasattr( items, '_asdict' ):
             self._pprint_dictlike( items, *rest )
+        elif isinstance( items, list ):
+            self._pprint_list( items, *rest )
+        elif isinstance( items, str ):
+            self._pprint_str( items, *rest )
         else:
             self.super._format( items, *rest )
 
@@ -82,7 +88,6 @@ class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
     def _format_dict_items( self, items, stream, indent, allowance, context, level ):
         items_repr = [ (self._repr( key, context, level), ent) for key, ent in items ]
         max_keylen = max( len( elt[0] ) for elt in items_repr ) + 1
-
         write      = stream.write
         indent    += self._indent_per_level
         delimnl    = ',\n' + ' ' * indent
@@ -105,24 +110,31 @@ class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
                 write( delimnl )
 
 
+    def _surround_obj( self, obj, beg='', end='', base=str ):
+        if self.show_class and type( obj ) is not base:
+            try:
+                beg = '{0.__module__}.{0.__name__}({1}'.format(
+                    type( obj ),
+                    (  ' ' if beg == '' else beg)
+                )
+                end = (' ' if end == '' else end) + ')'
+            except AttributeError:
+                pass
+        return beg, end
+
+
     # This does a better job of formatting dict-like types like os.environ
     def _pprint_dictlike( self, obj, stream, indent, allowance, context, level ):
         write = stream.write
-        begstr = '{'
-        endstr = '}'
-        if type( obj ) is not dict:
-            try:
-                begstr = type( obj ).__name__ + '({'
-                endstr = '})'
-            except AttributeError:
-                pass
+        begstr, endstr = self._surround_obj( obj, '{', '}', dict )
+        allowance += len( endstr )
 
         if hasattr( obj, '_asdict' ):  # e.g. collections.namedtuple
             obj = obj._asdict()
 
         if hasattr( self, '_sort_dicts' ):
             if self._sort_dicts:
-                items = sorted( obj.items(), key=pprint._safe_tuple)
+                items = sorted( obj.items(), key=pprint._safe_tuple )
             else:
                 items = obj.items()
         else:
@@ -133,34 +145,32 @@ class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
             if self._indent_per_level > 1:
                 write( (self._indent_per_level - 1) * ' ' )
             indent += len( begstr ) - 1
-            self._format_dict_items(items, stream, indent, allowance + 1, context, level)
+            self._format_dict_items( items, stream, indent, allowance, context, level )
         write( endstr )
 
 
     def _pprint_list(self, obj, stream, indent, allowance, context, level):
         write = stream.write
-        write( '[' )
-        self._format_items( obj, stream, indent, allowance + 1, context, level )
+        begstr, endstr = self._surround_obj( obj, '[', ']', list )
+        indent    += max( 0, len( begstr ) - 1)
+        allowance += len( endstr )
+        write( begstr )
+        self._format_items( obj, stream, indent, allowance, context, level )
         if len( obj ) > 1:
-            write( ',\n' + ' ' * indent + ']' )
+            write( ',\n' + ' ' * indent + endstr )
         else:
-            stream.write( ']' )
+            stream.write( endstr )
 
 
     def _pprint_set(self, obj, stream, indent, allowance, context, level):
         write = stream.write
-        if not len( obj ):
-            write( repr( obj ))
-            return
-        begstr = '{'
-        endstr = '}'
-        if type( obj ) is not set:
-            begstr = type( obj ).__name__ + '({'
-            endchar = '})'
-            indent += len( begstr ) - 2
+        begstr, endstr = self._surround_obj( obj, '{', '}', set )
+        indent += max( 0, len( begstr ) - 2)
+        allowance += len( endstr )
+
         write( begstr )
         obj = sorted( obj, key=pprint._safe_key )
-        self._format_items( obj, stream, indent, allowance + len( endstr ), context, level)
+        self._format_items( obj, stream, indent, allowance, context, level )
         if len( obj ) > 1:
             write( ',\n' + ' ' * indent + endstr )	# close on new line
         else:
@@ -170,24 +180,34 @@ class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
     def _maxwidth( self, width=None ):
         if width is None:
             width = self._width
-        return max( width, self._doc_width )
+        return max( width, self._max_width )
 
 
     # If a string is multiline, extend width so any breaks are at line endings
-    def _pprint_str( self, obj, *rest ):
+    def _pprint_str( self, obj, stream, indent, allowance, context, level ):
+        write = stream.write
+        begstr, endstr = self._surround_obj( obj, '', '', str )
+        indent    += max( 0, len( begstr ) - 1)
+        allowance += len( endstr )
+
+        write( begstr )
         nl = obj.find( '\n' )
         if len( obj ) > nl+1 > 0: # first nl is not at very end of str
             try:
                 _width = self._width
                 self._width = self._maxwidth()
-                self.super._pprint_str( obj, *rest )
+                self.super._pprint_str( obj, stream, indent, allowance, context, level )
             finally:
                 self._width = _width
         else:
-            self.super._pprint_str( obj, *rest )
+            self.super._pprint_str( obj, stream, indent, allowance, context, level )
+        write( endstr )
 
 
     def _pprint_bytes( self, obj, stream, indent, *rest ):
+        if self._re_nonbinary is None:
+            self._re_nonbinary = re.compile( b'[^\r\t\n\x20-\x7e]' )
+
         if ( len( obj ) < self._maxwidth()
              and not self._re_nonbinary.search( obj )):
             try:
