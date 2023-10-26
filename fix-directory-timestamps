@@ -152,6 +152,7 @@ sub parse_options
 sub main
 {
   parse_options (\@_);
+  push @_, '.' unless @_;
   map { traverse( $_ ) } @_;
 }
 
