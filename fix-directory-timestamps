@@ -31,6 +31,7 @@ my @ignore_meta =
 my %opt = ( meta    => 1,
             dirs    => 1,
             nocase  => 0,
+            older   => 0,
             verbose => 0,
             noerr   => 0, );
 
@@ -48,6 +49,8 @@ sub perror
 sub chmtime
 {
   my ($dir, $atime, $mtime, $cur_mtime) = @_;
+
+  return if ($mtime > $cur_mtime) && !$opt{older};
 
   unless ($opt{nochange})
     {
@@ -125,6 +128,8 @@ sub parse_options
      'D'                        => sub { $opt{dirs}    = 0 },
      'f|fold-case|ignore-case!' =>      \$opt{nocase},
      'F'                        => sub { $opt{nocase}  = 0 },
+     'o|older|override-older!'  =>      \$opt{older},
+     'O'                        => sub { $opt{older}   = 0 },
      'v|verbose!'               =>      \$opt{verbose},
      'V'                        => sub { $opt{verbose} = 0 },
      'q|quiet-errors!'          =>      \$opt{noerr},
@@ -180,6 +185,7 @@ fix-directory-timestamps - finish documenting me
      {-n|--no-change}
      {-i|--ignore  FILENAME}
      {-m|--meta}
+     {-o|--older}
      [dir1 {dir2 {dir3 ...}}]
 
  The -h option may be repeated up to 3 times for increased verbosity.
@@ -234,6 +240,12 @@ such as checksum files,
 iso9660 rock ridge translation tables,
 font indexes,
 etc.
+
+=item B<-o>, B<--older>
+(opposite: O<-M>, B<--no-older>)
+
+Update timestamps on directories even if their current timestamp is older
+than the computed time.
 
 =item B<-d>, B<--dirs>
 (opposite: B<-D>, B<--no-dirs>)
