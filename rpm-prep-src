@@ -10,7 +10,7 @@ case $# in
             inst=`rpm -q --qf '%{SOURCERPM}\n' $1`
             case $inst in
                 *"is not installed" ) : ;;
-                * ) rpm=`$LOCATE -n 1 '*'/$inst`
+                * ) rpm=`$LOCATE '*'/$inst | sed 1q`
                     case $rpm in
                         '' ) : ;;
                         * )
