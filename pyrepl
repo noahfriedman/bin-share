@@ -68,11 +68,34 @@ class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
         self.show_class    = True
         self.super.__init__( *args, **kwargs )
 
+
+    @staticmethod
+    def _any_callable( obj, *method_names ):
+        for name in method_names:
+            method = getattr( obj, name, None )
+            if callable( method ):
+                return method
+        return None
+
+
+    def _surround_obj( self, obj, beg='', end='', base=str ):
+        if self.show_class and type( obj ) is not base:
+            try:
+                beg = '{0.__module__}.{0.__name__}({1}'.format(
+                    type( obj ),
+                    (  ' ' if beg == '' else beg)
+                )
+                end = (' ' if end == '' else end) + ')'
+            except AttributeError:
+                pass
+        return beg, end
+
+
     def _format( self, items, *rest ):
         # Intercept dict-like objects before using their non-prettyprinting repr
         if callable( items ): # class constructors
             self.super._format( items, *rest )
-        elif hasattr( items, 'items' ) or hasattr( items, '_asdict' ):
+        elif self._any_callable( items, 'items', '_asdict' ):
             self._pprint_dictlike( items, *rest )
         elif isinstance( items, list ):
             self._pprint_list( items, *rest )
@@ -110,27 +133,23 @@ class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
                 write( delimnl )
 
 
-    def _surround_obj( self, obj, beg='', end='', base=str ):
-        if self.show_class and type( obj ) is not base:
-            try:
-                beg = '{0.__module__}.{0.__name__}({1}'.format(
-                    type( obj ),
-                    (  ' ' if beg == '' else beg)
-                )
-                end = (' ' if end == '' else end) + ')'
-            except AttributeError:
-                pass
-        return beg, end
-
-
     # This does a better job of formatting dict-like types like os.environ
     def _pprint_dictlike( self, obj, stream, indent, allowance, context, level ):
         write = stream.write
         begstr, endstr = self._surround_obj( obj, '{', '}', dict )
         allowance += len( endstr )
 
-        if hasattr( obj, '_asdict' ):  # e.g. collections.namedtuple
-            obj = obj._asdict()
+        try:
+            # e.g. collections.namedtuple
+            if self._any_callable( obj, '_asdict' ):
+                obj = obj._asdict()
+        except Exception as err:
+            self.last_exception = err  # debugging hook
+            # This could have failed e.g. with dbus proxy objects that
+            # claim to have any named method you ask for, but then can't
+            # actually call them.
+            stream.write( '# {}'.format( err ))
+            return self.super._format( obj, stream, indent, allowance, context, level )
 
         if hasattr( self, '_sort_dicts' ):
             if self._sort_dicts:
