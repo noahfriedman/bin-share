@@ -1110,7 +1110,7 @@ def make_display_values( tty, args ):
             dfl = elt[ CC_PARAM_LIST_DFLT ]
             if ( dfl is None
                  or val == dfl
-                 or ( isinstance( val, str )
+                 or ( isinstance( val, (bytes, str) )
                       and ord( val ) == dfl)):
                 continue
         if name in ['time', 'min']:
