@@ -8,8 +8,7 @@
 # Commentary:
 # Code:
 
-# Copy namespace now, before any modules are imported.
-repl_locals = dict( locals() )
+from __future__ import print_function
 
 import readline
 import rlcompleter
@@ -23,14 +22,21 @@ import pprint
 import re
 import sys
 
+from io import StringIO
+
 
+# python2 doesn't support super().method call syntax,
+# so instead we use self.super.method
+class _super( object ):
+    super = property( lambda self: super( type( self ), self ) )
+
 # Provide saved history and tab completion on python symbols
 # Shamelessly stolen from Python library manual
-class Repl( code.InteractiveConsole ):
-    def __init__( self, locals=None, history_file=None, history_size_max=1024 ):
-        code.InteractiveConsole.__init__( self, locals )
-        readline.parse_and_bind( 'tab: complete' )
+class Repl( code.InteractiveConsole, _super ):
+    def __init__( self, locals=None, filename="<repl>", history_file=None, history_size_max=1024 ):
+        self.super.__init__( locals=locals, filename=filename )
 
+        readline.parse_and_bind( 'tab: complete' )
         if history_file is None:
             histdir  = os.getenv( 'XDG_CACHE_HOME' ) or os.getenv( 'HOME' )
             self.history_file = os.path.join( histdir, ".pyrepl_history" )
@@ -39,6 +45,7 @@ class Repl( code.InteractiveConsole ):
         self.history_size_max = history_size_max
         self.history_import()
         atexit.register( self.history_export )
+
 
     def history_import( self ):
         if self.history_file:
@@ -49,25 +56,37 @@ class Repl( code.InteractiveConsole ):
             except FileNotFoundError: # python3, undef in python2
                 pass
 
+
     def history_export( self ):
         if self.history_file:
             readline.set_history_length( self.history_size_max )
             readline.write_history_file( self.history_file )
 
 
-# python2 doesn't support super().method call syntax,
-# so instead we use self.super.method
-class _super( object ):
-    super = property( lambda self: super( type( self ), self ) )
+class GuardingRecursion( object ):
+    def __init__( self, obj, context ):
+        self.obj_id  = id( obj )
+        self.context = context
 
-# I think I'm inching toward just writing another pretty printer from scratch.
+    def __enter__( self ):
+        if self.obj_id in self.context:
+            raise RecursionError( 'object({:#x})'.format( self.obj_id ))
+        self.context[ self.obj_id ] = 1
+
+    def __exit__( self, exc_type, exc_value, traceback ):
+        if self.obj_id in self.context:
+            del self.context[ self.obj_id ]
+        return exc_type is None
+
+
 class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
     def __init__( self, *args, **kwargs ):
-        self._re_nonbinary = None
-        self._max_width    = 1024
-        self.show_class    = True
+        self._re_nonbinary  = None
+        self._max_width     = 1024
+        self._show_class    = False
+        self._show_obj_id   = False
         self.super.__init__( *args, **kwargs )
-
+        self.__dict__.setdefault( '_depth', None )
 
     @staticmethod
     def _any_callable( obj, *method_names ):
@@ -78,63 +97,180 @@ class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
         return None
 
 
+    @staticmethod
+    def _classname( obj ):
+        if not isinstance( obj, type ):
+            obj = type( obj )
+        module = getattr( obj, '__module__', '?' )
+        name   = getattr( obj, '__name__'  , '?' )
+        if module in ( 'builtins', '__builtin__' ):
+            return name
+        else:
+            return '{}.{}'.format( module, name )
+
+
+    def _maxwidth( self, width=None ):
+        if width is None:
+            width = self._width
+        return max( width, self._max_width )
+
+
+    # Handles str or bytes sequences
+    def _split_seq( self, obj, maxwidth=78, indent=1, allowance=1, minwidth=8 ):
+        maxwidth = max( minwidth, maxwidth - indent )
+        lines = obj.splitlines( True )
+        lastline = len( lines ) - 1
+        result = []
+        for n, elt in enumerate( lines ):
+            # one could just check if "elt is lines[-1]", but if lines consists of
+            # one or more equivalent strings, the interpreter could optimize them
+            # to be the same object, and the allowance adjustment would trigger early.
+            if n == lastline:
+                maxwidth -= allowance
+            if len( repr( elt )) <= maxwidth:
+                result.append( elt )
+            else:
+                # split line at whitespace or hyphens if possible
+                pattern = br'[^\s\-]*[\s\-]*' if isinstance( elt, bytes ) else r'[^\s\-]*[\s\-]*'
+                nullstr = elt[0:0] # this will be '' or b'' as needed
+                chunks  = re.findall( pattern, elt )
+                if chunks and chunks[-1] == nullstr:
+                    chunks.pop()
+                accum = nullstr
+                for part in chunks:
+                    if len( repr( accum + part )) <= maxwidth:
+                        accum += part
+                    elif len( repr( part )) > maxwidth:
+                        if accum != nullstr:
+                            result.append( accum )
+                            accum = nullstr
+                        # can't break at whitespace; just make maxwidth fragments
+                        trylen = maxwidth
+                        start  = 0
+                        while start < len( part ):
+                            fragment = part[ start:min( start+trylen, len( part )) ]
+                            if trylen < minwidth or len( repr( fragment )) <= maxwidth:
+                                result.append( fragment )
+                                start += len( fragment )
+                                trylen = maxwidth
+                            else:
+                                trylen -= maxwidth // 2
+                    else:
+                        result.append( accum )
+                        accum = part
+                if accum:
+                    result.append( accum )
+        return result
+
+
     def _surround_obj( self, obj, beg='', end='', base=str ):
-        if self.show_class and type( obj ) is not base:
+        show_class = (self._classname( obj )
+                      if (self._show_class and type( obj ) is not base)
+                      else None)
+        show_objid = id( obj ) if self._show_obj_id else None
+
+        if show_class or show_objid:
             try:
-                beg = '{0.__module__}.{0.__name__}({1}'.format(
-                    type( obj ),
-                    (  ' ' if beg == '' else beg)
-                )
-                end = (' ' if end == '' else end) + ')'
-            except AttributeError:
-                pass
+                empty = len( obj ) == 0
+            except TypeError as err:
+                empty = hasattr( obj, '__dict__' ) and not obj.__dict__
+
+            spc = ' ' * (self._indent_per_level - 1)
+
+            beg = spc if (beg == '' and not empty) else beg
+            if show_class and show_objid:
+                beg = '{}@{:#x}({}'.format( show_class, show_objid, beg )
+            elif show_class:
+                beg = '{}({}'.format( show_class, beg )
+            else:
+                beg = '{:#x}({}'.format( show_objid, beg )
+
+            end  = spc if (end == '' and not empty) else end
+            end += ')'
         return beg, end
 
 
-    def _format( self, items, *rest ):
-        # Intercept dict-like objects before using their non-prettyprinting repr
-        if callable( items ): # class constructors
-            self.super._format( items, *rest )
-        elif self._any_callable( items, 'items', '_asdict' ):
-            self._pprint_dictlike( items, *rest )
-        elif isinstance( items, list ):
-            self._pprint_list( items, *rest )
-        elif isinstance( items, str ):
-            self._pprint_str( items, *rest )
+    def _upcall( self, method, *args ):
+        # python2 pretty printer is missing many of the methods we use here,
+        # so we check if the method we really want is defined,
+        # or just fall back to the monolithic formatter.
+        fn = getattr( self.super, method, self.super._format )
+        return fn( *args )
+
+
+    def _recursion( self, obj ):
+        s = '<{0} object at {1:#x}>'
+        return s.format( self._classname( obj ), id( obj ) )
+
+
+    def _pprint_literal( self, obj, stream, *args ):
+        stream.write( obj )
+
+
+    def _pprint_max_depth_reached( self, obj, stream, *args ):
+        stream.write( '<max depth {:d} exceeded>'.format( self._depth ) )
+
+
+    def _format( self, obj, stream, indent, allowance, context, level ):
+        if id( obj ) in context:
+            self._pprint_literal( self._recursion( obj ), stream, indent, allowance, context, level )
+            return
+        if isinstance( self._depth, int ) and level > self._depth:
+            self._pprint_max_depth_reached( obj, stream )
+            return
+
+        fn = self._class_formatter( obj )
+        if fn:
+            fn( self, obj, stream, indent, allowance, context, level )
+        elif callable( obj ): # class constructors
+            self.super._format( obj, stream, indent, allowance, context, level )
+        elif self._any_callable( obj, 'items', '_asdict' ):
+            self._pprint_dict( obj, stream, indent, allowance, context, level )
         else:
-            self.super._format( items, *rest )
+            # Delete obj from context if calling super methods,
+            # because we aren't handling it ourselves anymore.
+            try:
+                formatter = self._dispatch[ self._classname( obj ) ]
+                formatter( self, obj, stream, indent, allowance, context, level )
+            except KeyError:
+                self.super._format( obj, stream, indent, allowance, context, level )
+
+
+    def _repr_pp( self, obj, *args ):
+        sio = StringIO()
+        self._format( obj, sio, 0, 0, {}, 0 )
+        return sio.getvalue()
 
 
     # This method override adds padding so that all keys in a dict are
     # aligned to the same column. That is, they are all indented to the
     # length of the longest key.
     def _format_dict_items( self, items, stream, indent, allowance, context, level ):
-        items_repr = [ (self._repr( key, context, level), ent) for key, ent in items ]
+        items_repr = [ (self._repr_pp( key, context, level), ent) for key, ent in items ]
         max_keylen = max( len( elt[0] ) for elt in items_repr ) + 1
         write      = stream.write
         indent    += self._indent_per_level
         delimnl    = ',\n' + ' ' * indent
-        last_index = len( items_repr ) - 1
+        last_i = len( items_repr ) - 1
 
-        for i, (rep, ent) in enumerate( items_repr ):
-            last = i == last_index
-            write( rep )
-            write( ' ' * (max_keylen - len( rep )))
+        for i, (key, val) in enumerate( items_repr ):
+            islast = i == last_i
+            write( key )
+            write( ' ' * (max_keylen - len( key )))
             write( ': ' )
-            self._format( ent,
+            self._format( val,
                           stream,
                           indent + max_keylen + 2,
-                          allowance if last else 1,
+                          allowance if islast else 1,
                           context,
-                          level )
-            if last:
+                          level + 1 )
+            if islast:
                 write( delimnl[ 0 : -self._indent_per_level ])
             else:
                 write( delimnl )
 
-
-    # This does a better job of formatting dict-like types like os.environ
-    def _pprint_dictlike( self, obj, stream, indent, allowance, context, level ):
+    # Format dict and other associative objects
+    def _pprint_dict( self, obj, stream, indent, allowance, context, level ):
         write = stream.write
         begstr, endstr = self._surround_obj( obj, '{', '}', dict )
         allowance += len( endstr )
@@ -143,13 +279,14 @@ class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
             # e.g. collections.namedtuple
             if self._any_callable( obj, '_asdict' ):
                 obj = obj._asdict()
+            elif hasattr( obj, '__dict__' ):
+                obj = obj.__dict__
         except Exception as err:
-            self.last_exception = err  # debugging hook
             # This could have failed e.g. with dbus proxy objects that
             # claim to have any named method you ask for, but then can't
             # actually call them.
-            stream.write( '# {}'.format( err ))
-            return self.super._format( obj, stream, indent, allowance, context, level )
+            self._pprint_literal( repr( obj ), stream, indent, allowance, context, level )
+            return
 
         if hasattr( self, '_sort_dicts' ):
             if self._sort_dicts:
@@ -164,21 +301,38 @@ class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
             if self._indent_per_level > 1:
                 write( (self._indent_per_level - 1) * ' ' )
             indent += len( begstr ) - 1
-            self._format_dict_items( items, stream, indent, allowance, context, level )
+            with GuardingRecursion( obj, context ):
+                self._format_dict_items( items, stream, indent, allowance, context, level )
         write( endstr )
 
 
     def _pprint_list(self, obj, stream, indent, allowance, context, level):
         write = stream.write
-        begstr, endstr = self._surround_obj( obj, '[', ']', list )
-        indent    += max( 0, len( begstr ) - 1)
-        allowance += len( endstr )
-        write( begstr )
-        self._format_items( obj, stream, indent, allowance, context, level )
-        if len( obj ) > 1:
-            write( ',\n' + ' ' * indent + endstr )
+        if isinstance( obj, tuple ):
+            begstr, endstr = self._surround_obj( obj, '(', ')', tuple )
         else:
-            stream.write( endstr )
+            begstr, endstr = self._surround_obj( obj, '[', ']', list )
+        pad_i      = self._indent_per_level - 1
+        pad_s      = ' ' * pad_i
+        indent    += len( begstr ) + pad_i
+        allowance += len( endstr ) - pad_i
+        level     += pad_i + 1
+        if obj:
+            write( begstr + pad_s )
+            last_i = len( obj ) - 1
+            for i, elt in enumerate( obj ):
+                with GuardingRecursion( obj, context ):
+                    self._format( elt, stream, indent, allowance, context, level )
+                if i < last_i:
+                    write( ',\n' + ' ' * indent )
+            if isinstance( obj, tuple ) and len( obj ) == 1:
+                write( ',' )
+            if len( obj ) > 1 and self._indent_per_level > 1:
+                write( ',\n' + ' ' * (indent - pad_i - 1) + endstr ) # close on new line
+            else:
+                write( pad_s + endstr ) # close on final line
+        else:
+            write( repr( obj ))
 
 
     def _pprint_set(self, obj, stream, indent, allowance, context, level):
@@ -189,37 +343,39 @@ class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
 
         write( begstr )
         obj = sorted( obj, key=pprint._safe_key )
-        self._format_items( obj, stream, indent, allowance, context, level )
-        if len( obj ) > 1:
+        self._upcall( '_format_items', obj, stream, indent, allowance, context, level )
+        if len( obj ) > 1 and self._indent_per_level > 1:
             write( ',\n' + ' ' * indent + endstr )	# close on new line
         else:
-            write( ' ' + endstr )			# close on final line
-
-
-    def _maxwidth( self, width=None ):
-        if width is None:
-            width = self._width
-        return max( width, self._max_width )
+            write( endstr )				# close on final line
 
 
     # If a string is multiline, extend width so any breaks are at line endings
     def _pprint_str( self, obj, stream, indent, allowance, context, level ):
         write = stream.write
         begstr, endstr = self._surround_obj( obj, '', '', str )
-        indent    += max( 0, len( begstr ) - 1)
+        pad_i      = self._indent_per_level - 2
+        pad_s      = ' ' * pad_i
+        indent    += len( begstr ) + pad_i
         allowance += len( endstr )
+
+        if not obj:
+            write( begstr + repr( obj ) + endstr )
+            return
 
         write( begstr )
         nl = obj.find( '\n' )
         if len( obj ) > nl+1 > 0: # first nl is not at very end of str
-            try:
-                _width = self._width
-                self._width = self._maxwidth()
-                self.super._pprint_str( obj, stream, indent, allowance, context, level )
-            finally:
-                self._width = _width
+            # Don't break paragraphs into short lines; that's actually
+            # harder to read than just breaking at newlines.
+            lines = self._split_seq( obj, self._maxwidth(), indent, allowance )
         else:
-            self.super._pprint_str( obj, stream, indent, allowance, context, level )
+            lines = self._split_seq( obj, self._width, indent, allowance )
+        last_i = len( lines ) - 1
+        for i, elt in enumerate( lines ):
+            write( repr( elt ))
+            if i < last_i:
+                write( '\n' + ' ' * indent )
         write( endstr )
 
 
@@ -263,20 +419,46 @@ class ReplPrettyPrinter( pprint.PrettyPrinter, _super ):
         self._pprint_str( str( obj ), *args )
 
 
+    def _class_formatter( self, obj ):
+        fn = self._class_formatters.get( type( obj ))
+        if fn:
+            return fn
+        for sdtype, fn in self._class_formatters.items():
+            if isinstance( obj, sdtype ):
+                return fn
+
+    _class_formatters = { list                    : _pprint_list,
+                          tuple                   : _pprint_list,
+                          dict                    : _pprint_dict,
+                          type( dict().items() )  : _pprint_list,
+                          type( dict().keys() )   : _pprint_list,
+                          type( dict().values() ) : _pprint_list,
+                          set                     : _pprint_set,
+                          frozenset               : _pprint_set,
+                          str                     : _pprint_str,
+                          bytes                   : _pprint_bytes, }
+
     try:
-        _dispatch = pprint.PrettyPrinter._dispatch.copy()
-        _dispatch[                str.__repr__] = _pprint_str
-        _dispatch[              bytes.__repr__] = _pprint_bytes
-        _dispatch[               list.__repr__] = _pprint_list
-        _dispatch[                set.__repr__] = _pprint_set
-        _dispatch[          frozenset.__repr__] = _pprint_set
-        _dispatch[        os._Environ.__repr__] = _pprint_dictlike
-        _dispatch[copyright.__class__.__repr__] = _pprint_site_Printer
-        _dispatch[     help.__class__.__repr__] = _pprint_site_Printer
+        _dispatch = pprint._dispatch.copy()
     except AttributeError:
-        pass
+        _dispatch = dict()
+
+    _dispatch[                  str.__repr__] = _pprint_str
+    _dispatch[                bytes.__repr__] = _pprint_bytes
+    _dispatch[                 dict.__repr__] = _pprint_dict
+    _dispatch[                 list.__repr__] = _pprint_list
+    _dispatch[                  set.__repr__] = _pprint_set
+    _dispatch[            frozenset.__repr__] = _pprint_set
+    _dispatch[          os._Environ.__repr__] = _pprint_dict
+    _dispatch[  copyright.__class__.__repr__] = _pprint_site_Printer
+    _dispatch[       help.__class__.__repr__] = _pprint_site_Printer
+    _dispatch[          'argparse.Namespace'] = _pprint_dict
+    _dispatch['_frozen_importlib.ModuleSpec'] = _pprint_dict
 
 
+repl_locals = dict( locals() )
+
+
 repl_pp = ReplPrettyPrinter( indent=2, width=72 )
 def pp( *args, **kwargs ):
     for arg in args:
@@ -295,7 +477,7 @@ def load( filename ):
     exec( text, repl_locals )
 
 
-def pyrepl():
+def pyrepl( argv=sys.argv ):
     banner = '{} {}.{}.{} [{}] {}-{}'.format(
         platform.python_implementation(),
         sys.version_info.major,
@@ -313,7 +495,12 @@ def pyrepl():
     repl_locals.update( { '__name__' : '__pyrepl__',
                           'bt'       : bt,
                           'load'     : load,
-                          'repl_pp'  : repl_pp, } )
+                          'pp'       : pp,
+                          'repl_pp'  : repl_pp,
+                        } )
+
+    for elt in sys.argv[1:]:
+        load( elt )
 
     # Don't display 'None' if there is nothing to display.
     sys.displayhook = lambda arg: (arg is None) or pp( arg )
