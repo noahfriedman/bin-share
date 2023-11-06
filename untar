@@ -4,8 +4,6 @@
 # Created: 1996-01-15
 # Public domain
 
-# $Id: untar,v 1.40 2019/06/15 07:21:13 friedman Exp $
-
 # Commentary:
 
 # This started out just unpacking tar files, but now supports more formats.
@@ -14,11 +12,18 @@
 
 tmpdir=untar$$
 
+: ${BZIP2:=bzip2} : ${GZIP:=gzip}   : ${LZIP:=lzip} : ${LZMA:=lzma}
+: ${LHA:=lha}     : ${UNZIP:=unzip} : ${_7ZIP:=7z}  : ${XZ:=xz}
+: ${AR:=ar}       : ${CAT:=cat}     : ${CPIO:=cpio} : ${RPM2CPIO:=rpm2cpio}
+: ${DD:=dd}       : ${GREP:=grep}   : ${TAR:=tar}   : ${XARGS:=xargs}
+: ${XORRISO:=xorriso}
+
 pre()
 {
-    pkgdir=`echo "$file" | sed -e 's=.*/==' -e 's=\.[^.]*$=='`
+    pkgdir=${file##*/}   # strip directory
+    pkgdir=${pkgdir%.*}  # strip extension
     case $pkgdir in
-        *.tar | *.xtar ) pkgdir=`echo "$pkgdir" | sed -e 's=\.[^.]*$=='` ;;
+        *.tar | *.xtar ) pkgdir=${pkgdir%.*} ;; # strip one more extension
     esac
 
     if [ -d "$pkgdir" ]; then
@@ -61,7 +66,7 @@ post()
         cd .. &&
         rmdir "$tmpdir"
     else
-        echo "$tmpdir": empty directory\? 1>&2
+        echo "$tmpdir: empty directory?" 1>&2
         cd .. && rmdir "$tmpdir"
         return 1
     fi
@@ -71,38 +76,38 @@ extract()
 {
     case $file in
         *.t[ag]z | *.tar.gz | *.tar.[Zz] | *.xtar.gz | *.xtar.[Zz] | *.nif )
-            ${GZIP-gzip} -dc "$file" | ${TAR-tar} -xpvf - ;;
+            $GZIP -dc "$file" | $TAR -xpvf - ;;
 
         *.tbz | *.tbz2 | *.tar.bz2 | *.xtar.bz2 | *.tar.bz | *.cbt )
-            ${BZIP2-bzip2} -dc "$file" | ${TAR-tar} -xpvf - ;;
+            $BZIP2 -dc "$file" | $TAR -xpvf - ;;
 
         *.tar.xz | *.txz ) # xz uses LZMA, but isn't compatible with `lzma'
-            ${XZ-xz} -dc "$file" | ${TAR-tar} -xpvf - ;;
+            $XZ -dc "$file" | $TAR -xpvf - ;;
 
         *.tar.lz | *.tlz ) # lzip uses LZMA, but isn't compatible with `lzma'
-            ${LZIP-lzip} -dc "$file" | ${TAR-tar} -xpvf - ;;
+            $LZIP -dc "$file" | $TAR -xpvf - ;;
 
         *.tar.lzma )
-            ${LZMA-lzma} -dc "$file" | ${TAR-tar} -xpvf - ;;
+            $LZMA -dc "$file" | $TAR -xpvf - ;;
 
         *.tar | *.xtar | *.ova | *.tar.md5 )
-            ${TAR-tar} -xpvf "$file" ;;
+            $TAR -xpvf "$file" ;;
 
         *.zip | *.cbz | *.fbu | *.jar | *.apk | *.xpi | *.epub )
-            ${UNZIP-unzip} -o -d . "$file" ;;
+            $UNZIP -o -d . "$file" ;;
 
         *.rpm )
-            ${RPM2CPIO-rpm2cpio} "$file" | ${CPIO-cpio} -dimv --no-absolute-filenames ;;
+            $RPM2CPIO "$file" | $CPIO -dimv --no-absolute-filenames ;;
 
         *.deb | *.udeb )
-            ${AR-ar} xv "$file"
+            $AR xv "$file"
             for file in control.tar.* data.tar.* ; do
                 (pre; extract; post)
                 rm -f "$file"
             done ;;
 
         *.lzh )
-            ${LHA-lha} x "$file" ;;
+            $LHA x "$file" ;;
 
         *.rar | *.cbr )
             if type unar >/dev/null 2>&1;
@@ -115,29 +120,29 @@ extract()
             esac ;;
 
         *.a | *.lib )
-            ${AR-ar} t "$file" | sed -ne 's=/[^/]*$==p' |
+            $AR t "$file" | sed -ne 's=/[^/]*$==p' |
                 xargs --no-run-if-empty mkdir -p
-            ${AR-ar} xv "$file" ;;
+            $AR xv "$file" ;;
 
         *.7z )
-            7z x "$file" ;;
+            $_7Z x "$file" ;;
 
         *.cab )
             #${CABEXTRACT-cabextract} "$file" ;;
-            7z x "$file" ;;
+            $_7Z x "$file" ;;
 
         *.msi )
             # ${MSIEXEC-msiexec} /a "$file" /qb TARGETDIR=./$pkgdir ;;
-            7z x "$file" ;;
+            $_7Z x "$file" ;;
 
         *.dmg )
-            7z x "$file" ;;
+            $_7Z x "$file" ;;
 
         *.pkg ) # mac pkg files
             # pkgutil --expand "$file" .
             basename=${file##*/}
             pkgdir=${basename%.pkg}.app
-            7z x -o"$pkgdir" "$file" ;;
+            $_7Z x -o"$pkgdir" "$file" ;;
 
         *initramfs*.img | *initrd*.img | *ramdisk.img )
             extract_initrd "$file" ;;
@@ -151,47 +156,48 @@ extract()
             unsquashfs -i -d "${dest%.squashfs}" "$file" ;;
 
         *.iso )
-            xorriso -for_backup \
-                    -indev "$file" \
-                    -osirrox on:auto_chmod_on \
-                    -chmod_r u+rw / -- \
-                    -extract / .  \
-                    -rollback_end
+            $XORRISO -for_backup \
+                     -indev "$file" \
+                     -osirrox on:auto_chmod_on \
+                     -chmod_r u+rw / -- \
+                     -extract / .  \
+                     -rollback_end
             ;;
     esac
 }
 
 extract_initrd()
 {
-    if ${GREP-grep} -q 'early_cpio' "$file"; then
+    # Assuming GNU grep's -q because initrd files are a linux thing.
+    if $GREP -q 'early_cpio' "$file"; then
         # Skip uncompressed cpu microcode blobs at head of actual archive.
-        blocks=`${CPIO-cpio} -t < "$file" 2>&1 \
+        blocks=`$CPIO -t < "$file" 2>&1 \
                   | sed -ne '/^\([0-9]*\) blocks$/s//\1/p'`
-        exp() { ${DD-dd} bs=1b skip=$blocks status=none if="$1"; }
+        exp() { $DD bs=1b skip=$blocks status=none if="$1"; }
     else
-        exp() { ${CAT-cat} -- "$1"; }
+        exp() { $CAT -- "$1"; }
     fi
 
     kind=`exp "$file" | file -`
     case $kind in
-        *gzip*  ) exp2() { ${GZIP-gzip}   -dc; } ;;
-        *bzip2* ) exp2() { ${BZIP2-bzip2} -dc; } ;;
-        *XZ*    ) exp2() { ${XZ-xz}       -dc; } ;;
-        *cpio*  ) exp2() { ${CAT-cat};         } ;;
+        *gzip*  ) exp2() { $GZIP  -dc; } ;;
+        *bzip2* ) exp2() { $BZIP2 -dc; } ;;
+        *XZ*    ) exp2() { $XZ    -dc; } ;;
+        *cpio*  ) exp2() { $CAT      ; } ;;
         *       ) echo "$file: unknown file format" 1>&2
                   exit 1 ;;
     esac
-    exp "$file" | exp2 | ${CPIO-cpio} -dimv --no-absolute-filenames
+    exp "$file" | exp2 | $CPIO -dimv --no-absolute-filenames
 }
 
 
 main()
 {
-  for file in ${1+"$@"}; do
+  for file in "$@"; do
     (pre; extract; post)
   done
 }
 
-main ${1+"$@"}
+main "$@"
 
 # eof
