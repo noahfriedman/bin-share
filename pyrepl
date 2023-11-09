@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # pyrepl --- interactive python interpreter with easier to read output
 
 # Author: Noah Friedman <friedman@splode.com>
@@ -8,29 +8,23 @@
 # Commentary:
 # Code:
 
-from __future__ import print_function
-
 repl_locals = locals().copy()
-del repl_locals[ 'print_function' ]
 
 import readline
 import rlcompleter
-import termios
-
-import atexit
 import code
-import signal
 import subprocess
 
-import builtins
-import io
+import atexit
 import os
 import platform
-import re
 import sys
-import types
 
-import pprint
+import signal
+import termios
+
+import nfpprint
+
 
 
 # Provide saved history and tab completion on python symbols
@@ -41,7 +35,7 @@ class Repl( code.InteractiveConsole ):
 
         readline.parse_and_bind( 'tab: complete' )
         if history_file is None:
-            histdir  = os.getenv( 'XDG_CACHE_HOME' ) or os.getenv( 'HOME' )
+            histdir = os.getenv( 'XDG_CACHE_HOME' ) or os.getenv( 'HOME' )
             self.history_file = os.path.join( histdir, ".pyrepl_history" )
         else:
             self.history_file = history_file
@@ -66,682 +60,49 @@ class Repl( code.InteractiveConsole ):
             readline.write_history_file( self.history_file )
 
 
-
-class GuardingRecursion( object ):
-    ignore_types = ( type, float, int, str, bytes, type( None ))
-
-
-    def __init__( self, context, *objs ):
-        self.context = context
-        self.obj_ids = []
-        for elt in objs:
-            if isinstance( elt, self.ignore_types ):
-                continue
-            elt_id = id( elt )
-            if elt_id in context:
-                name = type( elt ).__name__
-                raise RecursionError( '{}={:#x}'.format( name, elt_id ))
-            context[ elt_id ] = 1
-            self.obj_ids.append( elt_id )
-
-
-    def __enter__( self ):
-        pass
-
-
-    def __exit__( self, exc_type, exc_value, traceback ):
-        context = self.context
-        for elt_id in self.obj_ids:
-            if elt_id in context:
-                del context[ elt_id ]
-        return exc_type is None
-
-
-class PrettyPrinter( pprint.PrettyPrinter ):
+class PrettyPrinter( nfpprint.PrettyPrinter ):
     def __init__( self, *args, **kwargs ):
-        self._element_nl    = True
-        self._close_on_nl   = True
-        self._re_isbinary   = None
-        self._min_width     =    8
-        self._max_width     = 256
-        self._auto_width    = True  # adjust to terminal
-        self._show_class    = False
-        self._show_obj_id   = False
-        self._debug         = False
-
         super( __class__, self ).__init__( *args, **kwargs )
-        self.__dict__.setdefault( '_depth', None )
+        # adjust width when terminal size changes
+        self.settings.setdefault( 'auto_width', True )
 
-        self._orig_SIGWINCH = signal.signal(
-            signal.SIGWINCH,
-            self.handle_SIGWINCH )
-        if self._auto_width:
-            self.update_termwidth()
-
-
-    def handle_SIGWINCH( self, signum, frame ):
-        signame = signal.Signals( signum ).name
-        owidth = self._width
-        self.update_termwidth()
-        nwidth = self._width
-        self._debugmsg( '[{}] {} => {}', signame, owidth, nwidth )
+        self._orig_SIGWINCH = signal.signal( signal.SIGWINCH,
+                                             self._handle_SIGWINCH )
+        self._update_max_width()
 
 
-    def update_termwidth( self, fd=sys.stdout ):
-        if self._auto_width:
+    def _handle_SIGWINCH( self, signum, frame ):
+        if self.settings.debug:
+            signame = signal.Signals( signum ).name
+            owidth  = self.settings.max_width
+            self._update_max_width()
+            nwidth  = self.settings.max_width
+            self.debugmsg( '[{}] {} => {}', signame, owidth, nwidth )
+        else:
+            self._update_max_width()
+
+
+    def _update_max_width( self, fd=sys.stdout ):
+        if self.settings.auto_width:
             try:
                 (row, col) = termios.tcgetwinsize( fd )
                 if col > 15:
-                    self._width = col
+                    self.settings.max_width = col - 2
             except termios.error:
                 pass
 
-
     def __del__( self ):
         signal.signal( signal.SIGWINCH, self._orig_SIGWINCH )
-        self._debugmsg( '{}.__del__({:#x})', self._classname( self ), id( self ) )
-        if hasattr( self.super, '__del__' ):
-            super( __class__, self ).__del__()
-
-
-    def _debugmsg( self, fmt, *args ):
-        if self._debug:
-            print( '\n*', fmt.format( *args ), file=sys.stdout )
-
-    @staticmethod
-    def _any_callable( obj, *method_names ):
-        for name in method_names:
-            method = getattr( obj, name, None )
-            if callable( method ):
-                return method
-        return None
-
-
-    @staticmethod
-    def _classname( obj ):
-        if not isinstance( obj, type ):
-            obj = type( obj )
-        module = getattr( obj, '__module__', '?' )
-        name   = getattr( obj, '__name__'  , '?' )
-        if module[0] == '_' or module in ( 'builtins', ):
-            return name
-        else:
-            return '{}.{}'.format( module, name )
-
-
-    def _maxwidth( self, width=None ):
-        if width is None:
-            width = self._width
-        return max( width, self._max_width )
-
-
-    # encode or decode data as needed
-    @staticmethod
-    def _convert( data, _type, encoding=None ):
-        if not isinstance( _type, (type, tuple) ):
-            _type = type( _type )
-        if isinstance( data, _type ):
-            return data
-        codec = (getattr( data, 'encode', None )
-                 or getattr( data, 'decode' ))
-        if encoding is None:
-            return codec()  # bound method, so no data arg
-        return codec( encoding )
-
-
-    def _repr_pp( self, obj, stream, indent, allowance, context, level ):
-        # FIXME: tuples as keys in a dict format really badly using _format.
-        # Need an option to disable the newline-per-element behavior
-        if True:
-            return repr( obj )
-        sio = StringIO()
-        self._format( obj, sio, 0, 0, {}, 0 )
-        return sio.getvalue()
-
-
-    def _recursion( self, obj ):
-        s = '#<{0} object at {1:#x}>'
-        return s.format( self._classname( obj ), id( obj ) )
-
-
-    def _max_depth( self, obj=None ):
-        return '<max depth {:d} exceeded>'.format( self._depth )
-
-
-    def _surround_obj( self, obj, beg='', end='', base=str, force=False ):
-        """Compute decoration around object to be displayed.
-        Caller supplies basic values, e.g. '{','}', and depending on
-        options and object types, this will return an annotated variation
-        on that including class name, object id (useful for tracing
-        recursion), or both.
-        """
-        show_class = (self._classname( obj )
-                      if force or ( self._show_class
-                                    and type( obj ) is not base )
-                      else False)
-        show_objid = id( obj ) if self._show_obj_id else False
-
-        if show_class or show_objid:
-            if show_class and show_objid:
-                beg = '{}@{:#x}({}'.format( show_class, show_objid, beg )
-            elif show_class:
-                beg = '{}({}'.format( show_class, beg )
-            else:
-                beg = '{:#x}({}'.format( show_objid, beg )
-            end += ')'
-        return beg, end
-
-
-    # Handles str or bytes sequences
-    # This is intended for data that is humanly readable, e.g. ascii text.
-    # General binary data is split by _split_data.
-    def _split_str( self, obj, maxwidth=76, indent=1, allowance=1, minwidth=8 ):
-        maxwidth = max( minwidth, maxwidth - indent )
-        lines    = obj.splitlines( True )
-        lastline = len( lines ) - 1
-        result   = []
-        # split lines at whitespace if possible
-        split_re = re.compile( self._convert( r'\S*\s*', obj ))
-        for i, elt in enumerate( lines ):
-            # One might just check if "elt is lines[-1]", but if lines consist of
-            # one or more equivalent strings, the interpreter could optimize them
-            # to be the same object since strings are immutable, and the
-            # allowance adjustment would trigger too early.
-            if i == lastline:
-                maxwidth -= allowance
-            if len( repr( elt )) <= maxwidth:
-                result.append( elt )
-            else:
-                empty  = elt[0:0] # this will be bytes or str as needed
-                chunks = split_re.findall( elt )
-                if chunks and chunks[-1] == empty:
-                    chunks.pop()
-                accum = empty
-                for part in chunks:
-                    if len( repr( accum + part )) <= maxwidth:
-                        accum += part
-                    elif len( repr( part )) > maxwidth:
-                        if accum != empty:
-                            result.append( accum )
-                            accum = empty
-                        # can't break at whitespace; just make maxwidth fragments
-                        trylen = maxwidth
-                        start  = 0
-                        while start < len( part ):
-                            fragment = part[ start:min( start+trylen, len( part )) ]
-                            if trylen < minwidth or len( repr( fragment )) <= maxwidth:
-                                result.append( fragment )
-                                start += len( fragment )
-                                trylen = maxwidth
-                            else:
-                                trylen -= minwidth
-                    else:
-                        result.append( accum )
-                        accum = part
-                if accum:
-                    result.append( accum )
-        return result
-
-
-    @staticmethod
-    def _split_data( obj, max_width, min_width=1 ):
-        """Break a binary string into "lines" which are no longer than
-        MAX_WIDTH columns wide when displayed as python objects, i.e. 'b'
-        prefix, hexadecimal notation for non-printing characters, etc.
-        """
-        blocks = []
-        start  = 0
-        stop   = len( obj )
-        width  = max_width
-        adjust = width // 2
-        seg      = ''
-        rseg_len = 0
-        def advance( segment ):
-            blocks.append( segment )
-            nonlocal start, width, adjust, seg, rseg_len
-            start   += len( segment )
-            width    = max_width
-            adjust   = width // 2
-            seg      = ''
-            rseg_len = 0
-        while start < stop:
-            # save values from previous prior loop
-            p_seg      = seg
-            p_rseg_len = rseg_len
-            #
-            end        = min( start + width, stop )
-            seg        = obj[ start:end ]
-            rseg       = repr( seg )
-            rseg_len   = len( rseg )
-            #
-            if rseg_len == max_width or (rseg_len < max_width and end == stop):
-                advance( seg )
-                continue
-            elif ( adjust == 1
-                   and   rseg_len >  max_width
-                   and p_rseg_len <= max_width ):
-                advance( p_seg ) # previous result is the largest that can fit
-                continue
-            # zero in on final len by making smaller and smaller adjustments
-            elif rseg_len > max_width: width -= adjust
-            elif rseg_len < max_width: width += adjust
-            if adjust > 1: adjust = (adjust * 3) // 4 # 3/4 of previous adjust
-        return blocks
-
-
-    def _format( self, obj, stream, indent, allowance, context, level ):
-        if id( obj ) in context:
-            stream.write( self._recursion( obj ) )
-            return
-        if isinstance( self._depth, int ) and level > self._depth:
-            stream.write( self._max_depth() )
-            return
-
-        fn = self._class_formatter( obj )
-        if fn:
-            self._debugmsg( '_format: {}( {}={:#x} )', fn.__name__, obj.__class__.__name__, id(obj) )
-            fn( self, obj, stream, indent, allowance, context, level )
-        elif callable( obj ):
-            # class constructors, functions, etc
-            # They are relatively opaque, so let them repr themselves
-            stream.write( repr( obj ))
-        elif self._any_callable( obj, 'items', '_asdict' ):
-            self._pprint_nonordered_associative( obj, stream, indent, allowance, context, level )
-        else:
-            try:
-                formatter = self._dispatch[ self._classname( obj ) ]
-                formatter( self, obj, stream, indent, allowance, context, level )
-            except KeyError:
-                # There are a handful of objects the original pprint still handles,
-                # including all of the collections and dataclasses subtypes
-                super( __class__, self )._format( obj, stream, indent, allowance, context, level )
-
-    # Format dict and other associative objects with no intrinsic ordering.
-    # Don't use this for ordered pairs, since it may sort by key.
-    def _pprint_nonordered_associative( self, obj, stream, indent, allowance, context, level ):
-        try:
-            # e.g. collections.namedtuple
-            if self._any_callable( obj, '_asdict' ):
-                pobj = obj._asdict()
-            elif hasattr( obj, '__dict__' ):
-                pobj = obj.__dict__.copy()
-            else:
-                pobj = obj
-        except:
-            # This could have failed e.g. with dbus proxy objects that
-            # claim to have any named method you ask for, but then can't
-            # actually call them.
-            stream.write( repr( obj ) )
-            return
-
-        if hasattr( self, '_sort_dicts' ):
-            if self._sort_dicts:
-                pobj = sorted( pobj.items(), key=pprint._safe_tuple )
-        else:
-            pobj = sorted( pobj.items(), key=lambda k: repr( k ))
-
-        begstr, endstr = self._surround_obj( obj, '{', '}', dict )
-        if pobj:
-            with GuardingRecursion( context, obj, pobj ):
-                self._format_obj_kv_pairs(
-                    pobj, stream, indent, allowance, context, level,
-                    begstr  = begstr,
-                    endstr  = endstr,
-                    sep     = ':',
-                    reprkey = True )
-        else:
-            stream.write( repr( obj ) )
-
-    _pprint_dict = _pprint_nonordered_associative
-
-    # Format classes with key/value pairs but which are ordered in some way.
-    # (e.g. named tuples, although those in particular are handled elsewhere.)
-    def _pprint_ordered_associative( self, obj, stream, indent, allowance, context, level,
-                                 beg     = '',
-                                 end     = '',
-                                 sep     = '=',
-                                 base    = dict,
-                                 reprkey = False ):
-        if self._any_callable( obj, '_asdict' ):
-            pobj = obj._asdict()
-        elif hasattr( obj, '__dict__' ):
-            class_attrs = dir( type( obj ))
-            pobj = { key : val for (key, val) in obj.__dict__.items()
-                     if (key not in class_attrs
-                         and (isinstance( key, str ) and key[0] != '_'
-                              or str( key )[0] != '_' )) }
-        else:
-            pobj = obj
-
-        begstr, endstr = self._surround_obj( obj, beg, end, base, force=True )
-        if pobj:
-            with GuardingRecursion( context, obj, pobj ):
-                self._format_obj_kv_pairs(
-                    pobj, stream, indent, allowance, context, level,
-                    begstr  = begstr,
-                    endstr  = endstr,
-                    sep     = sep,
-                    reprkey = reprkey )
-        else:
-            stream.write( obj )
-
-    # The inner loop of _pprint_(non)ordered_associative
-    # This method adds padding so that all keys are aligned to the same
-    # column, i.e. they are all indented to the length of the longest key.
-    def _format_obj_kv_pairs( self,
-                              obj, stream, indent, allowance, context, level,
-                              begstr  = '{',
-                              endstr  = '}',
-                              sep     = ':',
-                              reprkey = True ):
-        write      = stream.write
-        pad_i      = self._indent_per_level - 1
-        pad_s      = ' ' * pad_i
-        indent    += len( begstr ) + pad_i - 1
-        allowance += len( endstr ) - pad_i
-        level     += 1
-        delim      = ',\n' + ' ' * indent
-
-        if isinstance( obj, ( list, tuple )):
-            getkey = lambda x: x[0]
-        else:
-            getkey = lambda x: x
-        if reprkey:
-            keylist    = tuple( self._repr_pp( getkey( elt ),
-                                               stream, indent,
-                                               allowance, context, level)
-                                for elt in obj )
-            max_keylen = max( len( elt ) for elt in keylist ) + 1
-        else:
-            max_keylen = max( len( getkey( elt )) for elt in obj ) + 1
-
-        write( begstr )
-        last_i  = len( obj ) - 1
-        if hasattr( obj, 'items' ):
-            _iter = obj.items()
-        else:
-            _iter = obj
-        for i, (key, val) in enumerate( _iter ):
-            islast = i == last_i
-            if reprkey:
-                key = keylist[ i ]
-            write( pad_s )
-            write( key )
-            write( ' ' * (max_keylen - len( key )))
-            write( sep )
-            write( ' ' )
-            self._format( val,
-                          stream,
-                          indent + max_keylen + 3,
-                          allowance if islast else 1,
-                          context,
-                          level + 1 )
-            if not islast:
-                write( delim )
-        if self._close_on_nl:
-            write( delim[:-1])
-        else:
-            write( pad_s )
-        write( endstr )
-
-
-    def _pprint_list( self, obj, stream, indent, allowance, context, level,
-                      beg  = '[',
-                      end  = ']',
-                      base = list,
-                      sort = False ):
-        write = stream.write
-        begstr, endstr = self._surround_obj( obj, beg, end, base )
-        pad_i      = self._indent_per_level - 1
-        pad_s      = ' ' * pad_i
-        indent    += len( begstr ) + pad_i
-        allowance += len( endstr ) - pad_i
-        level     += 1
-        delim      = ',\n' + ' ' * indent
-
-        write( begstr )
-        if obj:
-            write( pad_s )
-            last_i = len( obj ) - 1
-
-            if not sort:
-                _iter = iter( obj )
-            elif callable( sort ):
-                _iter = iter( sorted( obj, key=sort ))
-            else:
-                _iter = iter( sorted( obj, key=repr ))
-
-            for i, elt in enumerate( _iter ):
-                with GuardingRecursion( context, obj ):
-                    self._format( elt, stream, indent, allowance, context, level )
-                if i < last_i:
-                    write( delim )
-            if self._close_on_nl and len( obj ) > 1:
-                write( delim[ 0 : -pad_i - 1 ] )
-            else:
-                write( pad_s )
-        write( endstr )
-
-    def _pprint_set( self, *args ):
-        self._pprint_list( *args, beg='{', end='}', base=set, sort=self._sort_dicts )
-
-
-    def _named_tuple_attributes( self, obj ):
-        name_list   = []
-        want_attrs  = set( dir( obj   ))
-        purge_attrs = set( dir( tuple ))
-        purge_attrs.update( set( _ for _ in want_attrs if _[0] == '_' ) )
-
-        match_args  = getattr( obj, '__match_args__', None )
-        if match_args:
-            name_list.extend( match_args )
-            purge_attrs.update( set(
-                ( *match_args,
-                  'n_fields',
-                  'n_sequence_fields',
-                  'n_unnamed_fields', )))
-        want_attrs.difference_update( purge_attrs )
-
-        # get all remaining non-filtered attributes in their
-        # original directory order.
-        # n.b dirs( obj ) will be lexicographically sorted;
-        # obj.__dir__() will be in creation order (as of CPython 3.10)
-        name_list.extend( attr for attr in obj.__dir__()
-                          if attr in want_attrs )
-
-        result = []
-        # record all the name/value tuples
-        # including any that might not be "real" members
-        result.extend( zip( name_list, obj ))
-        if len( name_list ) > len( obj ):
-            for name in name_list[ len( obj ): ]:
-                result.append( (name, getattr( obj, name )))
-        elif len( obj ) > len( name_list ):
-            for i in range( len( name_list ), len( obj )):
-                result.append( (None, obj[ i ] ))
-        return result
-
-
-    def _pprint_named_tuple( self, obj, stream, indent, allowance, context, level ):
-        begstr, endstr = self._surround_obj( obj, '(', ')', tuple, force=True )
-
-        attrs = self._named_tuple_attributes( obj )
-        obf = []
-        nwidth = len( str( len( obj ) - 1))  # we count 0-9, not 1-10
-        for i, (name, value) in enumerate( attrs ):
-            if i < len( obj ):
-                if name is None:
-                    namef = '[{1:>{0}}]'.format( nwidth,  i )
-                else:
-                    fmt   = self._convert( '[{1:>{0}}] {2}', name )
-                    namef = fmt.format( nwidth, i, name )
-            else:
-                fmt   = self._convert( ' {1:>{0}}  {2}', name )
-                namef = fmt.format( nwidth, '', name )
-            obf.append( (namef, value) )
-
-        with GuardingRecursion( context, obf ):
-            self._format_obj_kv_pairs( obf, stream, indent, allowance, context, level,
-                                       begstr  = begstr,
-                                       endstr  = endstr,
-                                       sep     = '=',
-                                       reprkey = False )
-
-
-    def _pprint_tuple( self, obj, stream, indent, allowance, context, level ):
-        if hasattr( obj, '__match_args__' ):
-            self._pprint_named_tuple( obj, stream, indent, allowance, context, level )
-            return
-
-        write = stream.write
-        begstr, endstr = self._surround_obj( obj, '(', ')', tuple )
-        pad_i      = self._indent_per_level - 1
-        pad_s      = ' ' * pad_i
-        indent    += len( begstr ) + pad_i
-        allowance += len( endstr ) - pad_i
-        level     += 1
-        delim      = ',\n' + ' ' * indent
-
-        write( begstr )
-        if obj:
-            write( pad_s )
-            last_i = len( obj ) - 1
-            for i, elt in enumerate( obj ):
-                with GuardingRecursion( context, obj ):
-                    self._format( elt, stream, indent, allowance, context, level )
-                if i < last_i:
-                    write( delim )
-            if len( obj ) == 1:
-                write( ',' )
-            if self._close_on_nl and len( obj ) > 1:
-                write( delim[ 0 : -pad_i - 1 ] )
-            else:
-                write( pad_s )
-        write( endstr )
-
-
-    # If a string is multiline, extend width so any breaks are at line endings
-    def _pprint_str( self, obj, stream, indent, allowance, context, level, base=str ):
-        write = stream.write
-        begstr, endstr = self._surround_obj( obj, '', '', base=base )
-        pad_i      = self._indent_per_level - 2
-        indent    += len( begstr ) + pad_i
-        allowance += len( endstr )
-        delim      = '\n' + ' ' * indent
-        nl         = self._convert( '\n', obj )
-
-        write( begstr )
-        if obj:
-            if base is None:
-                obj = repr( obj )
-                nl  = self._convert( nl, obj )
-            # Don't break paragraphs into short lines; that's actually
-            # harder to read than just breaking at newlines.
-            nlpos  = obj.find( nl )
-            width  = (self._maxwidth()
-                     if len( obj ) > nlpos+1 > 0 # first nl is not at very end of str
-                     else self._width)
-            lines  = self._split_str( obj, width, indent, allowance )
-            last_i = len( lines ) - 1
-            for i, elt in enumerate( lines ):
-                write( repr( elt ))
-                if i < last_i:
-                    write( delim )
-        else:
-            write( repr( obj ))
-        write( endstr )
-
-
-    def _pprint_repr( self, obj, *args ):
-        self._pprint_str( obj, *args, base=None )
-
-
-    def _pprint_bytes( self, obj, stream, indent, allowance, *rest ):
-        if obj.isascii():
-            self._pprint_str( obj, stream, indent, allowance, *rest, base=bytes )
-            return
-
-        write = stream.write
-        begstr, endstr = self._surround_obj( obj, '', '', base=bytes )
-        pad_i      = self._indent_per_level - 2
-        pad_s      = ' ' * pad_i
-        indent    += len( begstr ) + pad_i
-        allowance += len( endstr )
-        delim      = '\n' + ' ' * indent
-        width      = max( self._width - indent - allowance, self._min_width )
-
-        write( begstr )
-        if obj:
-            write( pad_s )
-            lines = self._split_data( obj, width, self._min_width )
-            last_i = len( lines ) - 1
-            for i, elt in enumerate( lines ):
-                write( repr( elt ))
-                if i < last_i:
-                    write( delim )
-        else:
-            write( repr( obj ))
-        write( endstr )
-
-
-    def _class_formatter( self, obj ):
-        fn = self._class_formatters.get( type( obj ))
-        if fn:
-            return fn
-        for sdtype, fn in self._class_formatters.items():
-            if isinstance( obj, sdtype ):
-                return fn
-
-    _class_formatters = {
-        dict                    : _pprint_nonordered_associative,
-        type( dict().items() )  : _pprint_nonordered_associative,
-        type( dict().keys() )   : _pprint_list,
-        type( dict().values() ) : _pprint_list,
-        set                     : _pprint_set,
-        frozenset               : _pprint_set,
-        list                    : _pprint_list,
-        tuple                   : _pprint_tuple,
-        str                     : _pprint_str,
-        bytes                   : _pprint_bytes,
-        types.SimpleNamespace   : _pprint_ordered_associative,
-        # Since these are in builtins, they show up a lot
-        type( credits )         : _pprint_repr,
-        type( help )            : _pprint_repr,
-        type( quit )            : _pprint_repr,
-    }
-
-    # This can go away when parent class is no longer needed
-    try:
-        _dispatch = pprint._dispatch.copy()
-    except AttributeError:
-        _dispatch = dict()
-
-    _dispatch[                  str.__repr__] = _pprint_str
-    _dispatch[                bytes.__repr__] = _pprint_bytes
-    _dispatch[                 dict.__repr__] = _pprint_nonordered_associative
-    _dispatch[                 list.__repr__] = _pprint_list
-    _dispatch[                tuple.__repr__] = _pprint_tuple
-    _dispatch[                  set.__repr__] = _pprint_set
-    _dispatch[            frozenset.__repr__] = _pprint_set
-    _dispatch[          os._Environ.__repr__] = _pprint_nonordered_associative
-    _dispatch[          'argparse.Namespace'] = _pprint_ordered_associative
-    _dispatch[                  'ModuleSpec'] = _pprint_ordered_associative
-
+        self.debugmsg( '{}.__del__({:#x})', self._class_name( self ), id( self ) )
+        parent = super( __class__, self )
+        if hasattr( parent, '__del__' ):
+            parent.__del__()
 
 
-repl_pp = PrettyPrinter( indent=2, width=72 )
+repl_pp = None
 def pp( *args, **kwargs ):
     for arg in args:
         repl_pp.pprint( arg, **kwargs )
-
-###### FIXME
-repl_pps = pprint.PrettyPrinter( indent=2, width=72 )
-def pps( *args, **kwargs ):
-    for arg in args:
-        repl_pps.pprint( arg, **kwargs )
-repl_locals.update( {      'pps' : pps,
-                      'repl_pps' : repl_pps } )
-######
 
 
 def bt( *cmd ):
@@ -757,6 +118,9 @@ def load( filename ):
 
 
 def pyrepl( argv=sys.argv ):
+    global repl_pp
+    repl_pp = PrettyPrinter( indent=2, width=76 )
+
     banner = '{} {}.{}.{} [{}] {}-{}'.format(
         platform.python_implementation(),
         sys.version_info.major,
@@ -784,10 +148,7 @@ def pyrepl( argv=sys.argv ):
     # Don't display 'None' if there is nothing to display.
     sys.displayhook = lambda arg: (arg is None) or pp( arg )
     repl = Repl( locals=repl_locals )
-    try:
-        repl.interact( banner=banner, exitmsg='' )
-    except TypeError:
-        repl.interact( banner=banner )  # python2.7
+    repl.interact( banner=banner, exitmsg='' )
 
 
 if __name__ == '__main__':
