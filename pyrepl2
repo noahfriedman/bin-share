@@ -700,7 +700,7 @@ class PrettyPrinter( pprint.PrettyPrinter, object ):
         list                    : _pprint_list,
         tuple                   : _pprint_tuple,
         str                     : _pprint_str,
-        bytes                   : _pprint_bytes,
+        unicode                 : _pprint_str,
         # Since these are in builtins, they show up a lot
         type( credits )         : _pprint_repr,
         type( help )            : _pprint_repr,
