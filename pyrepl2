@@ -292,16 +292,8 @@ class PrettyPrinter( pprint.PrettyPrinter, object ):
         stop   = len( obj )
         width  = max_width
         adjust = width // 2
-        seg      = ''
+        seg    = obj[0:0]  # empty string of obj's type
         rseg_len = 0
-        my = locals()
-        def advance( segment ):
-            blocks.append( segment )
-            my['start']   += len( segment )
-            my['width']    = max_width
-            my['adjust']   = width // 2
-            my['seg']      = ''
-            my['rseg_len'] = 0
         while start < stop:
             # save values from previous prior loop
             p_seg      = seg
@@ -313,12 +305,23 @@ class PrettyPrinter( pprint.PrettyPrinter, object ):
             rseg_len   = len( rseg )
             #
             if rseg_len == max_width or (rseg_len < max_width and end == stop):
-                advance( seg )
+                blocks.append( seg )
+                start   += len( seg )
+                seg      = obj[0:0]
+                width    = max_width
+                adjust   = width // 2
+                rseg_len = 0
                 continue
             elif ( adjust == 1
                    and   rseg_len >  max_width
                    and p_rseg_len <= max_width ):
-                advance( p_seg ) # previous result is the largest that can fit
+                # previous result is the largest that can fit
+                blocks.append( p_seg )
+                start   += len( p_seg )
+                seg      = obj[0:0]
+                width    = max_width
+                adjust   = width // 2
+                rseg_len = 0
                 continue
             # zero in on final len by making smaller and smaller adjustments
             elif rseg_len > max_width: width -= adjust
@@ -699,7 +702,7 @@ class PrettyPrinter( pprint.PrettyPrinter, object ):
         frozenset               : _pprint_set,
         list                    : _pprint_list,
         tuple                   : _pprint_tuple,
-        str                     : _pprint_str,
+        str                     : _pprint_bytes,
         unicode                 : _pprint_str,
         # Since these are in builtins, they show up a lot
         type( credits )         : _pprint_repr,
