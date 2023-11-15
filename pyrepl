@@ -62,10 +62,9 @@ class Repl( code.InteractiveConsole ):
 
 class PrettyPrinter( nfpprint.PrettyPrinter ):
     def __init__( self, *args, **kwargs ):
-        super( __class__, self ).__init__( *args, **kwargs )
+        super().__init__( *args, **kwargs )
         # adjust width when terminal size changes
         self.settings.setdefault( 'auto_width', True )
-
         self._orig_SIGWINCH = signal.signal( signal.SIGWINCH,
                                              self._handle_SIGWINCH )
         self._update_max_width()
@@ -77,7 +76,7 @@ class PrettyPrinter( nfpprint.PrettyPrinter ):
             owidth  = self.settings.max_width
             self._update_max_width()
             nwidth  = self.settings.max_width
-            self.debugmsg( '[{}] {} => {}', signame, owidth, nwidth )
+            self._debugmsg( '[{}] {} => {}', signame, owidth, nwidth )
         else:
             self._update_max_width()
 
@@ -93,7 +92,7 @@ class PrettyPrinter( nfpprint.PrettyPrinter ):
 
     def __del__( self ):
         signal.signal( signal.SIGWINCH, self._orig_SIGWINCH )
-        self.debugmsg( '{}.__del__({:#x})', self._class_name( self ), id( self ) )
+        self._debugmsg( '{}.__del__({:#x})', self._class_name( self ), id( self ) )
         parent = super( __class__, self )
         if hasattr( parent, '__del__' ):
             parent.__del__()
