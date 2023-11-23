@@ -18,6 +18,7 @@ import subprocess
 import atexit
 import os
 import platform
+import re
 import sys
 
 import signal
@@ -116,6 +117,29 @@ def load( filename ):
     exec( text, repl_locals )
 
 
+def attrs( obj, pattern='', regex=False ):
+    if regex is not False:
+        if isinstance( regex, bool ):
+            regex = re.compile( pattern )
+        else:
+            regex = re.compile( pattern, flags=regex )
+        ismatch = lambda k: regex.search( str( k ))
+    else:
+        ismatch = lambda k: str( k ).find( pattern ) >= 0
+
+    res = {}
+    for k in dir( obj ):
+        if ismatch( k ):
+            res[ k ] = getattr( obj, k )
+    return res
+
+
+def slots( obj ):
+    sl = { name : getattr( obj, name, None ) for name in obj.__slots__ }
+    if sl:
+        return sl
+
+
 def pyrepl( argv=sys.argv ):
     global repl_pp
     repl_pp = PrettyPrinter( indent=2, width=76 )
@@ -135,10 +159,12 @@ def pyrepl( argv=sys.argv ):
     # Set the current namespace to __pyrepl__ so loading random
     # scripts doesn't fire off their "if __main__" blocks.
     repl_locals.update( { '__name__' : '__pyrepl__',
+                          'repl_pp'  : repl_pp,
+                          'pp'       : pp,
                           'bt'       : bt,
                           'load'     : load,
-                          'pp'       : pp,
-                          'repl_pp'  : repl_pp,
+                          'attrs'    : attrs,
+                          'slots'    : slots,
                         } )
 
     for elt in sys.argv[1:]:
