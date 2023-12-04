@@ -168,6 +168,7 @@ def pyrepl( argv=sys.argv ):
                         } )
 
     for elt in sys.argv[1:]:
+        sys.argv.pop( 1 )
         load( elt )
 
     # Don't display 'None' if there is nothing to display.
