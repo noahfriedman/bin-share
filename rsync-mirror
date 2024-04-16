@@ -1,20 +1,30 @@
 #!/bin/sh
 
-RSYNC_RSH=${RSYNC_RSH-ssh}
+: ${RSYNC:=rsync}
+: ${RSYNC_RSH:=ssh}
 export RSYNC_RSH
 
 case $* in
-  *-quiet* ) : ;;
-  *          ) set : --verbose "$@" ; shift ;;
+    *-quiet*   ) : ;;
+    *          ) set : --verbose "$@" ; shift ;;
 esac
 
 case $* in
-  *-inplace* ) : ;;
-  *          ) set : --sparse  "$@" ; shift ;;
+    *-inplace* ) : ;;
+    *          ) set : --sparse  "$@" ; shift ;;
 esac
 
 case ${RS_UID-${UID-`id -u`}} in
-  0          ) set : --devices "$@" ; shift ;;
+    0          ) set : --devices "$@"
+                 shift
+                 case ${U_SYSTEM-`uname -s`} in
+                     Linux ) set : \
+                                 --acls \
+                                 --xattrs \
+                                 --filter='-x security.selinux' \
+                                 "$@"
+                             shift ;;
+                 esac ;;
 esac
 
 set : \
@@ -34,7 +44,7 @@ set : \
 shift
 
 if [ -t 0 ]; then
-    ${RSYNC-rsync} -n "$@" | sed -e 's/^/[PROPOSED] /'
+    $RSYNC -n "$@" | sed -e 's/^/[PROPOSED] /'
     echo
     echo -n "Is this what you want (y/N)? "
     read resp
@@ -44,6 +54,7 @@ if [ -t 0 ]; then
     esac
 fi
 
-exec ${RSYNC-rsync} "$@"
+echo + $RSYNC "$@" 1>&2
+exec $RSYNC "$@"
 
 # eof
