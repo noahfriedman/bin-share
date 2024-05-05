@@ -22,6 +22,7 @@ case ${RS_UID-${UID-`id -u`}} in
                                  --acls \
                                  --xattrs \
                                  --filter='-x security.selinux' \
+                                 --filter='-x system.nfs4_acl' \
                                  "$@"
                              shift ;;
                  esac ;;
