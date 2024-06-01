@@ -4,12 +4,11 @@
 # Created: 2014-01-25
 # Public domain
 
-# $Id: rpm-gpg-fingerprints,v 1.1 2014/01/25 18:42:00 friedman Exp $
-
 rpm --nodigest \
     --nosignature \
     --qf '%{version}\t%{summary}\n' \
     -q gpg-pubkey \
+    "$@" \
 | sed -e 's/gpg(//;s/)$//' \
 | sort -k2V
 
