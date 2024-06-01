@@ -4,24 +4,26 @@
 # Created: 2004-11-29
 # Public domain
 
-# $Id: rpm-pkg-list,v 1.52 2019/06/07 07:45:26 friedman Exp $
-
 # Commentary:
 # Code:
 
-$^W = 1; # enable warnings
-
 use strict;
+use warnings qw(all);
+
 use POSIX;
 use Symbol;
 use Getopt::Long;
+use Pod::Usage;
 
-my $sortby = [];
-my $reverse_sort;
-my $header;
-my $progname;
-my $fmtsize = 0;
-my $show_total;
+(my $progname = $0) =~ s=.*/==;
+
+my %opt   = ( sortby       => [],
+              reverse_sort => undef,
+              header       => undef,
+              fmtsize      => undef,
+              show_total   => undef,
+            );
+
 my $total = 0;
 
 # Meaning of fields:
@@ -57,13 +59,13 @@ my %field
       repository        => { column  => 5,
                              sort    => 5,
                              prefmt  => \&fmtrepo,
-                             qf      => join (":",
+                             qf      => join( ":",
                                               '%|dsaheader?{%{dsaheader:pgpsig}}',
                                               '{%|rsaheader?{%{rsaheader:pgpsig}}',
                                               '{%|siggpg?{%{siggpg:pgpsig}}',
                                               '{%|sigpgp?{%{sigpgp:pgpsig}}',
                                               '{(none)}|}|}|}|',
-                                             ),
+                                            ),
                            },
     );
 
@@ -85,7 +87,7 @@ sub xopen
   my $file = $_[0];
   return unless -f $file;
 
-  open (my $fh, $file);
+  open( my $fh, $file );
   return $fh if $fh;
 
   print STDERR "open: $file: $!\n";
@@ -94,7 +96,7 @@ sub xopen
 
 sub repo_fingerprint_init
 {
-  my $fh = @_ ? xopen ($_[0]) : q(main::DATA);
+  my $fh = @_ ? xopen( $_[0] ) : q(main::DATA);
   return unless $fh;
 
   while (<$fh>)
@@ -124,10 +126,10 @@ sub fieldqf
 
 sub fielderr
 {
-  print join (": ", $progname, @_), "\n",
+  print join( ": ", $progname, @_ ), "\n",
         "Valid field names are:\n\t",
-        join ("\n\t", fieldnames()), "\n";
-  exit (1);
+        join( "\n\t", fieldnames() ), "\n";
+  exit( 1 );
 }
 
 sub field_prefmt_list
@@ -137,7 +139,7 @@ sub field_prefmt_list
   my @prefmt = map { my $f = $field{$_}->{prefmt};
                      $any = 1 if $f;
                      $f;
-                   } fieldnames ();
+                   } fieldnames();
   return unless $any;
   return @prefmt if wantarray;
   return \@prefmt;
@@ -145,21 +147,22 @@ sub field_prefmt_list
 
 sub capitalize
 {
-  join ("-", map { ucfirst $_ } split (/-/, $_[0]));
+  join( "-", map { ucfirst $_ } split( /-/, $_[0] ));
 }
 
 sub fmtdate
 {
   return "" if $_[0] eq "";
-  strftime ($datefmt, localtime ($_[0]));
+  strftime( $datefmt, localtime( $_[0] ));
 }
 
 sub fmtsize
 {
+  my $fmtsize = $opt{fmtsize};
   return $_[0] unless $fmtsize;
 
-  my $size   = shift;
-  my @suffix = ('', qw(K M G T P E));
+  my $size    = shift;
+  my @suffix  = ('', qw(K M G T P E));
 
   while ($size > $fmtsize)
     {
@@ -168,7 +171,7 @@ sub fmtsize
     }
 
   my $fmtstr = $size < 100 && $suffix[0] ne '' ? "%.1f%s" : "%d%s" ;
-  return sprintf ($fmtstr, $size, $suffix[0]);
+  return sprintf( $fmtstr, $size, $suffix[0] );
 }
 
 sub fmtrepo
@@ -179,7 +182,7 @@ sub fmtrepo
 
   # do a more extensive search and memoize the result so we don't have to
   # search again for other packages with this same key.
-  my $try = rpmsigkey ($_);
+  my $try = rpmsigkey( $_ );
   if ($try ne '')
     {
       $repo_fingerprint{$_} = $try;
@@ -189,62 +192,54 @@ sub fmtrepo
 }
 
 
-sub cmd
-{
-  my (@cmd) = @_;
-
-  my $fh = gensym;
-  open ($fh, "-|") || exec @cmd;
-  return $fh;
-}
-
 sub rpmout
 {
-  local $/ = undef;
-  local $_;
+  my @cmd = ($ENV{RPMCMD} || 'rpm');
+  push @cmd, ('--root',   $opt{root})   if $opt{root};
+  push @cmd, ('--dbpath', $opt{dbpath}) if $opt{dbpath};
+  push @cmd, (qw(--nodigest --nosignature));
+  push @cmd, ("@_" =~ /\*/ ? '-qa' : '-q');
+  push @cmd, @_;
 
-  my @cmd = ($ENV{RPMCMD} || 'rpm',
-             qw(--nodigest --nosignature),
-             ("@_" =~ /\*/ ? '-qa' : '-q'),
-             @_);
   #print STDERR "$progname: @cmd\n";
-  my $fh = cmd (@cmd);
-  $_ = <$fh>;
-  close ($fh);
+  open( my $fh, "-|", @cmd ) or die "$_[0]: $!\n";
+  local $/ = undef;
+  local $_ = <$fh>;
+  close( $fh );
   return $_;
 }
 
 sub rpmq
 {
-  my @qf = map { fieldqf ($_) } fieldnames ();
-  my $fmt = join ("\x1", @qf) . "\n";
+  my @qf = map { fieldqf( $_ ) } fieldnames();
+  my $fmt = join( "\x1", @qf ) . "\n";
 
-  local $_ = rpmout ('--qf', $fmt, @_);
+  local $_ = rpmout( '--qf', $fmt, @_ );
   s/^package .*? is not installed\n//gm;
 
-  my @prefmt = field_prefmt_list ();
-  my @lines = map { my @f = split (/\x1/, $_);
+  my @prefmt = field_prefmt_list();
+  my @lines = map { my @f = split( /\x1/, $_ );
                     $total += $f[0];
                     if (@prefmt)
                       {
                         for (my $i = 0; $i < @f; $i++)
                           {
                             my $fn = $prefmt[$i];
-                            $f[$i] = &$fn ($f[$i]) if $fn;
+                            $f[$i] = &$fn( $f[$i] ) if $fn;
                           }
                       }
                     \@f;
-                  } split (/\n/, $_);
+                  } split( /\n/, $_ );
 
   push @lines, [$total, "TOTAL", ("") x ((scalar keys %field) - 2)]
-    if $show_total;
+    if $opt{show_total};
   return \@lines;
 }
 
 sub rpmsigkey
 {
   my $fmt = '%{summary}';
-  local $_ = rpmout ('--qf', $fmt, '--whatprovides', "gpg($_[0])");
+  local $_ = rpmout( '--qf', $fmt, '--whatprovides', "gpg($_[0])" );
   return "" if /no package provides/;
   s/gpg\(/(/;
   s/\).*/) $_[0]/;
@@ -259,8 +254,8 @@ sub rpmsigkey
 # Return [-1,0,1] for the overall comparison.
 sub cmp_version
 {
-  my @a = split (/[.]/, $_[0]);
-  my @b = split (/[.]/, $_[1]);
+  my @a = split( /[.]/, $_[0] );
+  my @b = split( /[.]/, $_[1] );
   my $j = (@a < @b ? @a : @b);
   for (my $i = 0; $i < $j; $i++)
     {
@@ -281,12 +276,12 @@ sub cmp_version
 sub cmp_hyphenated_fields
 {
   my $f = defined $_[2] ? $_[2] : 0 ;
-  my @a = split (/[-]/, $_[0], $f);
-  my @b = split (/[-]/, $_[1], $f);
+  my @a = split( /[-]/, $_[0], $f );
+  my @b = split( /[-]/, $_[1], $f );
   my $j = (@a < @b ? @a : @b);
   for (my $i = 0; $i < $j; $i++)
     {
-      my $cmp = cmp_version ($a[$i], $b[$i]);
+      my $cmp = cmp_version( $a[$i], $b[$i] );
       return $cmp if $cmp != 0;
     }
   return -1 if @a  < @b;
@@ -297,31 +292,32 @@ sub cmp_hyphenated_fields
 # version-release string should only have 2 fields.
 sub cmp_version_release
 {
-  return cmp_hyphenated_fields ($_[0], $_[1], 2);
+  return cmp_hyphenated_fields( $_[0], $_[1], 2 );
 }
 
 sub sortlines
 {
   my ($lines) = @_;
+  my $sortby = $opt{sortby};
 
   my %f = %field;
   map { delete $f{$_} } @$sortby;
 
-  my @field = (@$sortby, fieldnames (%f));
-  #print STDERR "sortby = ", join (" ", @field), "\n";
+  my @field = (@$sortby, fieldnames( %f ));
+  #print STDERR "sortby = ", join(" ", @field ), "\n";
 
   my @sorted = sort
     { my @keys = @field;
       my $res = 0;
-      my ($x, $y) = $reverse_sort ? ($b, $a) : ($a, $b);
+      my ($x, $y) = $opt{reverse_sort} ? ($b, $a) : ($a, $b);
       while ($res == 0 && @keys)
         {
           my $key = shift @keys;
-          my $i = $field{$key}->{column};
+          my $i   = $field{$key}->{column};
           my $cmp = $field{$key}->{compare};
           if ($cmp)
             {
-              $res = &$cmp ($x->[$i], $y->[$i]);
+              $res = &$cmp( $x->[$i], $y->[$i] );
             }
           else
             {
@@ -340,9 +336,9 @@ sub sortlines
 sub fmtlines
 {
   my ($lines) = @_;
-  my @fieldnames = fieldnames ();
+  my @fieldnames = fieldnames();
   my @fn = map { $field{$_}->{fmt} } @fieldnames;
-  my @width = ($header
+  my @width = ($opt{header}
                ? map { length $_ } @fieldnames
                : (0) x @fn);
 
@@ -360,53 +356,109 @@ sub fmtlines
 sub printlines
 {
   my ($lines, $width) = @_;
-  my @field = fieldnames ();
+  my @field = fieldnames();
 
-  my $fmtstr = join ("  ",
+  my $fmtstr = join( "  ",
                      map { my $w = $width->[$field{$_}->{column}];
-                           sprintf ("%%%ds", ($field{$_}->{numeric}
-                                              ? $w : -$w));
-                         } @field) . "\n";
+                           sprintf( "%%%ds", ($field{$_}->{numeric}
+                                              ?  $w
+                                              : -$w) );
+                         } @field ) . "\n";
 
-  printf $fmtstr, map { capitalize ($_) } @field
-    if $header;
+  printf $fmtstr, map { capitalize( $_ ) } @field
+    if $opt{header};
   map { printf $fmtstr, @$_ } @$lines;
+}
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help = 0;
+  my @sortby;
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure( qw(bundling autoabbrev) );
+  my $succ = $parser->getoptions
+    ( 'help'            => sub { $help = 3 },
+      'usage'           => sub { $help = 1 },
+
+      # Passed through to rpm
+      "root=s"            =>      \$opt{root},
+      "dbpath=s"          =>      \$opt{dbpath},
+
+      "d|datefmt=s"       =>      \$opt{datefmt},
+      "H|header"          =>      \$opt{header},
+      "h|human-readable"  => sub { $opt{fmtsize} = 1024 },
+      "si"                => sub { $opt{fmtsize} = 1000 },
+      "r|reverse"         =>      \$opt{reverse_sort},
+      "s|sort=s"          => sub { push @sortby, $_[1] },
+      "t|total"           =>      \$opt{show_total},
+    );
+
+  pod2usage( -exitstatus => 1, -verbose => 0 )         unless $succ;
+  pod2usage( -exitstatus => 0, -verbose => $help - 1 ) if $help > 0;
+
+  @sortby = (qw(name version-release arch)) unless @sortby;
+  @sortby = map { $field_alias{$_}
+                    || (exists $field{$_} && $_)
+                    || fielderr( $_, "Unrecognized field name" );
+                } map { split( /[\s,]+/, $_ ) } @sortby;
+  $opt{sortby} = \@sortby;
+
+  @ARGV = ('*') unless @ARGV;
 }
 
 sub main
 {
   ($progname = $0) =~ s=.*/==;
-
-  Getopt::Long::config ('bundling', 'autoabbrev');
-  GetOptions ("d|datefmt=s",      \$datefmt,
-              "H|header",         \$header,
-              "h|human-readable", sub { $fmtsize = 1024 },
-              "si",               sub { $fmtsize = 1000 },
-              "r|reverse",        \$reverse_sort,
-              "s|sort=s",         sub { push @$sortby, $_[1] },
-              "t|total",          \$show_total);
-
-  $sortby = [qw(name version-release arch)] unless @$sortby;
-  $sortby = [map { $field_alias{$_}
-                     || (exists $field{$_} && $_)
-                     || fielderr ($_, "Unrecognized field name")
-                 } map { split (/[\s,]+/, $_) } @$sortby];
-
-  @ARGV = ('*') unless @ARGV;
+  parse_options( \@_ );
 
   my $rc = $ENV{RPMFINGERPRINTS} || "$ENV{HOME}/.rpm-fingerprints";
-  repo_fingerprint_init ();    # data section
-  repo_fingerprint_init ($rc); # user config
+  repo_fingerprint_init();      # data section
+  repo_fingerprint_init( $rc ); # user config
 
-  printlines (fmtlines (sortlines (rpmq (@ARGV))));
+  printlines( fmtlines( sortlines( rpmq( @_ ))));
 }
 
-main ();
+main( @ARGV );
 
+__END__
+
+
+=begin text
+
+=encoding utf8
+
+=end text
+
+=head1 NAME
+
+rpm-pkg-list - finish documenting me
+
+=head1 SYNOPSIS
+
+    {--help|--usage}          {-h|--human-readable}
+                              {--si}
+    {--root   ROOT}
+    {--dbpath DBPATH}         {-s|--sort  FIELD}
+                              {-r|--reverse}
+    {-d|--datefmt FORMAT}
+    {-H|--header}
+    {-t|--total}
+
+    [rpm package name patterns ...]
+
+=cut
+
+
 __DATA__
 
+###############################################
+### GPG key fingerprints for RPM signatures ###
+###############################################
+
 ######
-## GPG key fingerprints for RPM signatures
+## Fedora
 ######
 
 a15b79cc	fedora-40
@@ -473,7 +525,19 @@ dbbdcf7c	fedora-iot-2019
 1cddbca9	fedora-rawhide
 731002fa	fedora-legacy
 
-fd431d51	rhel-6
+######
+## Fedora EPEL
+######
+
+3228467c	epel-9
+2f86d6a1	epel-8
+352c64e5	epel-7
+0608b895	epel-6
+217521f6	epel-5			# also used for epel-4
+
+######
+## RPMfusion
+######
 
 d651ff2e	rpmfusion-free-2020	# Used for f33-f39 as of 2023-10-19
 100bcd92	rpmfusion-free-f32
@@ -537,12 +601,9 @@ a3108f6c	rpmfusion-nonfree-el7
 5568bbb2	rpmfusion-nonfree-el6
 ab194290	rpmfusion-nonfree-el5
 
-# Fedora EPEL
-3228467c	epel-9
-2f86d6a1	epel-8
-352c64e5	epel-7
-0608b895	epel-6
-217521f6	epel-5			# also used for epel-4
+######
+## CentOS
+######
 
 8483c65d	centos-8
 f4a80eb5	centos-7
@@ -555,9 +616,71 @@ fe837f6f	centos-security-6
 # CentOS SoftwareCollections SIG (https://wiki.centos.org/SpecialInterestGroup/SCLo
 f2ee9d55	centos-sc
 
-3dbdc284	opensuse
+
+######
+## Red Hat
+##
+## See https://access.redhat.com/security/team/key
+## for more details
+######
+
+fd431d51	redhat-release-2/2009		# 2009-10-22	RHEL{6,7,8,9}
+37017186	redhat-release/2006-2009	# 2006-12-06	RHEL{5,6,7}
+db42a60e	redhat-release/1999-2006	# 1999-09-23	RHEL{2.1,3,4,5,6,7}, RH6.2 and later
+cba29bf9	redhat-linux/1996		# 1996-02-20	RH{4,5} pre-enterprise PGP key
+
+# Disaster recovery keys, in case release keys were lost.
+5a6340b3	redhat-aux-3/2022		# 2022-03-09	RHEL9
+d4082792	redhat-aux-2/2018		# 2018-06-27	RHEL8
+2fa658e0	redhat-aux-1/2006		# 2006-12-01	RHEL{5,6,7}
+
+a5787476	redhat-devel/2014		# 2014-06-25
+
+f21541eb	redhat-beta-2/2009		# 2009-02-24	RHEL{6,7,8,9}
+897da07a	redhat-beta-1/2002		# 2002-03-15	RHEL{2.1,3,4,5,6,7}
+
+e418e3aa	redhat-rawhide/2003		# 2003-08-20
+
+1c711042	redhat-container-ready-1	# 2020-12-15
+8a828aad	redhat-ansible-1		# 2022-04-11
+55a34a82	redhat-isv-container		# 2019-08-30
+
+8366b0d9	redhat-portal-tools		# 2015-02-16
+
+
+# Secure Boot cert fingerprints (not gpg keys)
+
+d3320449	redhat-IMA-Release-CA
+f753959a	redhat-IMA-Release
+
+2a2898c8	redhat-secureboot-CA-6
+9c40ced9	redhat-secureboot-603
+fe10bba7	redhat-secureboot-602
+b7ee31e8	redhat-secureboot-601
+
+769a9f8f	redhat-secureboot-CA-5
+ae828a68	redhat-secureboot-504
+6d56d92b	redhat-secureboot-503
+127e985d	redhat-secureboot-502
+47273e6d	redhat-secureboot-501
+
+9c65f85c	redhat-secureboot-CA-3
+3d1d83f5	redhat-secureboot-304
+961f405a	redhat-secureboot-303
+490da9e6	redhat-secureboot-302
+5a887452	redhat-secureboot-301
+
+######
+## Rocky Linux
+######
 
 350d275d	rocky-release-2022
+
+######
+## SuSE
+######
+
+3dbdc284	opensuse
 
 39db7c82	suse-sles-12.0
 50a3dd1c	suse-sles-12.0-reserve
@@ -567,6 +690,10 @@ b37b98a9        suse-sles-11.2-ptf
 
 9c800aca	suse
 3d25d3d9	suse-security
+
+######
+## Misc
+######
 
 f14ab620	zfsonlinux.org
 f6777c67	adobe
@@ -585,23 +712,22 @@ a109b1ec	livna
 be1229cf	microsoft
 f90c0e97	negativo17
 98ab5139	oracle-virtualbox
+ebff1218	packagecloud.io		# 2018-12-10 ops production key
 a9464aa9	pidgin
 68d9802a	planetccrma		# nando@ccrma.stanford.edu
 92563518	ringcentral
-bf6a7041	slack-pre412		# versions 4.1.1 and earlier
-8e6c9578	slack			# versions 4.1.2 and above
 61a7c71d	zoom.us
+
+bf6a7041	slack-2017		# 2017-10-05 4.1.1 or earlier
+8e6c9578	slack-4.1.2		#            4.1.2 or above
+7eb66c16	slack-2022		# 2022-07-08 4.33 or earlier
+dde0f7a1	slack-2023		# 2023-07-07 4.34 or above
 
 ba392878	splode-internal-2005	# internal reference key; not secure
 dbcccc4b	splode-internal-2015	# internal reference key; not secure
 
 598252fb	rockowitz@build.opensuse.org
 
-# Note: these redhat keys should be discontinued as of 9/2008
-db42a60e	redhat
-897da07a	redhat-beta
-e418e3aa	redhat-rawhide-2003
-
-(none)  	(unknown)	# unsigned so dont know what repo it came from
+(none)  	(unsigned)		# unsigned so dont know what repo it came from
 
 # eof
