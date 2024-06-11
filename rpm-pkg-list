@@ -728,6 +728,8 @@ dbcccc4b	splode-internal-2015	# internal reference key; not secure
 
 598252fb	rockowitz@build.opensuse.org
 
+66fd4949	vmware-linux-packages	# 2008-04-15
+
 (none)  	(unsigned)		# unsigned so dont know what repo it came from
 
 # eof
