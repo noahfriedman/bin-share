@@ -1,21 +1,16 @@
-#!/bin/sh
-exec ${PERL-perl} -Sx $0 ${1+"$@"}
-#!perl
-
+#!/usr/bin/env perl
 # ptr --- resolve IP addresses to host names
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2001-11-27
 # Public domain
 
-# $Id: ptr,v 2.1 2001/11/27 08:01:53 friedman Exp $
-
 # Commentary:
 
 # Usage: ptr 192.168.1.30 127.0.0.1 ...
-# or invoke with no arguments and feed addresses one per line on stdin.
-# IP addresses will be picked out of lines which have other cruft in them,
-# so the input format is not very important.
+# or invoke with no arguments and feed addresses via stdin.  IP addresses
+# will be picked out of any text, so the input format is not very
+# important.
 
 # The command `adnshost', from the adns (asynchronous dns) package is required.
 # See http://www.chiark.greenend.org.uk/~ian/adns/ or ftp://ftp.gnu.org/adns/
@@ -23,117 +18,125 @@ exec ${PERL-perl} -Sx $0 ${1+"$@"}
 # Code:
 
 use strict;
-use Symbol;
+use warnings qw(all);
 
-sub ip2arpa ($)
+use List::Util qw(max);
+
+# Scan input text for IP addresses and pick them out
+sub snarf_ips
+{
+  local $/ = undef;  # read in all at once
+  local $_;
+  my @addr;
+  while (<STDIN>)
+    {
+      push @addr, $1
+        while (m/( (?:\d+\.\d+\.\d+\.\d+(?:\.in-addr\.arpa|))
+                 | (?:(?:(?:[0-9a-f]\.){32})ip6\.arpa)
+                 | (?:(?:[0-9a-f]{1,4}:){7}[0-9a-f])
+                 | (?:[0-9a-f:]*::[0-9a-f:]+)
+                 | (?:[0-9a-f:]+::[0-9a-f:]*)
+                 )/igx);
+    }
+  return @addr;
+}
+
+sub ip2arpa
 {
   local $_ = shift;
-  s/^(\d+)\.(\d+)\.(\d+)\.(\d+)\n?/$4.$3.$2.$1.in-addr.arpa/o;
+  if ( /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/ )
+    {
+      s//$4.$3.$2.$1.in-addr.arpa/;
+    }
+  elsif ( /^[0-9a-f:]+$/i )
+    {
+      $_ = lc( $_ );
+      my @quad = split( /:/, $_ );
+      map { $_ = ( $_ eq '' # "::" field, if any
+                   ? '0000' x (9 - scalar @quad)
+                   : sprintf( '%04x', hex( $_ )) );
+          } @quad;
+      my @b = split( //, reverse( join( '', @quad ) ));
+      $_ = join( '.', @b ) . '.ip6.arpa';
+    }
   return $_;
 }
 
-sub arpa2ip ($)
+sub cmd_io
 {
-  local $_ = shift;
-  s/^(\d+)\.(\d+)\.(\d+)\.(\d+)\.in-addr\.arpa/$4.$3.$2.$1/io;
+
+  pipe( my ($pr, $pw) ) or die "pipe: $!\n";
+  my $pid = open( my $out, "-|" ) // die "open fork: $!";
+  return ($pw, $out) if $pid; # parent
+
+  # child
+  close( $pw );
+  open( STDIN,  "<&=" . fileno( $pr ));
+  open( STDERR, ">&=1" );  # send stderr to stdout
+  exec( @_ ) or die "exec: $_[0]: $!\n";
+}
+
+sub adns
+{
+  my @cmd = ( 'adnshost',
+              '--no-env',
+              '--fmt-inline',
+              '--pipe',
+              '--type',  'ptr-', # don't check forward and reverse match
+            );
+
+  my ($iwh, $orh) = cmd_io( @cmd );
+  map { print $iwh $_, "\n" } @_;
+  close( $iwh );
+
+  local $/ = undef;  # read all data at once
+  local $_ = <$orh>;
+  wait;
+  close( $orh );
   return $_;
 }
 
-sub adns (@)
+sub parse_results
 {
-  my @adns_cmd = ("adnshost", "--asynch", "--fmt-inline",
-                  "--pipe", "--type", "ptr",
-                  #"--tcp",
-                 );
-
-  my ($irh, $iwh, $orh, $owh) = (gensym, gensym, gensym, gensym);
-  pipe ($irh, $iwh);
-  pipe ($orh, $owh);
-
-  my $pid = fork;
-  if ($pid == 0)
+  my ($data, $arpamap) = @_;
+  my @result;
+  for my $line (split( /[\r\n]+/, $data ))
     {
-      open (STDIN,  "<&=" . fileno ($irh));
-      open (STDOUT, ">&=" . fileno ($owh));
-      map { close ($_) } ($irh, $iwh, $orh, $owh);
-      exec (@adns_cmd) || die "exec: $adns_cmd[0]: $!";
-    }
-  else
-    {
-      close ($irh);
-      close ($owh);
-      print $iwh map { $_ . "\n" } @_;
-      close ($iwh);
-      my @result = <$orh>;
-      wait;
-      close ($orh);
-      return \@result;
-    }
-}
-
-sub parse_results ($)
-{
-  my $data = shift;
-  my %cname;
-  my %result;
-  for my $ent (@$data)
-    {
-      next if ($ent =~ /^;/o);
-
-      my ($ip, $type, $name) = split (/\s+/o, $ent);
-
-      if (uc ($type) eq "CNAME")
+      if ($line =~ /^;\s*(.*?)\s+(\S+)\s+\$/)
         {
-          $cname{$name} = $ip;
+          my ($err, $revip) = ($1, $2);
+          my $ip = $arpamap->{$revip} || $revip;
+          push @result, [$ip, "; $err"];
         }
       else
         {
-          $result{$ip} = $name;
+          my ($revip, $type, $name) = split( /\s+/, $line );
+          my $ip = $arpamap->{$revip} || $revip;
+          push @result, [$ip, $name];
         }
     }
-
-  while (my ($canon, $alias) = each %cname)
-    {
-      next unless (exists $result{$canon});
-      $result{$alias} = $result{$canon};
-      delete $result{$canon};
-    }
-
-  return \%result;
+  return @result;
 }
 
-sub max { return [ sort { -($a <=> $b) } @_ ]->[0]; }
-
-sub main ()
+sub main
 {
-  unless (@ARGV)
-    {
-      while (<STDIN>)
-        {
-          push @ARGV, $1
-            while (m/(\d+\.\d+\.\d+\.\d+(?:\.in-addr\.arpa|))/igo);
-        }
-    }
+  my %arpamap;
 
-  my $output = adns (map { ip2arpa ($_) } @ARGV);
-  my $result = parse_results ($output);
+  push @_, snarf_ips() unless @_;
+  map { my $orig = $_;
+        $_ = ip2arpa( $_ ) unless /\.arpa/i;
+        $arpamap{$_} = $orig;
+      } @_;
 
-  my $maxlen = max (map { length } @ARGV);
-  my $fmt = sprintf "%%-%ds %%s\n", $maxlen;
+  my $output = adns( @_ );
+  my @result = parse_results( $output, \%arpamap );
 
-  for my $ip (@ARGV)
-    {
-      printf $fmt, $ip, ($result->{ip2arpa ($ip)}
-                         || $result->{$ip}
-                         || "");
-    }
+  my $maxlen = max( map { length $_->[0] } @result );
+  my $fmt    = sprintf( "%%-%ds %%s\n", $maxlen );
+
+  map { printf( $fmt, @$_ ) } @result;
 }
 
-main ();
-
-# local variables:
-# mode: perl
-# eval: (auto-fill-mode 1)
-# end:
+main( @ARGV );
 
 # ptr ends here
