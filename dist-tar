@@ -23,7 +23,8 @@ while [ $# -gt 0 ]; do
     case $1 in
         -gz    ) DIST_TAR_ZIP=gzip  ;;
         -bz2   ) DIST_TAR_ZIP=bzip2 ;;
-        -gzip | -bzip2 | -lzma | -xz ) DIST_TAR_ZIP=${1#-} ;;
+        -lz    ) DIST_TAR_ZIP=lzip  ;;
+        -gzip | -bzip2 | -lzma | -lzip | -xz ) DIST_TAR_ZIP=${1#-} ;;
         -[0-9] ) ZLEVEL=${1#-} ;;
         -u*    ) TAROPT="$TAROPT --owner=${1#-u}" ;;
         -g*    ) TAROPT="$TAROPT --group=${1#-g}" ;;
@@ -51,6 +52,7 @@ zargs=-$ZLEVEL
 case ${zip##*/} in
     gzip  ) z=gz  ;;
     bzip2 ) z=bz2 ;;
+    lzip  ) z=lz ;;
     xz | lzma )
         if [ $ZLEVEL -gt 3 ]; then
             # xz will limit to 4 cores if there are more when -T=0
