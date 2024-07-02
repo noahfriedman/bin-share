@@ -700,7 +700,6 @@ f6777c67	adobe
 66534c2b	atrpms
 
 2012ea22	1password
-82d3dc6c	brave.com
 6b8d79e6	dag
 621e9f35	docker-ce
 1aa78495	dries
@@ -717,6 +716,12 @@ a9464aa9	pidgin
 68d9802a	planetccrma		# nando@ccrma.stanford.edu
 92563518	ringcentral
 61a7c71d	zoom.us
+
+f661cdcb	brave-pre-release
+20038257	brave-release
+6a8a26f9	brave-nightly
+c2d4e821	brave-c2d4e821
+82d3dc6c	brave-82d3dc6c
 
 bf6a7041	slack-2017		# 2017-10-05 4.1.1 or earlier
 8e6c9578	slack-4.1.2		#            4.1.2 or above
