@@ -20,7 +20,7 @@ cookies=$XDG_DATA_HOME/wget/cookies.txt
 
 # Get major/minor/patch version numbers for wget
 eval `$wget --version \
-        | sed -ne '1s/^.*get \([0-9]*\)\.\([0-9]*\)\.*\([0-9]*\)*.*/vmajor=\1 vminor=\2 vpatch=\3/p'`
+        | sed -ne '1s/^.*[Ww]get.* \([0-9]*\)\.\([0-9]*\)\.*\([0-9]*\)*.*/vmajor=\1 vminor=\2 vpatch=\3/p'`
 
 case $vmajor:$vminor in
     : | *: | :* ) exit 1 ;;
@@ -36,16 +36,13 @@ atleast()
 opts="--wait=0
       --tries=0
       --cache=off
-      --passive-ftp
      "
-     #--follow-ftp
 
 case " $* " in
-    *" -q "* | *" --quiet "* ) : ;;
-    * ) opts="$opts
-              --verbose
-              --server-response
-             " ;;
+    *" -q "*  | *" --quiet "*      ) : ;;
+    *" -nv "* | *" --no-verbose "* ) : ;;
+    *" -v "*  | *" --verbose "* )
+        opts="$opts --server-response" ;;
 esac
 
 # wget 1.11.1 doesn't allow -N (--timestamping) with -O
@@ -78,6 +75,9 @@ fi
 if atleast 1 8 && [ -t 1 ]; then
     # Use in-place progress bar if stdout is a tty
     opts="$opts --progress=bar:force"
+    if atleast 1 16; then
+        opts="$opts:noscroll"
+    fi
 fi
 
 # Add timeout and retry options to wget 1.9 and later
@@ -116,6 +116,16 @@ if atleast 1 20 3 ; then
     opts="$opts --auth-no-challenge"
 fi
 
+# 2024-07-06 wget2 doesn't implement ftp support yet
+if ! atleast 2 0; then
+    opts="$opts
+          --passive-ftp
+         "
+    #--follow-ftp
+fi
+
+
+
 conf=$XDG_CONFIG_HOME/wget/wgetrc
 case ${WGETRC+isset} in
     isset ) : ;;
@@ -126,7 +136,7 @@ esac
 
 exec ${WGET-$wget} \
      --user-agent="$user_agent" \
-     --execute 'robots = off' \
+     --execute 'robots=off' \
      $opts "$@"
 
 # wget ends here
