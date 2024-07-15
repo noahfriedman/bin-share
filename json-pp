@@ -1,0 +1,373 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings qw(all);
+
+use Getopt::Long;
+use Pod::Usage;
+use Encode;
+use JSON::PP;
+
+use lib "$ENV{HOME}/lib/perl";
+use NF::PrintObject qw(:all);
+
+(my $progname = $0) =~ s=.*/==;
+
+my %json_opt_allowed = map { $_ => 1 }
+  (qw( ascii
+       latin1
+       utf8
+       pretty
+       indent
+       space_before
+       space_after
+       relaxed
+       canonical
+       allow_nonref
+       allow_singlequote
+       allow_barekey
+       allow_bignum
+       loose
+       escape_slash
+       indent_length
+    ));
+
+
+my @json_opt_default =
+  (qw( utf8
+       pretty
+       indent
+       space_before
+       space_after
+       relaxed
+       canonical
+       allow_singlequote
+       allow_barekey
+       allow_bignum
+    ));
+
+
+my %opt = ( src_fmt  => 'json',
+            dst_fmt  => 'json',
+            json_opt => undef,
+            verbose  => undef,
+          );
+
+my %fmt = ( src => { json   => 1,
+                     perl   => 1,
+                   },
+            dst => { json   => 1,
+                     perl   => 1,
+                   },
+          );
+
+sub src_json
+{
+  my $json = JSON::PP->new;
+  my $enc =
+    /^\x00\x00\x00/s  ? "utf-32be"
+    : /^\x00.\x00/s     ? "utf-16be"
+    : /^.\x00\x00\x00/s ? "utf-32le"
+    : /^.\x00.\x00/s    ? "utf-16le"
+    :                     "utf-8";
+#   for my $key (keys %json_opt) {
+#     next if $key eq 'utf8';
+#     $json->$key($json_opt{$key});
+#   }
+#   $json->decode( Encode::decode($enc, $_) );
+}
+
+sub src_perl
+{
+  my $v = eval "no strict;\n#line 1 \"input\"\n$_";
+  die "$@" if $@;
+  return $v;
+}
+
+sub dst_json
+{
+  my $json = JSON::PP->new->utf8;
+#   for my $key (keys %json_opt) {
+#     $json->$key($json_opt{$key});
+#   }
+#   $json->canonical if $json_opt{pretty};
+#   $json->encode( $_ );
+}
+
+sub dst_perl
+{
+  require Data::Dumper;
+#   local $Data::Dumper::Terse     = 1;
+#   local $Data::Dumper::Indent    = 1;
+#   local $Data::Dumper::Useqq     = 1;
+#   local $Data::Dumper::Quotekeys = 0;
+#   local $Data::Dumper::Sortkeys  = 1;
+#   Data::Dumper::Dumper($_)
+}
+
+sub err
+{
+  print( STDERR join( ': ', $progname, @_ ), ".\n" );
+  return;
+}
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help = 0;
+  my @sortby;
+
+  my $f_fl = join( '|', qw( f src-format src-fmt from-format from-fmt ));
+  my $t_fl = join( '|', qw( t dst-format dst-fmt   to-format   to-fmt ));
+  my $j_fl = join( '|', qw( j json-options json-opts ));
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure( qw(bundling autoabbrev no_ignore_case) );
+  my $succ = $parser->getoptions
+    ( 'h|help+'      => \$help,
+      'usage'        => sub { $help = 1 },
+
+      'v|verbose'    => \$opt{verbose},
+      'V|version'    => \$opt{version},
+
+      "$f_fl=s"      => \$opt{src_fmt},
+      "$t_fl=s"      => \$opt{dst_fmt},
+      "$j_fl=s\@"    => \$opt{json_opt},
+
+    );
+
+  pod2usage( -exitstatus => 1, -verbose => 0 )         unless $succ;
+  pod2usage( -exitstatus => 0, -verbose => $help - 1 ) if $help > 0;
+
+  if ( $opt{version} )
+    {
+      print( "$JSON::PP::VERSION\n" );
+      exit( 0 );
+    }
+
+  # Accumulate any errors and continue so they can all be reported at once,
+  # instead of each error requiring a new invocation to spot and correct.
+  my @fail;
+
+  # validate and normalize json_opt, converting array into hash
+  $opt{json_opt} //= \@json_opt_default;
+  $opt{json_opt} = [] if $opt{json_opt}[0] eq '-';
+  my @jl = map { split( /\s*,\s*/, $_ ) } @{$opt{json_opt}};
+  my %jh;
+  for my $arg_opt (@jl)
+    {
+      (my $opt = lc( $arg_opt )) =~ s/-/_/g;
+      if ( $opt eq '_' )  # reset
+        { undef %jh }
+      elsif (exists $json_opt_allowed{$opt})
+        { $jh{$opt} = 1 }
+      else
+        { push @fail, "Invalid JSON::PP option \"$arg_opt\"" }
+    }
+  $opt{json_opt} = \%jh;
+
+  # Validate other options.
+  push @fail, "Unsupported source format \"$opt{src_fmt}\""
+    unless exists $fmt{src}->{$opt{src_fmt}};
+
+  push @fail, "Unsupported target format \"$opt{dst_fmt}\""
+    unless exists $fmt{dst}->{$opt{dst_fmt}};
+
+  if (@fail)
+    {
+      map { print STDERR "$progname: $_.\n" } @fail;
+      exit( 1 );
+    }
+
+
+  print STDERR object_pp( \%opt ), "\n\n";
+}
+
+sub main
+{
+  parse_options( \@_ );
+  @ARGV = @_;  # Reassign remaining args to use <>
+
+  local $/ = undef;  # read whole files at once
+  local $_;
+  while (<>)
+    {
+      #$_ = $F{$opt_from}->();
+      #$_ = $T{$opt_to}->();
+      #print $_;
+      s/\e/^[/g;
+      print "\n\n\$_ = '$_'\n";
+    }
+}
+
+main( @ARGV );
+
+
+__END__
+
+=begin text
+
+=encoding utf8
+
+=end text
+
+=head1 NAME
+
+mjson_pp - pretty-print json or convert to/from perl data structure
+
+=head1 SYNOPSIS
+
+    {-f|--from-format SFORMAT}        alias: --src-format
+    {-t|  --to-format DFORMAT}        alias: --dst-format
+    {-j|--json-options o1,o2,...}     alias: --json-opts
+
+    {input file names, '-' or no file names for stdin}
+
+=head1 DESCRIPTION
+
+json_pp converts between some input and output formats (one of them is JSON).
+This program was copied from L<json_xs> and modified.
+
+The default input format is json and the default output format is json with pretty option.
+
+=head1 OPTIONS
+
+=over 2
+
+=over 4
+
+=item B<-f>, B<--from-format=>I<INPUT-FORMAT>
+
+...
+
+=item B<-t>, B<--to-format=>I<OUTPUT-FORMAT>
+
+...
+
+
+=item B<-j>, B<--json-options=>I<J1,J2,...>
+
+These options modify the pretty C<JSON::PP> printer;
+see pod or man page for further details.
+
+The currently recognized options include:
+
+=over 4
+
+=over 4
+
+=item * C<ascii>
+
+=item * C<latin1>
+
+=item * C<utf8>
+
+=item * C<pretty>
+
+=item * C<indent>
+
+=item * C<space_before>
+
+=item * C<space_after>
+
+=item * C<relaxed>
+
+=item * C<canonical>
+
+=item * C<allow_nonref>
+
+=item * C<allow_singlequote>
+
+=item * C<allow_barekey>
+
+=item * C<allow_bignum>
+
+=item * C<loose>
+
+=item * C<escape_slash>
+
+=item * C<indent_length>
+
+=back
+
+=back
+
+
+Multiple json options may be specified at once separated by commas,
+the B<-j> option can be specified multiple times for each option,
+or any combination of the two.
+
+For example:
+
+    -j utf8,indent,canonical
+
+    -j utf8,indent -j canonical
+
+    -j utf8 -j indent,canonical
+
+    -j utf8 -j indent -j canonical
+
+
+
+=back
+
+=back
+
+=head2 -json_opt
+
+options to JSON::PP
+
+Acceptable options are:
+
+=head2 -v
+
+Verbose option, but currently no action in fact.
+
+=head2 -V
+
+Prints version and exits.
+
+
+=head1 EXAMPLES
+
+    $ perl -e'print q|{"foo":"あい","bar":1234567890000000000000000}|' |\
+       json_pp -f json -t dumper -json_opt pretty,utf8,allow_bignum
+
+    $VAR1 = {
+              'bar' => bless( {
+                                'value' => [
+                                             '0000000',
+                                             '0000000',
+                                             '5678900',
+                                             '1234'
+                                           ],
+                                'sign' => '+'
+                              }, 'Math::BigInt' ),
+              'foo' => "\x{3042}\x{3044}"
+            };
+
+    $ perl -e'print q|{"foo":"あい","bar":1234567890000000000000000}|' |\
+       json_pp -f json -t dumper -json_opt pretty
+
+    $VAR1 = {
+              'bar' => '1234567890000000000000000',
+              'foo' => "\x{e3}\x{81}\x{82}\x{e3}\x{81}\x{84}"
+            };
+
+=head1 SEE ALSO
+
+L<JSON::PP>, L<json_xs>
+
+=head1 AUTHOR
+
+Makamaka Hannyaharamitu, E<lt>makamaka[at]cpan.orgE<gt>
+
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2010 by Makamaka Hannyaharamitu
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+=cut
