@@ -1,0 +1,182 @@
+#!/usr/bin/env perl
+# zlib-stream --- deflate or inflate stdin to stdout
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2024-08-08
+# Public domain
+
+use strict;
+use warnings qw(all);
+
+use Getopt::Long;
+use Pod::Usage;
+
+use Compress::Raw::Zlib qw(:level :status);
+
+my %opt = ( mode     => \&compress,
+            level    => Z_DEFAULT_COMPRESSION,
+            forcetty => undef,
+            debug    => undef,
+          );
+
+(my $progname = $0) =~ s=.*/==;
+
+sub _ok
+{
+  my ($method, $status, $zobj) = @_;
+  die sprintf( "$progname: error: %1\$s %2\$s (code %2\$d)\n%3\$s\n",
+               $method,
+               $status,
+               $zobj->msg() // '')
+    unless ($status == Z_OK || $status == Z_STREAM_END);
+
+  if ($opt{debug})
+    {
+      my $msg = $zobj->msg();
+      printf( STDERR "$progname: last zlib message: %s\n", $msg ) if $msg;
+    }
+}
+
+sub compress
+{
+  my $zobj = Compress::Raw::Zlib::Deflate->new( Level => $opt{level} );
+
+  my ($ibuf, $obuf, $status);
+  while (read( STDIN, $ibuf, 4096) > 0)
+    {
+      $status = $zobj->deflate( $ibuf, $obuf );
+      _ok( 'deflate', $status, $zobj );
+      print $obuf;
+    }
+  $status = $zobj->flush( $obuf ) ;
+  _ok( 'flush', $status, $zobj );
+  print $obuf;
+}
+
+sub decompress
+{
+  my $zobj = Compress::Raw::Zlib::Inflate->new( LimitOutput => 1 );
+
+  my ($ibuf, $obuf, $status);
+  eval
+    {
+      while (read( STDIN, $ibuf, 4096))
+        {
+          do { $status = $zobj->inflate( $ibuf, $obuf );
+               print $obuf;
+
+               die unless $status == Z_OK || $status == Z_BUF_ERROR;
+               if ($opt{debug})
+                 {
+                   my $msg = $zobj->msg();
+                   printf( STDERR "$progname: last zlib message: %s\n", $msg ) if $msg;
+                 }
+             } while length $obuf;
+        }
+    };
+  _ok( 'inflate', $status, $zobj );
+}
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help = -1;
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev));
+
+  my $succ = $parser->getoptions
+    ('h|help|usage+'            => \$help,
+     'debug'                    => \$opt{debug},
+
+     'f|force'                  => \$opt{forcetty},
+     'c|stdout|to-stdout'       => \$opt{forcetty},
+
+     'compress'                 => sub { $opt{mode} = \&compress   },
+     'd|decompress|uncompress'  => sub { $opt{mode} = \&decompress },
+
+     '0|none'                   => sub { $opt{level} = $_[0] },
+     '1|fast'                   => sub { $opt{level} = $_[0] },
+     '2'                        => sub { $opt{level} = $_[0] },
+     '3'                        => sub { $opt{level} = $_[0] },
+     '4'                        => sub { $opt{level} = $_[0] },
+     '5'                        => sub { $opt{level} = $_[0] },
+     '6'                        => sub { $opt{level} = $_[0] },
+     '7'                        => sub { $opt{level} = $_[0] },
+     '8'                        => sub { $opt{level} = $_[0] },
+     '9|best'                   => sub { $opt{level} = $_[0] },
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)     unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
+
+  if ($opt{debug})
+    {
+      my $flags   = Compress::Raw::Zlib::zlibCompileFlags();
+      my $vstr;
+
+      #print STDERR "* zlib version $version\n";
+
+      if (Compress::Raw::Zlib::is_zlibng_native())
+        {
+          my $ver = Compress::Raw::Zlib::zlibng_version();
+          $vstr = sprintf( 'zlib-ng %s in native mode', $ver );
+        }
+      elsif (Compress::Raw::Zlib::is_zlibng_compat())
+        {
+          my $ver   = Compress::Raw::Zlib::zlib_version();
+          my $verng = Compress::Raw::Zlib::zlibng_version();
+          $vstr = sprintf( 'zlib-ng %s in compat (%s) mode', $verng, $ver );
+        }
+      elsif (Compress::Raw::Zlib::is_zlib_native())
+        {
+          my $ver = Compress::Raw::Zlib::zlib_version();
+          $vstr = sprintf( 'zlib %s', $ver );
+        }
+      else
+        {
+          $vstr = sprintf( 'unknown zlib' );
+        }
+
+      print STDERR "$progname: Using $vstr\n";
+      print STDERR "$progname: zlib compilation flags $flags\n";
+    }
+
+  die "$progname: cowardly refusing to write to terminal without -c or -f.\n"
+    unless ($opt{forcetty} || ! -t STDOUT);
+}
+
+sub main
+{
+  parse_options (\@_);
+
+  binmode STDIN;
+  binmode STDOUT;
+
+  my $fn = $opt{mode};
+  &$fn( @_ );
+}
+
+main( @ARGV );
+
+__END__
+
+=begin text
+
+=encoding utf8
+
+=end text
+
+=head1 NAME
+
+zlib-stream - inflate or deflate using zlib, from stdin to stdout
+
+=head1 SYNOPSIS
+
+    {--help|--usage}                    {-f|--force}
+    {-d|--decompress|--uncompress}      {-c|--stdout|--to-stdout}
+
+    {-0|-1|-2|-3|-4|-5|-6|-7|-8-|-9|--fast|--best} [ignored for decompress]
+
+=cut
+
+# eof
