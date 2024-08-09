@@ -137,8 +137,8 @@ sub parse_options
           $vstr = sprintf( 'unknown zlib' );
         }
 
-      print STDERR "$progname: Using $vstr\n";
-      print STDERR "$progname: zlib compilation flags $flags\n";
+      printf( STDERR "%s: Using %s\n", $progname, $vstr );
+      printf( STDERR "%s: zlib build-time flags: %032b\n", $progname, $flags );
     }
 
   die "$progname: cowardly refusing to write to terminal without -c or -f.\n"
