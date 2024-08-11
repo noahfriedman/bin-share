@@ -4,8 +4,8 @@
 # This makes it easier to do filename completion on args without changing
 # the syntax of `=' in emacs, since that is a valid file name character.
 
-dd_op=( if ibs iflag    bs cbs conv
-        of obs oflag    seek skip count status )
+dd_op=( if ibs iflag iseek seek  bs conv  status
+        of obs oflag oseek skip cbs count )
 
 member()
 {
