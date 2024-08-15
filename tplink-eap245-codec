@@ -1,0 +1,277 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings qw(all);
+
+use Getopt::Long;
+use Pod::Usage;
+
+use Compress::Raw::Zlib qw(:status);
+use Crypt::Mode::ECB;
+use Digest::MD5;
+use Fcntl qw(:seek);
+use JSON;
+
+(my $progname = $0) =~ s=.*/==;
+
+my %opt = ( decode => 0,
+            debug  => 0,
+          );
+
+
+sub _zlib_ok
+{
+  my ($method, $status, $zobj) = @_;
+  die sprintf( "$progname: error: %1\$s %2\$s (code %2\$d)\n%3\$s\n",
+               $method,
+               $status,
+               $zobj->msg() // '')
+    unless ($status == Z_OK || $status == Z_STREAM_END);
+
+  if ($opt{debug})
+    {
+      my $msg = $zobj->msg();
+      printf( STDERR "$progname: last zlib message: %s\n", $msg ) if $msg;
+    }
+}
+
+sub zlib_encode
+{
+  my $zobj = Compress::Raw::Zlib::Deflate->new( Level => 9 );
+
+  my ($ibuf, $obuf, $status);
+  while (read( STDIN, $ibuf, 4096) > 0)
+    {
+      $status = $zobj->deflate( $ibuf, $obuf );
+      _ok( 'deflate', $status, $zobj );
+      print $obuf;
+    }
+  $status = $zobj->flush( $obuf ) ;
+  _ok( 'flush', $status, $zobj );
+  print $obuf;
+}
+
+sub zlib_decode
+{
+  my $ibuf = shift;
+
+  my $zobj = Compress::Raw::Zlib::Inflate->new( LimitOutput => 1 );
+  my ($result, $status);
+  eval
+    {
+      my $obuf;
+      do { $status = $zobj->inflate( $ibuf, $obuf );
+           $result .= $obuf;
+           die unless $status == Z_OK || $status == Z_BUF_ERROR;
+         } while length $obuf;
+    };
+  _zlib_ok( 'inflate', $status, $zobj );
+  return $result;
+}
+
+
+sub des_ecb_encode
+{
+  my ($data, $key) = @_;
+
+  my $ecb = Crypt::Mode::ECB->new( 'DES' );
+  return $ecb->encrypt( $data, $key );
+}
+
+sub des_ecb_decode
+{
+  my ($data, $key) = @_;
+
+  my $pad = length( $data ) % 8;
+  $data .= chr( 0 ) x $pad;
+
+  my $ecb = Crypt::Mode::ECB->new( 'DES', 0 );  # 0=nopad
+  return $ecb->decrypt( $data, $key );
+}
+
+
+sub md5_bin
+{
+  my $ctx = Digest::MD5->new;
+  map { $ctx->add( $_ ) } @_;
+  return $ctx->digest;
+}
+
+sub bin2hex { unpack( 'H*', join( '', @_ )) }
+sub hex2bin {   pack( 'H*', join( '', @_ )) }
+
+
+sub xseek
+{
+  my ($fh, $filename, $pos, $whence) = @_;
+  seek( $fh, ($pos // 0), ($whence // SEEK_CUR) )
+    or die "seek: $filename: $!\n";
+}
+
+sub file_contents
+{
+  my ($filename, $iskip) = @_;
+
+  open( my $fh, '<', $filename ) or die "open: $filename: $!\n";
+  binmode( $fh );
+
+  my $pos = 0;
+  my $buf = '';
+
+  xseek( $fh, $filename, $iskip, SEEK_SET ) if $iskip;
+  while (my $amtread = read( $fh, $buf, 4096, $pos ))
+    {
+      $pos += $amtread;
+    }
+  close( $fh );
+  return $buf;
+}
+
+
+# \0^E^A\0\0^A6IEAP245(TP-Link|UN|AC1750-D):3.0\0\0... [128 octets]
+my $eap245_header = pack( '(H4)*',
+  (qw( 0005 0100 0001 3649  4541 5032 3435 2854
+       502d 4c69 6e6b 7c55  4e7c 4143 3137 3530
+       2d44 293a 332e 3000  0000 0000 0000 0000
+       0000 0000 0000 0000  0000 0000 0000 0000
+       0000 0000 0000 0000  0100 0000 0000 0000
+       0000 0000 0000 0000  0000 0001 0000 0000
+       0000 0000 0000 0000  0000 0000 0000 0000
+       0000 0000 0000 0000  0000 0000 0000 0000 )));
+
+my $template_md5_hex = '478da50bf9e3d2cf8819839d4c061445';
+my $template_md5_bin = hex2bin( $template_md5_hex );
+
+my $des_ecb_key_hex  = substr( $template_md5_hex, 0, 16 );
+my $des_ecb_key_bin  = hex2bin( $des_ecb_key_hex );
+
+sub decode
+{
+  my ($file_name) = @_;
+
+  my $file_data  = file_contents( $file_name );
+  my $ciphertext = substr( $file_data, 148, );
+
+  if ($opt{debug})
+    {
+      my $file_size    = substr( $file_data,  0,   4 );  # TODO: validate file_size
+      my $file_md5_bin = substr( $file_data,  4,  16 );
+      my $header       = substr( $file_data, 20, 128 );
+
+      my $data_md5_bin = md5_bin( $template_md5_bin, $header, $ciphertext );
+      if ($data_md5_bin eq $file_md5_bin)
+        {
+          printf( STDERR "Valid checksum: %s\n", bin2hex( $file_md5_bin ));
+        }
+      else
+        {
+          my $data_md5_hex = bin2hex( $data_md5_bin );
+          my $file_md5_hex = bin2hex( $file_md5_bin );
+          printf( STDERR
+                  "Checksum mismatch!\nCalculated: %s\nExpected:   %s\n",
+                  $data_md5_hex,
+                  $file_md5_hex );
+        }
+    }
+
+  my $ztext = des_ecb_decode( $ciphertext, $des_ecb_key_bin );
+  return zlib_decode( $ztext );
+}
+
+
+# e_des()
+# {
+#     infile=$1
+#     outfile=${infile%.*}.new.bin
+#
+#     key=478DA50BF9E3D2CF
+#     {
+#         # Replace bytes 0x04-0x14 before computing checksum
+#         echo 478DA50BF9E3D2CF8819839D4C061445 | basenc --base16 -d
+#         eap245_header
+#         jq -c --raw-output0 '.' $infile |
+#             $OPENSSL zlib -e -nopad     |
+#             $OPENSSL enc -des-ecb -K $key
+#     } > $temprefix.tem
+#     $OPENSSL enc -md5 -binary -in $temprefix.tem -out $temprefix.md5
+#     size=$(stat -c %s $temprefixout.bin.new.tem)
+# }
+#
+
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help = -1;
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev));
+
+  my $succ = $parser->getoptions
+    ('h|help|usage+' =>      \$help,
+     'debug'         =>      \$opt{debug},
+
+     'd|decode'      =>      \$opt{decode},
+     'e|encode'      => sub { $opt{decode} = 0 },
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)     unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
+}
+
+sub main
+{
+  parse_options (\@_);
+
+  if ($opt{decode})
+    {
+      my $plain = decode( @_ );
+      print $plain;
+    }
+  else
+    {
+      my $bin = encode( @_ );
+      print $bin;
+    }
+}
+
+main( @ARGV );
+
+__END__
+
+=begin text
+
+=encoding utf8
+
+=end text
+
+=head1 NAME
+
+tplink-eap245-conf - encode or decode eap245 config.bin<=>config.cfg
+
+=head1 SYNOPSIS
+
+    {--help|--usage}
+    {-d|--decode}
+    {-e|--encode}
+    {CONFIG.BIN | CONFIG.CFG}
+
+=cut
+
+
+# fragment for decoding aes-encrypted tar files from tp-link devices.
+#d_aes()
+#{
+#    infile=$1
+#    outfile=${infile%.*}.tgz
+#
+#    key=30313233343536373839616263646566  # 0123456789abcdef
+#     iv=31323334353637383930616263646566  # 1234567890abcdef
+#
+#    dd if=$infile bs=1 iseek=128 status=none |
+#        openssl aes-128-cbc -d -K $key -iv $iv -out $outfile
+#}
+
+
+
+# eof
