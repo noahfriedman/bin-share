@@ -1,4 +1,8 @@
 #!/usr/bin/env perl
+# tplink-eap245-codec --- encode/decode config.bin backups
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2024-08-14
+# Public domain
 
 use strict;
 use warnings qw(all);
@@ -14,12 +18,18 @@ use JSON;
 
 (my $progname = $0) =~ s=.*/==;
 
+my $jq_prog = $ENV{JQ} // 'jq';
+my @jq_opt_pretty  = (qw( --ascii-output ));
+my @jq_opt_compact = (qw( --ascii-output --compact-output ));
+
 my %opt = ( decode => 0,
             debug  => 0,
+            pp     => 0,
+            jq     => 0,
           );
 
 
-sub _zlib_ok
+sub zlib_ok
 {
   my ($method, $status, $zobj) = @_;
   die sprintf( "$progname: error: %1\$s %2\$s (code %2\$d)\n%3\$s\n",
@@ -37,36 +47,26 @@ sub _zlib_ok
 
 sub zlib_encode
 {
-  my $zobj = Compress::Raw::Zlib::Deflate->new( Level => 9 );
+  my $ibuf = shift;
+  my $zobj = Compress::Raw::Zlib::Deflate->new( Level        => 9,
+                                                AppendOutput => 1, );
 
-  my ($ibuf, $obuf, $status);
-  while (read( STDIN, $ibuf, 4096) > 0)
-    {
-      $status = $zobj->deflate( $ibuf, $obuf );
-      _ok( 'deflate', $status, $zobj );
-      print $obuf;
-    }
+  my $status = $zobj->deflate( $ibuf, my $obuf );
+  zlib_ok( 'deflate', $status, $zobj );
   $status = $zobj->flush( $obuf ) ;
-  _ok( 'flush', $status, $zobj );
-  print $obuf;
+  zlib_ok( 'flush',   $status, $zobj );
+
+  return $obuf;
 }
 
 sub zlib_decode
 {
   my $ibuf = shift;
+  my $zobj = Compress::Raw::Zlib::Inflate->new( AppendOutput => 1 );
 
-  my $zobj = Compress::Raw::Zlib::Inflate->new( LimitOutput => 1 );
-  my ($result, $status);
-  eval
-    {
-      my $obuf;
-      do { $status = $zobj->inflate( $ibuf, $obuf );
-           $result .= $obuf;
-           die unless $status == Z_OK || $status == Z_BUF_ERROR;
-         } while length $obuf;
-    };
-  _zlib_ok( 'inflate', $status, $zobj );
-  return $result;
+  my $status = $zobj->inflate( $ibuf, my $obuf );
+  zlib_ok( 'inflate', $status, $zobj );
+  return $obuf;
 }
 
 
@@ -99,6 +99,63 @@ sub md5_bin
 
 sub bin2hex { unpack( 'H*', join( '', @_ )) }
 sub hex2bin {   pack( 'H*', join( '', @_ )) }
+
+
+sub mkpipe
+{
+  use IO::Handle;
+  use Socket;
+
+  my ($rfh, $wfh) = (IO::Handle->new, IO::Handle->new);
+
+  socketpair( $rfh, $wfh, AF_UNIX, SOCK_STREAM, PF_UNSPEC );
+  shutdown( $rfh, 1 ); # no more writing for reader
+  shutdown( $wfh, 0 ); # no more reading for writer
+  map { binmode( $_ ) } ($rfh, $wfh);
+
+  my $bufsize = pack('I', 1024 * 1024 ); # 1MiB
+  setsockopt( $rfh, SOL_SOCKET, SO_RCVBUF, $bufsize );
+  setsockopt( $wfh, SOL_SOCKET, SO_SNDBUF, $bufsize );
+  return ($rfh, $wfh);
+}
+
+sub jq
+{
+  use IPC::Open2;
+
+  my $data = shift;
+  my ($jq_stdin, $jq_stdout); # = mkpipe();
+
+  my $pid = eval { open2( $jq_stdout, $jq_stdin, $jq_prog, @_) };
+  die "exec: $jq_prog: $!\n" if $@;
+
+  print $jq_stdin $data;
+  close( $jq_stdin );
+
+  local $/ = undef;
+  local $_ = <$jq_stdout>;
+  close( $jq_stdout );
+  waitpid( $pid, 0 );
+
+  return $_;
+}
+
+sub json_in
+{
+  return jq( $_[0], @jq_opt_compact, '.' ) if $opt{jq};
+
+  my $json = JSON->new->canonical->ascii;
+  my $decoded = $json->decode( $_[0] );
+  return $json->encode( $decoded );
+}
+
+sub json_out
+{
+  return jq( $_[0], @jq_opt_pretty, '.' ) if $opt{jq};
+
+  my $json = JSON->new->canonical->ascii->pretty;
+  return $json->encode( $json->decode( $_[0] ));
+}
 
 
 sub xseek
@@ -147,9 +204,8 @@ my $des_ecb_key_bin  = hex2bin( $des_ecb_key_hex );
 
 sub decode
 {
-  my ($file_name) = @_;
+  my ($file_data) = @_;
 
-  my $file_data  = file_contents( $file_name );
   my $ciphertext = substr( $file_data, 148, );
 
   if ($opt{debug})
@@ -178,60 +234,67 @@ sub decode
   return zlib_decode( $ztext );
 }
 
+sub encode
+{
+  my ($file_data) = @_;
 
-# e_des()
-# {
-#     infile=$1
-#     outfile=${infile%.*}.new.bin
-#
-#     key=478DA50BF9E3D2CF
-#     {
-#         # Replace bytes 0x04-0x14 before computing checksum
-#         echo 478DA50BF9E3D2CF8819839D4C061445 | basenc --base16 -d
-#         eap245_header
-#         jq -c --raw-output0 '.' $infile |
-#             $OPENSSL zlib -e -nopad     |
-#             $OPENSSL enc -des-ecb -K $key
-#     } > $temprefix.tem
-#     $OPENSSL enc -md5 -binary -in $temprefix.tem -out $temprefix.md5
-#     size=$(stat -c %s $temprefixout.bin.new.tem)
-# }
-#
+  my $ztext = zlib_encode( $file_data );
+  my $ciphertext = des_ecb_encode( $ztext, $des_ecb_key_bin );
+  # n.b. checksum is computed over boilerplate checksum, but not size field.
+  my $md5 = md5_bin( $template_md5_bin, $eap245_header, $ciphertext );
+
+  my $data = join( '', $md5, $eap245_header, $ciphertext );
+  my $len = 4 + length( $data );  # length will include length tag
+  return pack('N', $len) . $data;
+}
+
 
-
 sub parse_options
 {
   local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
   my $help = -1;
 
   my $parser = Getopt::Long::Parser->new;
-  $parser->configure (qw(bundling autoabbrev));
+  $parser->configure (qw(bundling autoabbrev no_ignore_case));
 
   my $succ = $parser->getoptions
-    ('h|help|usage+' =>      \$help,
-     'debug'         =>      \$opt{debug},
+    ('h|help|usage+'     =>      \$help,
+     'debug'             =>      \$opt{debug},
 
-     'd|decode'      =>      \$opt{decode},
-     'e|encode'      => sub { $opt{decode} = 0 },
+     'd|decode'          =>      \$opt{decode},
+     'e|encode'          => sub { $opt{decode} = 0 },
+     'p|pp|pretty-print' =>      \$opt{pp},
+     'j|jq!'             =>      \$opt{jq},
+     'J'                 => sub { $opt{jq} = 0 },
     );
 
   pod2usage (-exitstatus => 1, -verbose => 0)     unless $succ;
   pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
+
+  $opt{pp} = 1 if $opt{jq};
 }
 
 sub main
 {
   parse_options (\@_);
 
+  my $file_name = shift;
+  my $file_data = file_contents( $file_name );
+
   if ($opt{decode})
     {
-      my $plain = decode( @_ );
+      my $plain = decode( $file_data );
+      $plain =~ s/\0$//;
+      $plain = json_out( $plain ) if $opt{pp};
       print $plain;
+      print "\n" if (-t STDOUT) && $plain !~ /\n$/s;
     }
   else
     {
-      my $bin = encode( @_ );
-      print $bin;
+      $file_data =~ s/\0$//s;
+      my $plain = json_in( $file_data );
+      my $bin   = encode( $plain . "\n" );
+      print $bin unless -t STDOUT;
     }
 }
 
@@ -253,7 +316,9 @@ tplink-eap245-conf - encode or decode eap245 config.bin<=>config.cfg
 
     {--help|--usage}
     {-d|--decode}
-    {-e|--encode}
+    {-e|--encode}                 default mode
+    {-p|--pp|--pretty-print}      decode-mode only
+    {-j|--jq}                     Use jq for formatting instead of perl-JSON
     {CONFIG.BIN | CONFIG.CFG}
 
 =cut
@@ -271,7 +336,5 @@ tplink-eap245-conf - encode or decode eap245 config.bin<=>config.cfg
 #    dd if=$infile bs=1 iseek=128 status=none |
 #        openssl aes-128-cbc -d -K $key -iv $iv -out $outfile
 #}
-
-
 
 # eof
