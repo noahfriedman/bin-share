@@ -41,7 +41,7 @@ if gnup $TAR; then
     gnutar=t
     if gnup $FIND && gnup $SORT; then
         FPRINT=print0
-        SORTOPT="$SORTOPT --zero-terminated"
+        SORTOPT="$SORTOPT --zero-terminated -V"
         TAROPT="$TAROPT --null"
     fi
 fi
