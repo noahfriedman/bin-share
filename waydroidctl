@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# waydroid init -s GAPPS -c https://ota.waydro.id/system -v https://ota.waydro.id/vendor
+# waydroid session stop
+
+stop()
+{
+    pkill -e weston
+
+    systemctl -q is-active waydroid-container.service || return
+
+    sudo pkill -e --cgroup=/lxc.payload.waydroid
+    sudo systemctl stop waydroid-container.service
+
+
+}
+
+start()
+{
+    systemctl restart waydroid-container.service
+    weston --width=480 --height=600 --xwayland &> /dev/null & disown
+    export WAYLAND_DISPLAY=wayland-1
+    export XDG_SESSION_TYPE=wayland
+    export DISPLAY=:1
+
+    waydroid show-full-ui & disown
+}
