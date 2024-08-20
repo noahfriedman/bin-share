@@ -1,0 +1,340 @@
+#!/usr/bin/env perl
+# tplink-eap245-codec --- encode/decode config.bin backups
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2024-08-14
+# Public domain
+
+use strict;
+use warnings qw(all);
+
+use Getopt::Long;
+use Pod::Usage;
+
+use Compress::Raw::Zlib qw(:status);
+use Crypt::Mode::ECB;
+use Digest::MD5;
+use Fcntl qw(:seek);
+use JSON;
+
+(my $progname = $0) =~ s=.*/==;
+
+my $jq_prog = $ENV{JQ} // 'jq';
+my @jq_opt_pretty  = (qw( --ascii-output ));
+my @jq_opt_compact = (qw( --ascii-output --compact-output ));
+
+my %opt = ( decode => 0,
+            debug  => 0,
+            pp     => 0,
+            jq     => 0,
+          );
+
+
+sub zlib_ok
+{
+  my ($method, $status, $zobj) = @_;
+  die sprintf( "$progname: error: %1\$s %2\$s (code %2\$d)\n%3\$s\n",
+               $method,
+               $status,
+               $zobj->msg() // '')
+    unless ($status == Z_OK || $status == Z_STREAM_END);
+
+  if ($opt{debug})
+    {
+      my $msg = $zobj->msg();
+      printf( STDERR "$progname: last zlib message: %s\n", $msg ) if $msg;
+    }
+}
+
+sub zlib_encode
+{
+  my $ibuf = shift;
+  my $zobj = Compress::Raw::Zlib::Deflate->new( Level        => 9,
+                                                AppendOutput => 1, );
+
+  my $status = $zobj->deflate( $ibuf, my $obuf );
+  zlib_ok( 'deflate', $status, $zobj );
+  $status = $zobj->flush( $obuf ) ;
+  zlib_ok( 'flush',   $status, $zobj );
+
+  return $obuf;
+}
+
+sub zlib_decode
+{
+  my $ibuf = shift;
+  my $zobj = Compress::Raw::Zlib::Inflate->new( AppendOutput => 1 );
+
+  my $status = $zobj->inflate( $ibuf, my $obuf );
+  zlib_ok( 'inflate', $status, $zobj );
+  return $obuf;
+}
+
+
+sub des_ecb_encode
+{
+  my ($data, $key) = @_;
+
+  my $ecb = Crypt::Mode::ECB->new( 'DES' );
+  return $ecb->encrypt( $data, $key );
+}
+
+sub des_ecb_decode
+{
+  my ($data, $key) = @_;
+
+  my $pad = length( $data ) % 8;
+  $data .= chr( 0 ) x $pad;
+
+  my $ecb = Crypt::Mode::ECB->new( 'DES', 0 );  # 0=nopad
+  return $ecb->decrypt( $data, $key );
+}
+
+
+sub md5_bin
+{
+  my $ctx = Digest::MD5->new;
+  map { $ctx->add( $_ ) } @_;
+  return $ctx->digest;
+}
+
+sub bin2hex { unpack( 'H*', join( '', @_ )) }
+sub hex2bin {   pack( 'H*', join( '', @_ )) }
+
+
+sub mkpipe
+{
+  use IO::Handle;
+  use Socket;
+
+  my ($rfh, $wfh) = (IO::Handle->new, IO::Handle->new);
+
+  socketpair( $rfh, $wfh, AF_UNIX, SOCK_STREAM, PF_UNSPEC );
+  shutdown( $rfh, 1 ); # no more writing for reader
+  shutdown( $wfh, 0 ); # no more reading for writer
+  map { binmode( $_ ) } ($rfh, $wfh);
+
+  my $bufsize = pack('I', 1024 * 1024 ); # 1MiB
+  setsockopt( $rfh, SOL_SOCKET, SO_RCVBUF, $bufsize );
+  setsockopt( $wfh, SOL_SOCKET, SO_SNDBUF, $bufsize );
+  return ($rfh, $wfh);
+}
+
+sub jq
+{
+  use IPC::Open2;
+
+  my $data = shift;
+  my ($jq_stdin, $jq_stdout); # = mkpipe();
+
+  my $pid = eval { open2( $jq_stdout, $jq_stdin, $jq_prog, @_) };
+  die "exec: $jq_prog: $!\n" if $@;
+
+  print $jq_stdin $data;
+  close( $jq_stdin );
+
+  local $/ = undef;
+  local $_ = <$jq_stdout>;
+  close( $jq_stdout );
+  waitpid( $pid, 0 );
+
+  return $_;
+}
+
+sub json_in
+{
+  return jq( $_[0], @jq_opt_compact, '.' ) if $opt{jq};
+
+  my $json = JSON->new->canonical->ascii;
+  my $decoded = $json->decode( $_[0] );
+  return $json->encode( $decoded );
+}
+
+sub json_out
+{
+  return jq( $_[0], @jq_opt_pretty, '.' ) if $opt{jq};
+
+  my $json = JSON->new->canonical->ascii->pretty;
+  return $json->encode( $json->decode( $_[0] ));
+}
+
+
+sub xseek
+{
+  my ($fh, $filename, $pos, $whence) = @_;
+  seek( $fh, ($pos // 0), ($whence // SEEK_CUR) )
+    or die "seek: $filename: $!\n";
+}
+
+sub file_contents
+{
+  my ($filename, $iskip) = @_;
+
+  open( my $fh, '<', $filename ) or die "open: $filename: $!\n";
+  binmode( $fh );
+
+  my $pos = 0;
+  my $buf = '';
+
+  xseek( $fh, $filename, $iskip, SEEK_SET ) if $iskip;
+  while (my $amtread = read( $fh, $buf, 4096, $pos ))
+    {
+      $pos += $amtread;
+    }
+  close( $fh );
+  return $buf;
+}
+
+
+# \0^E^A\0\0^A6IEAP245(TP-Link|UN|AC1750-D):3.0\0\0... [128 octets]
+my $eap245_header = pack( '(H4)*',
+  (qw( 0005 0100 0001 3649  4541 5032 3435 2854
+       502d 4c69 6e6b 7c55  4e7c 4143 3137 3530
+       2d44 293a 332e 3000  0000 0000 0000 0000
+       0000 0000 0000 0000  0000 0000 0000 0000
+       0000 0000 0000 0000  0100 0000 0000 0000
+       0000 0000 0000 0000  0000 0001 0000 0000
+       0000 0000 0000 0000  0000 0000 0000 0000
+       0000 0000 0000 0000  0000 0000 0000 0000 )));
+
+my $template_md5_hex = '478da50bf9e3d2cf8819839d4c061445';
+my $template_md5_bin = hex2bin( $template_md5_hex );
+
+my $des_ecb_key_hex  = substr( $template_md5_hex, 0, 16 );
+my $des_ecb_key_bin  = hex2bin( $des_ecb_key_hex );
+
+sub decode
+{
+  my ($file_data) = @_;
+
+  my $ciphertext = substr( $file_data, 148, );
+
+  if ($opt{debug})
+    {
+      my $file_size    = substr( $file_data,  0,   4 );  # TODO: validate file_size
+      my $file_md5_bin = substr( $file_data,  4,  16 );
+      my $header       = substr( $file_data, 20, 128 );
+
+      my $data_md5_bin = md5_bin( $template_md5_bin, $header, $ciphertext );
+      if ($data_md5_bin eq $file_md5_bin)
+        {
+          printf( STDERR "Valid checksum: %s\n", bin2hex( $file_md5_bin ));
+        }
+      else
+        {
+          my $data_md5_hex = bin2hex( $data_md5_bin );
+          my $file_md5_hex = bin2hex( $file_md5_bin );
+          printf( STDERR
+                  "Checksum mismatch!\nCalculated: %s\nExpected:   %s\n",
+                  $data_md5_hex,
+                  $file_md5_hex );
+        }
+    }
+
+  my $ztext = des_ecb_decode( $ciphertext, $des_ecb_key_bin );
+  return zlib_decode( $ztext );
+}
+
+sub encode
+{
+  my ($file_data) = @_;
+
+  my $ztext = zlib_encode( $file_data );
+  my $ciphertext = des_ecb_encode( $ztext, $des_ecb_key_bin );
+  # n.b. checksum is computed over boilerplate checksum, but not size field.
+  my $md5 = md5_bin( $template_md5_bin, $eap245_header, $ciphertext );
+
+  my $data = join( '', $md5, $eap245_header, $ciphertext );
+  my $len = 4 + length( $data );  # length will include length tag
+  return pack('N', $len) . $data;
+}
+
+
+sub parse_options
+{
+  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+  my $help = -1;
+
+  my $parser = Getopt::Long::Parser->new;
+  $parser->configure (qw(bundling autoabbrev no_ignore_case));
+
+  my $succ = $parser->getoptions
+    ('h|help|usage+'     =>      \$help,
+     'debug'             =>      \$opt{debug},
+
+     'd|decode'          =>      \$opt{decode},
+     'e|encode'          => sub { $opt{decode} = 0 },
+     'p|pp|pretty-print' =>      \$opt{pp},
+     'j|jq!'             =>      \$opt{jq},
+     'J'                 => sub { $opt{jq} = 0 },
+    );
+
+  pod2usage (-exitstatus => 1, -verbose => 0)     unless $succ;
+  pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
+
+  $opt{pp} = 1 if $opt{jq};
+}
+
+sub main
+{
+  parse_options (\@_);
+
+  my $file_name = shift;
+  my $file_data = file_contents( $file_name );
+
+  if ($opt{decode})
+    {
+      my $plain = decode( $file_data );
+      $plain =~ s/\0$//;
+      $plain = json_out( $plain ) if $opt{pp};
+      print $plain;
+      print "\n" if (-t STDOUT) && $plain !~ /\n$/s;
+    }
+  else
+    {
+      $file_data =~ s/\0$//s;
+      my $plain = json_in( $file_data );
+      my $bin   = encode( $plain . "\n" );
+      print $bin unless -t STDOUT;
+    }
+}
+
+main( @ARGV );
+
+__END__
+
+=begin text
+
+=encoding utf8
+
+=end text
+
+=head1 NAME
+
+tplink-eap245-conf - encode or decode eap245 config.bin<=>config.cfg
+
+=head1 SYNOPSIS
+
+    {--help|--usage}
+    {-d|--decode}
+    {-e|--encode}                 default mode
+    {-p|--pp|--pretty-print}      decode-mode only
+    {-j|--jq}                     Use jq for formatting instead of perl-JSON
+    {CONFIG.BIN | CONFIG.CFG}
+
+=cut
+
+
+# fragment for decoding aes-encrypted tar files from tp-link devices.
+#d_aes()
+#{
+#    infile=$1
+#    outfile=${infile%.*}.tgz
+#
+#    key=30313233343536373839616263646566  # 0123456789abcdef
+#     iv=31323334353637383930616263646566  # 1234567890abcdef
+#
+#    dd if=$infile bs=1 iseek=128 status=none |
+#        openssl aes-128-cbc -d -K $key -iv $iv -out $outfile
+#}
+
+# eof
