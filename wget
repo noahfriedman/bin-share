@@ -92,10 +92,18 @@ if atleast 1 9; then
          #--dns-cache=off
 fi
 
-false && # disable this section
+if atleast 1 11; then
+    opts="$opts
+          --max-redirect=8
+         "
+fi
+
 if atleast 1 13; then
     # use the name specified by the redirection url's last component
-    opts="$opts --trust-server-names"
+    opts="$opts
+          --trust-server-names
+          --content-disposition
+         "
 fi
 
 if atleast 1 17; then
