@@ -587,7 +587,7 @@ sub output_columns
                           'struct ttysize' => 4, );
           local *__OPTIMIZE__ = sub { 1; }; # silence warnings in v5.22
           for my $ph (map { $_ . ".ph"
-                          } (qw(sys/ioctl sys/termios sys/ttycom ttold)))
+                          } (qw(termios sys/termios sys/ttycom sys/ioctl ttold)))
             {
               local $@;  # save and restore prior exception
               eval { require "$ph" };
