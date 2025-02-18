@@ -8,8 +8,10 @@
 # Commentary:
 
 # stuff to do:
-# 	* grab console: TIOCCONS
-#	* document all the supported flags
+#       * warn when setting a flag is ignored instead getting an error
+#	  (e.g: setting cs7 on a pty on linux won't change it from cs8)
+# 	* grab console? (TIOCCONS)
+#	* document all the flags in help output
 
 # Code:
 
@@ -706,7 +708,9 @@ class Stty( object ):
         except KeyError as e:
             e.args = ( arg, 'Invalid or unsupported argument' )
             raise
-        if data[ FL_FIELD_VALUE ] is None:
+        if data[ FL_FIELD ] is False:
+            raise OSError( arg, 'Not available on this system' )
+        elif data[ FL_FIELD_VALUE ] is None:
             val = bool( arg[0] != '-' )
         else:
             val = data[ FL_FIELD_VALUE ]
