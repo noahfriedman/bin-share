@@ -94,16 +94,35 @@ class PseudoTermios( object ):
         CLNEXT     = CTRL( 'V' )
         CFLUSH     = CTRL( 'O' )
 
-        # Some line disciplines which python doesn't usually define.
-        N_AX25     =  5
-        N_X25      =  6 # X.25 async
-        N_IRDA     = 11 # http://irda.sourceforge.net/
-        N_SMSBLOCK = 12 # SMS block mode for GSM
-        N_SYNC_PPP = 14 # synchronous PPP
-        N_HCI      = 15 # Bluetooth HCI UART
-        N_SLCAN    = 17 # Serial / USB serial CAN Adaptors
-        N_PPS      = 18 # Pulse per Second (GPS, etc)
-        N_NULL     = 27 # Null ldisc used for error handling
+        # Some line disciplines which python doesn't usually define,
+        # and probably hardly anyone actually uses.
+        # See <bits/ioctl-types.h>, <linux/tty.h>
+        N_AX25         =  5
+        N_X25          =  6 # X.25 async
+        N_6PACK        =  7
+        N_MASC         =  8 # Mobitex module
+        N_R3964        =  9 # Simatic R3964 module
+        N_PROFIBUS     = 10 # Profibus
+        N_IRDA         = 11 # http://irda.sourceforge.net/
+        N_SMSBLOCK     = 12 # SMS block mode for GSM
+        N_HDLC         = 13 # synchronous HDLC
+        N_SYNC_PPP     = 14 # synchronous PPP
+        N_HCI          = 15 # Bluetooth HCI UART
+        N_GIGASET_M101 = 16 # Siemens Gigaset M101 serial DECT adapter
+        N_SLCAN        = 17 # Serial / USB serial CAN Adaptors
+        N_PPS          = 18 # Pulse per Second (GPS, etc)
+        N_V253         = 19 # Codec control over voice modem
+        N_CAIF         = 20 # CAIF protocol for talking to modems
+        N_GSM0710      = 21 # GSM 0710 Mux
+        N_TI_WL        = 22 # for TI's WL BT, FM, GPS combo chips
+        N_TRACESINK    = 23 # Trace data routing for MIPI P1149.7
+        N_TRACEROUTER  = 24 # Trace data routing for MIPI P1149.7
+        N_NCI          = 25 # NFC NCI UART
+        N_SPEAKUP      = 26 # Speakup communication with synths
+        N_NULL         = 27 # Null ldisc used for error handling
+        N_MCTP         = 28 # MCTP-over-serial
+        N_DEVELOPMENT  = 29 # Manual out-of-tree testing
+        N_CAN327       = 30 # ELM327 based OBD-II interfaces
 
     elif OS in ('FreeBSD', 'Darwin'):
         # Darwin's tty line discipline is most similar to FreeBSD's
@@ -850,7 +869,7 @@ class Stty( object ):
             try:
                 self._tcsets( attr )
             except struct.error as err:
-                raise OSError( self, 'unknown line discipline "{}"'.format( line ))
+                raise OSError( err, 'unknown line discipline "{}"'.format( line ))
 
 
     def save( self ):
