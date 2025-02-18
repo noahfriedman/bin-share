@@ -1,0 +1,25 @@
+#!/bin/sh
+# Public domain
+
+# n.b. temporarily convert _ to ^A so it constitutes a word boundary.
+re='s/_/\001/g;
+      s/\bjan(|uary)\b/01/ig;
+      s/\bfeb(|uary)\b/02/ig;
+        s/\bmar(|ch)\b/03/ig;
+        s/\bapr(|il)\b/04/ig;
+             s/\bmay\b/05/ig;
+         s/\bjun(|e)\b/06/ig;
+         s/\bjul(|y)\b/07/ig;
+       s/\baug(|ust)\b/08/ig;
+    s/\bsep(|tember)\b/09/ig;
+      s/\boct(|ober)\b/10/ig;
+     s/\bnov(|ember)\b/11/ig;
+     s/\bdec(|ember)\b/12/ig;
+    s/\001/_/g;
+'
+
+case $1 in -[vy] ) v=$1; shift ;; esac
+
+exec rename-re $v "$re" "$@"
+
+# eof
