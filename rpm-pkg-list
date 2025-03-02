@@ -461,6 +461,8 @@ __DATA__
 ## Fedora
 ######
 
+105ef944	fedora-42
+e99d6ad1	fedora-41
 a15b79cc	fedora-40
 18b8e74c	fedora-39
 eb10b464	fedora-38
@@ -539,7 +541,7 @@ dbbdcf7c	fedora-iot-2019
 ## RPMfusion
 ######
 
-d651ff2e	rpmfusion-free-2020	# Used for f33-f39 as of 2023-10-19
+d651ff2e	rpmfusion-free-2020	# Used for f33-f41 as of 2025-02-21
 100bcd92	rpmfusion-free-f32
 c481937a	rpmfusion-free-f31
 c0aeda6e	rpmfusion-free-f30
@@ -564,7 +566,7 @@ a3780952	rpmfusion-free-f13
 8fcff4da	rpmfusion-free-f11
 49c8885a	rpmfusion-free-f10-or-earlier
 
-94843c65	rpmfusion-nonfree-2020	# Used for f33-f38 as of 2023-10-19
+94843c65	rpmfusion-nonfree-2020	# Used for f33-f41 as of 2025-02-21
 6dc1be18	rpmfusion-nonfree-f32
 54a86092	rpmfusion-nonfree-f31
 1d14a795	rpmfusion-nonfree-f30
