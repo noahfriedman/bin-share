@@ -110,11 +110,14 @@ def bt( *cmd ):
     return output.rstrip( ' \t\r\n' )
 
 
-def load( filename ):
+def load( filename, eval=True ):
     with open( filename, 'r' ) as f:
         text = f.read()
     text.replace( '\r\n', '\n' )
-    exec( text, repl_locals )
+    if eval:
+        exec( text, repl_locals )
+    else:
+        return text
 
 
 def attrs( obj, pattern='', regex=False ):
