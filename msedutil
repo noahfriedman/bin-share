@@ -1,8 +1,16 @@
 #!/bin/sh
+# msedutil --- wrapper for sedutil-cli
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2022-04-20
+# Public domain
+
+# TODO: remove dependency on perl so script can be used in rescue environment
+# Not sure if busybox awk is up to the task.
 
 cmd_arg=
 dev_arg=
 pba_arg=
+tpm_chk=
 
 : ${SEDUTIL:=sedutil-cli}
 
@@ -72,7 +80,7 @@ sedutil_query()
             print $_;'
 }
 
-query_match() { sedutil_query | egrep -i "$@"; }
+query_match() { sedutil_query | grep -E -i "$@"; }
 
 sedutil_lockingranges()
 {
@@ -102,16 +110,46 @@ sedutil_lockingranges()
 ##
 ######
 
+catZ()
+{
+    case $1 in
+        *.gz   ) gzip  -dc "$1" ;;
+        *.xz   ) xz    -dc "$1" ;;
+        *.lz   ) lzip  -dc "$1" ;;
+        *.bz2  ) bzip2 -dc "$1" ;;
+    esac
+}
+
+prep_pba()
+{
+    if ! [ -f "$pba_arg" ]; then
+        usage "$pba_arg missing" 1>&2
+    fi
+
+    case $pba_arg in
+        *.[glx]z | *.bz2 )
+            pba_orig=$pba_arg
+            pba_tmp=${TMPFILE:-/tmp}/${pba_orig##*/}
+            pba_tmp=${pba_tmp%.*}$$
+            trap 'rm -fv "$pba_tmp"' 0 1 2 3 15
+            umask 077
+            catZ "$pba_orig" > "$pba_tmp"
+            pba_arg=$pba_tmp
+
+            echo Using "$pba_arg" for temporary uncompressed pba image.
+            ;;
+    esac
+
+}
+
+######
+##
+######
+
 opal_setup()
 {
     if [ -n "$pba_arg" ]; then
-        if [ -f "$pba_arg" ]; then
-            :
-        elif [ -f "$pba_arg.gz" ]; then
-            gunzip "$pba_arg.gz"
-        else
-            usage "$pba_arg missing" 1>&2
-        fi
+        prep_pba
     fi
 
     sedutil --initialSetup              debug "$dev_arg"
@@ -214,29 +252,30 @@ usage()
         0 ) : ;;
         * ) echo "${0##*/}: $@"; echo ;;
     esac
-    echo "Usage: ${0##*/} setup   /dev/sdX  [/path/to/pba.img{.gz}]"
-    echo "       ${0##*/} revert  /dev/sdX"
+    echo "Usage: ${0##*/} setup               /dev/sdX  [/path/to/pba.img{.gz}]"
+    echo "       ${0##*/} revert              /dev/sdX"
     echo "       ${0##*/} [enable | disable]  /dev/sdX"
     echo "       ${0##*/} [lock   | unlock]   /dev/sdX"
     echo "       ${0##*/} [query  | status]   /dev/sdX"
     echo "       ${0##*/} setpass [adm | sid] /dev/sdX"
-    echo "       ${0##*/} msid /dev/sdX"
+    echo "       ${0##*/} msid                /dev/sdX"
+    echo ""
+    echo "The PBA is usually named something like UEFI64-*.img{.gz}"
     exit 1
 }
 
-main()
+check_allow_tpm()
 {
-    case ${UID-`id -u`} in
-        0 ) : ;;
-        * ) exec sudo "$@" ;;
+    # n.b. allow_tpm not required for nvme drives
+    case $tpm_chk:${dev_arg##*/} in
+        :sd* ) : ;;
+        *    ) return 0 ;;
     esac
 
     case `uname -s` in
         Linux )
-            # Is this necessary for nvme drives?
-            # sedutil might require it even if it isn't.
             param=/sys/module/libata/parameters/allow_tpm
-            errmsg="libata.allow_tpm is not enabled; cannot continue."
+            errmsg="$dev_arg: libata.allow_tpm is not enabled; cannot continue"
             if [ -f $param ]; then
                 read allow_tpm < $param
                 case $allow_tpm in
@@ -245,6 +284,15 @@ main()
             else
                 fatal "$errmsg";
             fi ;;
+    esac
+    tpm_chk=1
+}
+
+main()
+{
+    case ${UID-`id -u`} in
+        0 ) : ;;
+        * ) exec sudo "$0" "$@" ;;
     esac
 
     case $1:$# in
@@ -265,6 +313,7 @@ main()
         lock | unlock | enable | disable | status )
             cmd_arg=$1 ; shift
             dev_arg=$1 ; shift
+            check_allow_tpm
             getpass_adm
             ;;
 
@@ -275,6 +324,7 @@ main()
                 pba_arg=$1
                 shift
             fi
+            check_allow_tpm
             getpass_sid
             if [ ".$sid_pass" = ".debug" ]; then
                 adm_pass=$sid_pass
@@ -285,6 +335,8 @@ main()
 
         setpass | passwd )
             shift
+            dev_arg=$2
+            check_allow_tpm
             case $1 in
                 adm | admin1 )
                     cmd_arg=setpass_adm ; shift
@@ -298,12 +350,14 @@ main()
 
                 * ) usage "password type must be 'sid' or 'admin1'" ;;
             esac
-            dev_arg=$1 ; shift
+            shift  # dev_arg already set
             getpass_new
             ;;
 
         * ) usage "$1: Unknown command" ;;
     esac
+
+    check_allow_tpm
 
     set -e
     opal_$cmd_arg "$@"
