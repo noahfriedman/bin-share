@@ -96,6 +96,9 @@ extract()
         *.zip | *.cbz | *.fbu | *.jar | *.apk | *.xpi | *.epub )
             $UNZIP -o -d . "$file" ;;
 
+        *.cpio | *.cpio.* )
+            catZ "$file" | $CPIO -dimv --no-absolute-filenames ;;
+
         *.rpm )
             $RPM2CPIO "$file" | $CPIO -dimv --no-absolute-filenames ;;
 
@@ -190,6 +193,18 @@ extract_initrd()
     exp "$file" | exp2 | $CPIO -dimv --no-absolute-filenames
 }
 
+catZ()
+{
+    case $1 in
+        *.[Zz] ) $GZIP  -dc "$1" ;;
+        *.gz   ) $GZIP  -dc "$1" ;;
+        *.xz   ) $XZ    -dc "$1" ;;
+        *.lz   ) $LZIP  -dc "$1" ;;
+        *.bz2  ) $BZIP2 -dc "$1" ;;
+        *.lzma ) $LZMA  -dc "$1" ;;
+        *      ) $CAT       "$1" ;;
+    esac
+}
 
 main()
 {
