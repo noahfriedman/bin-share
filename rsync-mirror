@@ -1,60 +1,124 @@
-#!/bin/sh
+#!/usr/bin/env bash
+# rsync-mirror --- (destructively) mirror files
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 1998-11-08
+# Public domain
 
-: ${RSYNC:=rsync}
-: ${RSYNC_RSH:=ssh}
-export RSYNC_RSH
+setup()
+{
+    : ${RSYNC:=rsync}
+    : ${RSYNC_RSH:=ssh}; export RSYNC_RSH
 
-case $* in
-    *-quiet*   ) : ;;
-    *          ) set : --verbose "$@" ; shift ;;
-esac
+    : ${U_UID:=${UID-`id -u`}}
+    : ${U_SYSTEM:=`uname -s`}
 
-case $* in
-    *-inplace* ) : ;;
-    *          ) set : --sparse  "$@" ; shift ;;
-esac
+    set : $( rsync --version |
+                 sed -E -n \
+                     -e '/^rsync +version +([0-9.]+) .*/!d' \
+                     -e 's//\1/' \
+                     -e 's/\./ /gp' )
+    rvmajor=$2
+    rvminor=$3
+    rvpatch=$4
 
-case ${RS_UID-${UID-`id -u`}} in
-    0          ) set : --devices "$@"
-                 shift
-                 case ${U_SYSTEM-`uname -s`} in
-                     Linux ) set : \
-                                 --acls \
-                                 --xattrs \
-                                 --filter='-x security.selinux' \
-                                 --filter='-x system.nfs4_acl' \
-                                 "$@"
-                             shift ;;
-                 esac ;;
-esac
+    rsync_opt=(
+        --owner
+        --group
+        --perms
+        --times
 
-set : \
-    --owner		\
-    --group		\
-    --perms		\
-    --times		\
-			\
-    --hard-links	\
-    --links		\
-			\
-    --delete		\
-    --force		\
-			\
-    --recursive		\
-    "$@"
-shift
+        --hard-links
+        --links
 
-if [ -t 0 ]; then
-    $RSYNC -n "$@" | sed -e 's/^/[PROPOSED] /'
-    echo
-    echo -n "Is this what you want (y/N)? "
-    read resp
-    case $resp in
-        [Yy]* ) : ;;
-        * ) exit 1 ;;
+        --delete
+        --force
+
+        --recursive
+
+        --acls
+        --xattrs
+        --filter='-x security.selinux'
+        --filter='-x system.nfs4_acl'
+    )
+
+    if [[ $RS_UID -eq 0 ]]; then
+        rsync_opt+=( --devices )
+    fi
+}
+
+atleast()
+{
+    { [ $rvmajor -gt $1 ]; }                         ||
+    { [ $rvmajor -eq $1 ] && [ $rvminor -gt $2 ]; }  ||
+    { [ $rvmajor -eq $1 ] && [ $rvminor -eq $2 ] && [ ${rvpatch:-0} -ge ${3-0} ]; }
+}
+
+# usage: member [key] ${array[@]}
+member()
+{
+    local key=$1 elt=
+    shift
+
+    for elt in "$@"; do
+        if [[ $key = $elt ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# usage: ainclude [key] [arrayname]
+# Appends key to array if it is not a member already.
+ainclude()
+{
+    declare -n arry=$2
+    member "$1" "${arry[@]}" && return 0
+    arry+=( "$1" )
+}
+
+rsync()
+{
+    if ${doexec:-false}; then
+        exec    $RSYNC "${rsync_opt[@]}" "$@"
+    else
+        command $RSYNC "${rsync_opt[@]}" "$@"
+    fi
+}
+
+main()
+{
+    case $# in
+        0 ) echo ${0##*/}: Nothing to do. 1>&2
+            exit 1 ;;
     esac
-fi
 
-exec $RSYNC "$@"
+    setup
+    main_args=( "$@" )
+    if atleast 3 1 3 || ! member '--inplace' "$@" ; then
+        ainclude '--sparse' main_args
+    fi
+
+    if ! { member '-q' "$@" || member '--quiet' "$@"; }; then
+        ainclude '--verbose' main_args
+    fi
+
+    if [ -t 0 ]; then
+        rsync -n "${main_args[@]}" | sed -e 's/^/[PROPOSED] /'
+        if [[ ${PIPESTATUS[0]} -ne 0 ]]; then exit 1; fi
+
+        echo
+        echo -n "Is this what you want (y/N)? "
+        read resp
+        case $resp in
+            [Yy]* ) : ;;
+            * ) exit 1 ;;
+        esac
+    fi
+
+    doexec=true
+    rsync "${main_args[@]}"
+}
+
+main "$@"
 
 # eof
