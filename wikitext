@@ -125,7 +125,7 @@ def main():
         # Should be sorted already, but don't trust that
         section.sort( key=lambda elt: elt['byteoffset'] )
 
-        wantsect = args.section
+        wantsect = args.section.lower()
         try:
             negno = int( wantsect )
             if negno < 0:
@@ -138,8 +138,8 @@ def main():
 
         for i in range( 0, len( section )):
             elt = section[ i ]
-            if wantsect in ( elt['line'],
-                             elt['anchor'],
+            if wantsect in ( elt['line'].lower(),
+                             elt['anchor'].lower(),
                              str( elt['index'] )):
                 beg = elt['byteoffset']
                 try:
