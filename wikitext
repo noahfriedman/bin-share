@@ -82,16 +82,17 @@ class MyFormatter( argparse.HelpFormatter ):
 
 def get_args():
     help = {
-        'json'    : 'Format output as JSON',
-        'section' : 'Section name or number',
+        'json'    : 'format output as JSON',
+        'section' : 'case-insensitive section number, name, or regex',
         'api-url' : 'API url (default is for wikipedia.com)',
-        'title'   : 'Wikipedia page title or component words',
+        'title'   : 'page title or component words',
 
         'epilog'  : """
-                    In addition to titles or anchors,
-                    the SECTION argument can be an index starting from 1,
+                    The SECTION argument can be an index starting from 1,
                     or a negative index from the end of the sections,
                     e.g. '-1' means the last section.
+                    If SECTION begins and ends with `/', the enclosed
+                    sequence is treated as a regular expression.
 
                     If --json argument is specified, output consists of
                     the wikitext plus an array of section definitions.
@@ -119,35 +120,56 @@ def main():
         combo = { 'wikitext': text,
                   'sections': section, }
         print( json.dumps( combo ))
-    elif args.section:
+
+    elif not ( args.section is None or args.section == '' ):
+        # n.b. the API supports a 'section' field, but it's limited to
+        # positive integer values only, and it's actually slower to
+        # retrieve the section text for average-size pages.  It's actually
+        # faster to retrieve the entire page and the section list, and do
+        # the processing locally.  Plus, we can do more flexible matching.
         data    = session.fetch( prop='sections' )
         section = data['parse']['sections']
         # Should be sorted already, but don't trust that
         section.sort( key=lambda elt: elt['byteoffset'] )
 
+        wantre   = None
         wantsect = args.section.lower()
-        try:
-            negno = int( wantsect )
-            if negno < 0:
-                numsects = len( section )
-                newno = numsects + negno
-                if numsects > newno > 0:
-                    wantsect = str( newno+1 )
-        except ValueError:
-            pass
+        if wantsect[0] == wantsect[-1] == '/':
+            wantre = re.compile( wantsect[1:-1], flags=re.IGNORECASE )
+        else:
+            try:
+                negno = int( wantsect )
+                if negno < 0:
+                    numsects = len( section )
+                    newno = numsects + negno
+                    if numsects > newno > 0:
+                        wantsect = str( newno+1 )
+            except ValueError:
+                pass
 
+        search_fields = ('line', 'anchor', 'index', 'number')
+        found = []
         for i in range( 0, len( section )):
-            elt = section[ i ]
-            if wantsect in ( elt['line'].lower(),
-                             elt['anchor'].lower(),
-                             str( elt['index'] )):
+            elt        = section[ i ]
+            elt_fields = [ elt[ name ].lower() for name in search_fields ]
+
+            ismatch = False
+            if wantre:
+                if any( wantre.match( field ) for field in elt_fields ):
+                    ismatch = True
+            elif wantsect in elt_fields:
+                ismatch = True
+
+            if ismatch:
                 beg = elt['byteoffset']
                 try:
                     end = section[ i+1 ][ 'byteoffset' ]
                 except IndexError:
                     end = None
-                print( text[ beg : end ] )
-                break
+                found.append( slice( beg, end ))
+        if found:
+            foundtext = ''.join( text[ r ] for r in found )
+            print( foundtext.rstrip() )
         else:
             print( 'Section not found', file=sys.stderr )
             return 1
