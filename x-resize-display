@@ -40,13 +40,42 @@ set_res()
     res=$1                 ; shift
     output=${1-$(get_out)} ; shift
 
-    # Assume 16:9 aspect ratio, since that's what all the manufacturers are
-    # forcing on us these days.  Sigh.
+    # Assume 16:9 aspect ratio for `p' labels, since that's what all the
+    # manufacturers are forcing on us these days.  Sigh.
     case ${res,,} in
-        4k    | uhd  ) res=3840x2160 ;;
-        2k    | qhd  ) res=2560x1440 ;;
-        1080p | fhd  ) res=1920x1080 ;;
-        720p         ) res=1280x720  ;;
+                  quhd  | 4320p | 8k ) res=7680x4320 ;; # 16:9
+                                  6k ) res=6144x3456 ;; # 16:9
+                                  5k ) res=5120x2880 ;; # 16:9
+                   uhd  | 2160p | 4k ) res=3840x2160 ;; # 16:9
+                  wqhd  | 1440p | 2k ) res=2560x1440 ;; # 16:9
+                   qhd               ) res=2560x1440 ;; # 16:9
+        qwxga                        ) res=2048x1152 ;; # 16:9
+                   fhd  | 1080p      ) res=1920x1080 ;; # 16:9
+                    hd+              ) res=1600x900  ;; # 16:9
+         wxga  |    hd  |  720p      ) res=1280x720  ;; # 16:9
+                   nhd               ) res= 640x360  ;; # 16:9
+
+        wqxga                        ) res=2560x1600 ;; # 16:10
+        wuxga                        ) res=1920x1200 ;; # 16:10
+        wsxga+                       ) res=1680x1050 ;; # 16:10
+         wxga+                       ) res=1440x900  ;; # 16:10
+         wxga                        ) res=1280x800  ;; # 16:10
+
+         sxga                        ) res=1280x1024 ;; #  5:4
+
+         qxga                        ) res=2048x1536 ;; #  4:3
+         uxga                        ) res=1600x1200 ;; #  4:3
+          xga                        ) res=1024x768  ;; #  4:3
+         svga                        ) res=800x600   ;; #  4:3
+          vga                        ) res=640x480   ;; #  4:3
+
+        # weird aspect ratios
+                  duhd               ) res=7680x2160 ;; # 32:9
+                   qhd+              ) res=3440x1600 ;; # 43:20 (~19:9)
+                 uwqhd               ) res=3440x1440 ;; # 43:18 (~21:9)
+                 uwfhd               ) res=2560x1080 ;; # 64:27 (~21:9)
+
+
     esac
 
     xrandr1 --output "$output" --mode "$res" "$@"
