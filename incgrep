@@ -1,62 +1,153 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # incgrep --- search all header files in known include directories for pattern
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 1996-01-29
 # Public domain.
 
-# $Id: incgrep,v 2.6 2012/09/06 18:34:11 friedman Exp $
-
-cc=${CC-gcc}
-cpp=cpp
-
-lang=c
-
-# Only used if not using gcc/gnu cpp
-includes=/usr/include
-
-if ($cc -v) > /dev/null 2>&1; then
-    version=`$cc -v 2>&1 | sed -ne '/gcc version/!d' -e 's/gcc version  *//p'`
-    case "$version" in
-        2.95.* | [3-9].* )
-            cpp=`$cc -print-prog-name=cpp` ;;
-        2.* )
-            ccdir=`$cc -print-libgcc-file-name | sed -e 's/\/[^/]*$//'`
-            cpp=$ccdir/cpp ;;
-    esac
-
-    case $1 in
-        -lang-* )
-            lang=`echo "$1" | sed -e 's/^-lang-//'`
-            cpp="$cpp -x $lang"
-            shift ;;
-    esac
-
-    includes=`$cpp -v 2>&1 < /dev/null \
-              | sed -ne '/#include <...> search starts here:/!d
-                         n
-                         :l
-                         /^End of search list./!{
-                           p
-                           n
-                           b l
-                         }'`
-fi
-
-follow=
-if (find --version) > /dev/null 2>&1 ; then
-    follow=-follow
-else
-    case `(uname -s) 2> /dev/null` in
-        FreeBSD ) follow=-follow ;;
-    esac
-fi
-
+cmdp()
 {
-    case $lang in
-        c ) find $includes $follow -name '*.h' -print0 ;;
-        * ) find $includes $follow -type f     -print0 ;;
+    for cmd in "$@"; do
+        if type "$cmd" > /dev/null 2>&1; then
+            echo "$cmd"
+            return 0
+        fi
+    done
+    echo false
+    return 1
+}
+
+setup()
+{
+    allargs=( "$@" )
+    ccargs=()
+    grepargs=()
+    includes=( /usr/include /usr/local/include )
+                            )
+
+    : ${U_RELEASE:=`uname -r`}
+    :  ${U_SYSTEM:=`uname -s`}
+    :      ${FIND:=`cmdp gfind  find`}
+    :     ${XARGS:=`cmdp gxargs xargs`}
+    :        ${CC:=`cmdp gcc    cc`}
+    :      ${GREP:='grep -E'}
+
+    # n.b. this also works with clang
+    gcc_version=`gcc_version`
+    case $gcc_version in
+        '' ) is_gcc=false ;;
+        *  ) is_gcc=true  ;;
     esac
-} 2> /dev/null | xargs -0 egrep "$@"
+
+    lang=c
+}
+
+gcc_version()
+{
+    $CC -v 2>&1 |
+        sed -e '/gcc version/!d' \
+            -e 's/gcc version  *//' \
+            -e 's/ .*//'
+}
+
+gcc_includes()
+{
+    local sedstr='
+        /#include <...> search starts here:/!d
+        n
+        :l
+        /^End of search list./!{
+            p
+            n
+            b l
+        }'
+
+
+    $CC -v -x $lang -E "${ccargs[@]}" /dev/null 2>&1 | sed -n -e "$sedstr"
+}
+
+incgrep()
+{
+    follow=
+    if ($FIND --version) > /dev/null 2>&1 ; then
+        follow=-follow
+    else
+        case $U_SYSTEM in
+            Linux | FreeBSD ) follow=-follow ;;
+        esac
+    fi
+
+    case $lang in
+        c ) $FIND "${includes[@]}" $follow -name '*.h' -print0 ;;
+        * ) $FIND "${includes[@]}" $follow -type f     -print0 ;;
+    esac | $XARGS -0 $GREP "${grepargs[@]}"
+}
+
+# usage: member [key] ${array[@]}
+member()
+{
+    local key=$1 elt=
+    shift
+
+    for elt in "$@"; do
+        if [[ $key = $elt ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# usage amember [key] [arrayname]
+amember()
+{
+    declare -n arry=$2
+    member "$1" "${arry[@]}"
+}
+
+# usage: ainclude [key] [arrayname]
+# Appends key to array if it is not a member already.
+ainclude()
+{
+    declare -n arry=$2
+    member "$1" "${arry[@]}" && return 0
+    arry+=( "$1" )
+}
+
+main()
+{
+    setup "$@"
+
+    for arg in "${allargs[@]}"; do
+        case $arg in
+            -lang-* )
+                lang=${arg#-lang-}
+                ccargs+=( "$arg" ) ;;
+
+            -I* )
+                if $is_gcc; then
+                    ccargs+=( "$arg" )
+                else
+                    dir=${arg#-I}
+                    ainclude "$dir" includes
+                fi ;;
+
+            * )
+                grepargs+=( "$arg" ) ;;
+        esac
+    done
+
+    if $is_gcc; then
+        includes=( $(gcc_includes) )
+    fi
+
+    if [[ $U_SYSTEM = Linux ]]; then
+        ainclude "/usr/src/kernels/$U_RELEASE/include" includes
+        ainclude "/usr/src/kernels/$U_RELEASE/arch"    includes
+    fi
+
+    incgrep
+}
+
+main "$@"
 
 # eof
