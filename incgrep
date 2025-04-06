@@ -23,7 +23,6 @@ setup()
     ccargs=()
     grepargs=()
     includes=( /usr/include /usr/local/include )
-                            )
 
     : ${U_RELEASE:=`uname -r`}
     :  ${U_SYSTEM:=`uname -s`}
