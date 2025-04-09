@@ -37,7 +37,7 @@ esac
 mkdir -p rpmbuild/BUILD
 for d in SOURCES SPECS; do
     if [ -d rpmbuild/$d ]; then
-        rm rpmbuild/$d || rmdir rpmbuild/$d || exit 1
+        rm rpmbuild/$d || rmdir rpmbuild/$d || exit $?
     fi
     ln -s .. rpmbuild/$d
 done
@@ -45,11 +45,9 @@ done
 
 if $RPMBUILD --define '_topdir %(pwd)/rpmbuild' --nodeps -bp "$@" *.spec
 then
-    mv rpmbuild/BUILD/* $orig_dir
-    case $rpm_dir in
-        '' ) rm -rf rpmbuild ;;
-        *  ) cd .. && rm -rf $rpm_dir ;;
-    esac
+    mv rpmbuild/BUILD/*/* .
+    rmdir SPECPARTS 2> /dev/null
+    rm -rf rpmbuild
 fi
 
 # eof
