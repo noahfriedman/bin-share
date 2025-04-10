@@ -5,8 +5,6 @@
 # Created: 2000-01-14
 # Public domain.
 
-# $Id: gnuedit,v 1.9 2011/12/05 21:39:46 friedman Exp $
-
 # Commentary:
 
 # This used to use gnuserv/gnuclient, but now uses native v22+ emacsclient.
@@ -14,8 +12,7 @@
 # Code:
 
 use strict;
-
-$^W = 1; # enable warnings
+use warnings qw(all);
 
 use FindBin;
 use lib "$FindBin::Bin/../../lib/perl";
@@ -35,26 +32,27 @@ my $server_user      = (   $ENV{GNUEDIT_USER}
                         || $ENV{SUDO_USER}
                         || $ENV{LOGNAME}
                         || $ENV{USER}
-                        || getpwuid ($<));
-my $server_host;
+                        || getpwuid( $< ));
 my $server_uid;
 
-my $yemacs_prefix = "/export/src/emacs/build";
+my $verbose          = $ENV{GNUEDIT_VERBOSE} || -t fileno( *STDIN{IO} ),
+my $tmpdir           = $ENV{TMPDIR} || $ENV{TEMPDIR} || "/tmp";
 
-my $verbose = (defined $ENV{GNUEDIT_VERBOSE}
-               ?       $ENV{GNUEDIT_VERBOSE}
-               : -t fileno (*STDIN{IO}));
+my $yemacs_prefix    = "/export/src/emacs/build";
+
+my $eval;
+
 (my $progname = $0) =~ s|.*/||;
 
 sub _error
 {
-  print STDERR join (": ", $progname, @_), "\n";
+  print STDERR join( ": ", $progname, @_ ), "\n";
   return;
 }
 
 sub _verbose
 {
-  print $progname, ": ", join (" ",  @_), "\n" if $verbose;
+  print $progname, ": @_\n" if $verbose;
   return;
 }
 
@@ -69,8 +67,8 @@ sub copy_to_tmpfile
 {
   my ($from, $to, $perm, $uid, $uidperm) = @_;
 
-  return unless copy_file ($from, $to, undef, 1);
-  chown ($uid, -1, $to) || chmod ($uidperm & umask, $to);
+  return unless copy_file( $from, $to, undef, 1 );
+  chown( $uid, -1, $to ) || chmod( $uidperm & umask, $to );
   return 1;
 }
 
@@ -82,7 +80,7 @@ sub spawn
   if ($pid == 0)
     {
       $SIG{__WARN__} = sub { 0; };
-      exec (@_) || die "exec: $_[0]: $!\n";
+      exec( @_ ) or die "exec: $_[0]: $!\n";
     }
   wait;
   return $? == 0;
@@ -92,25 +90,25 @@ sub client
 {
   my $arg0 = shift;
 
-  if (-S $server_socket)
-    {
-      unshift @_, "--socket-name", $server_socket;
-    }
-  elsif (-f $server_auth_file)
-    {
-      $ENV{EMACS_SERVER_FILE} = $server_auth_file;
-    }
-  unshift @_, "--quiet" unless $verbose;
+  my @args;
+  push @args, "--socket-name", $server_socket     if -S $server_socket;
+  push @args, "--server-file", $server_auth_file  if -f $server_auth_file;
+  push @args, "--quiet" unless $verbose;
 
-  if ($arg0 eq 'exec')
+  if ($arg0 eq 'eval')
+    {
+      push @args, "--eval";
+      spawn( $client_program, @args, @_ );
+    }
+  elsif ($arg0 eq 'exec')
     {
       $SIG{__WARN__} = sub { 0; };
-      exec ($client_program, @_) || die "exec: $client_program: $!\n";
+      exec( $client_program, @args, @_ ) or die "exec: $client_program: $!\n";
     }
   else
     {
       unshift @_, $arg0;
-      spawn ($client_program, @_);
+      spawn( $client_program, @args, @_ );
     }
 }
 
@@ -120,30 +118,33 @@ sub gnuedit_make_evalform
 
   (my $basename     = $filename)     =~ s|.*/||;
   (my $realbasename = $realfilename) =~ s|.*/||;
-  my $dirname = file_directory (expand_file_name ($filename));
+  my $dirname = file_directory( expand_file_name( $filename ));
 
   my $fn = "gnuedit-frob";
-  my $fmt = "(progn
-               (defun %s ()
-                 (cond ((equal buffer-file-name \"%s\")
-                        (setq default-directory \"%s/\")
-                        (rename-buffer \"%s (%s)\" t)))
-                 (remove-hook \'server-visit-hook \'%s)
-                 (fmakunbound \'%s))
-               (add-hook \'server-visit-hook \'%s) t)";
-  $fmt =~ s/\n\s+/ /g;
+  my $fmt = q{(progn
+                (defun %s ()
+                  (cond ((equal buffer-file-name "%s")
+                         (setq default-directory "%s/")
+                         (rename-buffer "%s (%s)" t)))
+                  (remove-hook 'server-visit-hook '%s)
+                  (fmakunbound '%s))
+                (add-hook 'server-visit-hook '%s))
+             };
+  $fmt =~ s/^\s*(.*?)\s*$/$1/gm;
+  $fmt =~ s/\n+/ /g;
 
-  sprintf ($fmt, $fn,
+  my $s =
+  sprintf( $fmt, $fn,
            $realfilename,
            $dirname,
            $basename, $realbasename,
-           $fn, $fn, $fn);
+           $fn, $fn, $fn );
+  return $s;
 }
 
 sub gnuedit_indirect
 {
   my $exit_status = 0;
-  my $tmpdir = $ENV{TMPDIR} || $ENV{TEMPDIR} || "/tmp";
   my $tmpfile = "$tmpdir/gnuedit$$";
 
   # If we are running as another user; edit file-by-file, checking whether
@@ -153,89 +154,89 @@ sub gnuedit_indirect
       my $realfile = (-l $file ? dereference_links ($file) : $file);
       # If file is a symlink we want to make changes and backups to the
       # real file, not the symlink.
-      _verbose ("following symbolic link:", $file, "->", $realfile)
+      _verbose( "following symbolic link:", $file, "->", $realfile )
         if ($realfile ne $file);
 
-      my $filestat = xstat ($realfile, 1);
+      my $filestat = xstat( $realfile, 1 );
 
       # If file does not exist, use direct editing so user will be notified
       # that the file is new (as well as being told if the parent directory
       # is not writable); the file name might have been a typo.
       if (!defined $filestat
           || ($filestat->[4] == $server_uid
-              && files_writable_by_uid ($server_uid, file_directory ($realfile))))
+              && files_writable_by_uid( $server_uid, file_directory( $realfile ))))
         {
           # Pass realfile name to emacs if file would not be readable due
           # to too many levels of symbolic links.
-          my $usefile = (!stat ($file) && $! == ELOOP) ? $realfile : $file;
+          my $usefile = (!stat( $file ) && $! == ELOOP) ? $realfile : $file;
           $exit_status++
-            unless (spawn ($client_program, $usefile));
+            unless client( $usefile );
           next;
         }
 
-      xunlink ($tmpfile, 1);
-      if (!copy_to_tmpfile ($realfile, $tmpfile, 0600, $server_uid, 0666))
+      xunlink( $tmpfile, 1 );
+      if (!copy_to_tmpfile( $realfile, $tmpfile, 0600, $server_uid, 0666 ))
         {
           $exit_status++;
           next;
         }
-      my $tmpfilestat = xstat ($tmpfile);
+      my $tmpfilestat = xstat( $tmpfile );
 
-      unless (client ("--eval", gnuedit_make_evalform ($file, $tmpfile))
-              && client ($tmpfile))
+      unless (client ("eval", "--suppress-output", gnuedit_make_evalform( $file, $tmpfile ))
+              && client( $tmpfile ))
         {
-          _error ($client_program, "exited abnormally; aborting changes") if $? != 0;
-          xunlink ($tmpfile);
+          _error( $client_program, "exited abnormally; aborting changes" ) if $? != 0;
+          xunlink( $tmpfile );
           $exit_status++;
           next;
         }
 
-      my $newstat = xstat ($tmpfile);
+      my $newstat = xstat( $tmpfile );
       unless (defined $newstat)
         {
-          xunlink ($tmpfile) unless ($!+0 == ENOENT);
+          xunlink( $tmpfile ) unless ($!+0 == ENOENT);
           $exit_status++;
           next;
         }
 
-      if ($newstat->[7] == $tmpfilestat->[7]      # size
+      if (   $newstat->[7] == $tmpfilestat->[7]   # size
           && $newstat->[9] == $tmpfilestat->[9])  # mtime
         {
-          _verbose ("no modifications made to", $tmpfile);
-          xunlink ($tmpfile);
+          _verbose( "no modifications made to", $tmpfile );
+          xunlink( $tmpfile );
           next;
         }
 
-      backup_file ($realfile)
-        && copy_file ($tmpfile, $realfile)
-        && set_file_stats ($realfile, $filestat, 1|4)
-        && xunlink ($tmpfile);
+      backup_file( $realfile )
+        && copy_file( $tmpfile, $realfile )
+        && set_file_stats( $realfile, $filestat, 1|4 )
+        && xunlink( $tmpfile );
     }
 
-  exit ($exit_status);
+  exit( $exit_status );
 }
 
 sub parse_options
 {
   my $help = -1;
-
   local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
-  my $parser = Getopt::Long::Parser->new;
-  $parser->configure (qw(bundling autoabbrev));
 
-  Getopt::Long::config (qw(bundling autoabbrev pass_through permute));
+  my $parser  = Getopt::Long::Parser->new;
+  $parser->configure( qw(nobundling autoabbrev pass_through permute) );
+
   my $succ = $parser->getoptions
-    ('h|help|usage+'  => \$help,
-     "u|username=s"   => \$server_user,
-     "q|quiet"        => sub { $verbose = 0 },
-     "v|verbose"      => \$verbose);
+    ( 'h|help|usage+'  =>      \$help,
+      "u|username=s"   =>      \$server_user,
+      "e|eval"         =>      \$eval,
+      "v|verbose"      =>      \$verbose,
+      "q|quiet"        => sub { $verbose = 0 },
+    );
 
-  pod2usage (-exitstatus => 1, -verbose => 0)     unless $succ;
-  pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
+  pod2usage( -exitstatus => 1, -verbose => 0 )     unless $succ;
+  pod2usage( -exitstatus => 0, -verbose => $help ) if $help >= 0;
 
-  $server_uid = getpwnam ($server_user);
-  $server_socket = sprintf ("%s/emacs%d/%s",
-                            $ENV{TMPDIR} || "/tmp", $server_uid, $server_name);
+  $server_uid    = getpwnam( $server_user );
+  $server_socket = sprintf( "%s/emacs%d/%s", $tmpdir, $server_uid, $server_name );
 
   my $yemacs_dir = yemacs_latest() . "/lib-src";
   $ENV{PATH} = "$yemacs_dir:$ENV{PATH}" if -x "$yemacs_dir/$client_program";
@@ -243,12 +244,16 @@ sub parse_options
 
 sub main
 {
-  parse_options (\@_);
+  parse_options( \@_ );
 
-  client ('exec', @_) if ($server_uid == $< && $server_uid == $>);
-  gnuedit_indirect (@_);
+  if ($eval)
+    { client( 'eval', @_ ) }
+  elsif ($server_uid == $< && $server_uid == $>)
+    { client( 'exec', @_ ) }
+  else
+    { gnuedit_indirect( @_ ) }
 }
 
-main (@ARGV);
+main( @ARGV );
 
 # gnuedit ends here
