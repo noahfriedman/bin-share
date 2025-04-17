@@ -99,7 +99,6 @@ class PrettyPrinter( nfpprint.PrettyPrinter ):
             parent.__del__()
 
 
-repl_pp = None
 def pp( *args, **kwargs ):
     for arg in args:
         repl_pp.pprint( arg, **kwargs )
@@ -146,6 +145,7 @@ def slots( obj ):
 def pyrepl( argv=sys.argv ):
     global repl_pp
     repl_pp = PrettyPrinter( indent=2, width=76 )
+    repl_pp.exit_hook = []
 
     banner = '{} {}.{}.{} [{}] {}-{}'.format(
         platform.python_implementation(),
@@ -177,7 +177,17 @@ def pyrepl( argv=sys.argv ):
     # Don't display 'None' if there is nothing to display.
     sys.displayhook = lambda arg: (arg is None) or pp( arg )
     repl = Repl( locals=repl_locals )
-    repl.interact( banner=banner, exitmsg='' )
+
+    try:
+        repl.interact( banner=banner, exitmsg='' )
+    finally:
+        for hook in repl_pp.exit_hook:
+            try:
+                hook()
+            except Exception as err:
+                prog = os.path.basename( sys.argv[ 0 ])
+                print( prog, 'exit_hook', err, sep=': ', file=sys.stderr )
+
 
 
 if __name__ == '__main__':
