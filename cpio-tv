@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+# Noah Friedman <friedman@splode.com>
+# Created: 2025-04-19
+# Public domain
+
+import os
+import sys
+
+from cpioarchive import CpioArchive, CpioEntry
+from stat        import filemode, S_ISLNK
+from time        import strftime, gmtime
+from rowfmt      import mkrowfmt
+from io          import BytesIO
+
+def main():
+    if len( sys.argv ) < 2:
+        sys.argv.append( '-' )
+
+    for file in sys.argv[ 1: ]:
+        if file == '-':
+            fileobj = sys.stdin.buffer # binary
+        else:
+            fileobj = open( file, 'rb' )
+        if not fileobj.seekable():
+            # read entire file into memory so we can 'seek' on it
+            fileobj = BytesIO( initial_bytes=filejob.buffer.read() )
+        archive = CpioArchive( fileobj=fileobj )
+
+        rows = []
+        for elt in archive:
+            if S_ISLNK( elt.mode ):
+                linkto = ' -> ' + elt.read().decode()
+            else:
+                linkto = ''
+            elt_l = ( filemode( elt.mode ),
+                      elt.nlinks,
+                      elt.uid,
+                      elt.gid,
+                      elt.size,
+                      strftime( '%Y-%m-%d %H:%M:%S %z', gmtime( elt.mtime )),
+                      elt.name + linkto )
+            rows.append( elt_l )
+
+        rfmt, _ = mkrowfmt( rows, fill={ None:'>', -1:'{}', } )
+        for i, row in enumerate( rows ):
+            print( rfmt.format( *row ).rstrip() )
+
+
+if __name__ == '__main__':
+    main()
+
+# eof
