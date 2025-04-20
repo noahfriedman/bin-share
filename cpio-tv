@@ -23,7 +23,7 @@ def main():
             fileobj = open( file, 'rb' )
         if not fileobj.seekable():
             # read entire file into memory so we can 'seek' on it
-            fileobj = BytesIO( initial_bytes=filejob.buffer.read() )
+            fileobj = BytesIO( initial_bytes=fileobj.read() )
         archive = CpioArchive( fileobj=fileobj )
 
         rows = []
