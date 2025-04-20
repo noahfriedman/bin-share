@@ -119,28 +119,6 @@ def load( filename, eval=True ):
         return text
 
 
-def attrs( obj, pattern='', regex=False ):
-    if regex is not False:
-        if isinstance( regex, bool ):
-            regex = re.compile( pattern )
-        else:
-            regex = re.compile( pattern, flags=regex )
-        ismatch = lambda k: regex.search( str( k ))
-    else:
-        ismatch = lambda k: str( k ).find( pattern ) >= 0
-
-    res = {}
-    for k in dir( obj ):
-        if ismatch( k ):
-            res[ k ] = getattr( obj, k )
-    return res
-
-
-def slots( obj ):
-    sl = { name : getattr( obj, name, None ) for name in obj.__slots__ }
-    if sl:
-        return sl
-
 
 def pyrepl( argv=sys.argv ):
     global repl_pp
@@ -166,8 +144,8 @@ def pyrepl( argv=sys.argv ):
                           'pp'       : pp,
                           'bt'       : bt,
                           'load'     : load,
-                          'attrs'    : attrs,
-                          'slots'    : slots,
+                          'attrs'    : nfpprint.attrs,
+                          'slots'    : nfpprint.slots,
                         } )
 
     for elt in sys.argv[1:]:
