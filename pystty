@@ -1465,10 +1465,7 @@ def main():
             display_bits( tty, args )
 
         elif arg1 in ('speeds',):
-            speeds = sorted( int( elt[ 1: ] ) for elt in vars( _termios )
-                             if  elt[0] == 'B'
-                             and elt[1] in '0123456789' )
-            for spd in speeds:
+            for spd in sorted( int( k ) for k in SPEED.keys() ):
                 print( spd )
 
         else:
