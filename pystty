@@ -1396,9 +1396,10 @@ def main():
     tty = Stty( fd=args.device, options=args )
 
     showable_args = [
-        'speed', 'ispeed', 'ospeed', 'line',   'ldisc',  'cline',  'c_line',
-        'size',  'chars',  'cchars', 'iflags', 'oflags', 'cflags', 'lflags',
-        'bits', ]
+        'speed',  'ispeed', 'ospeed', 'speeds',
+        'line',   'ldisc',  'cline',  'c_line',
+        'iflags', 'oflags', 'cflags', 'lflags',
+        'size',   'chars',  'cchars', 'bits', ]
     showable_args.extend( TERMSZ.keys() )
 
     try:
@@ -1423,7 +1424,7 @@ def main():
         tty.restore( arg1 )
 
     elif slen == 1 and arg1 in showable_args:
-        if arg1.find( 'speed' ) in (0, 1):
+        if arg1.find( 'speed' ) in (0, 1) and arg1[ -1 ] != 's':
             ris = tty.getispeed()
             ros = tty.getospeed()
             ispeed = NTOSPEED[ ris ] if ris in NTOSPEED else ris
@@ -1462,6 +1463,13 @@ def main():
 
         elif arg1 in ('bits',):
             display_bits( tty, args )
+
+        elif arg1 in ('speeds',):
+            speeds = sorted( int( elt[ 1: ] ) for elt in vars( _termios )
+                             if  elt[0] == 'B'
+                             and elt[1] in '0123456789' )
+            for spd in speeds:
+                print( spd )
 
         else:
             raise Exception( 'This should not happen' )
