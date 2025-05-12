@@ -1,96 +1,51 @@
-#!/usr/bin/env perl
-# slowcat --- write output slowly, emulating physical serial terminal
-
+#!/usr/bin/env python3
+# slowcat --- write output slowly, emulating dialup terminal
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2003-01-01
 # Public domain
 
-# $Id: slowcat,v 2.2 2003/05/13 10:27:27 friedman Exp $
 
-# Commentary:
-# Code:
+import argparse
+import os
+import sys
+from   time import sleep
 
-$^W = 1; # enable warnings
 
-use strict;
-use Getopt::Long;
-use Symbol;
+def get_args():
+    p = argparse.ArgumentParser()
+    p.add_argument( '-b', '--bps', type=int, default=9600 )
+    p.add_argument( 'files', nargs='*' )
+    return p.parse_args()
 
-(my $progname = $0) =~ s|.*/||;
 
-my $bits_per_sec  = $ENV{BAUD} || 9600;
-# Due to HZ resolution in most kernels, it is unlikely that select will
-# return in a shorter period of time than 10ms.
-my $usec_interval_min = 10000;
-my $usec_interval = $usec_interval_min;
+def slowcat( ifh, bps ):
+    ofd = sys.stdout.fileno()
+    interval = 8 / bps
+    while c := ifh.read( 1 ):
+        os.write( ofd, c )
+        sleep( interval )
 
-sub slowcat ($$$)
-{
-  my ($fh, $bits_per_sec, $usec_interval) = @_;
-  $usec_interval = $usec_interval_min if $usec_interval < $usec_interval_min;
 
-  my $bytes_per_sec = $bits_per_sec / 8;
-  my $bytes_per_call = 0;
-  my $sleep_interval;
+def main():
+    args = get_args()
+    if not args.files:
+        slowcat( sys.stdin.buffer, args.bps )
+    else:
+        err = 0
+        for file in args.files:
+            try:
+                slowcat( open( file, 'rb' ), args.bps )
+            except OSError as diag:
+                print( diag, file=sys.stderr )
+                err = min( 127, err + 1 )
+        return err
 
-  # Try to find a balance between the granularity of the sleep interval and
-  # some roughly integral number of bytes to output with each call.  If the
-  # former is too large or the latter too fractional, the output will look
-  # choppy, especially at slower speeds.
-  while ($bytes_per_call < 1
-         || ($bytes_per_call - int ($bytes_per_call) >= .009))
-    {
-      $sleep_interval = ($usec_interval++) / 1000000;
-      $bytes_per_call = $bytes_per_sec * $sleep_interval;
-    }
-  $bytes_per_call = int ($bytes_per_call);
 
-  while (sysread ($fh, $_, $bytes_per_call))
-    {
-      syswrite (STDOUT, $_, $bytes_per_call);
-      select (undef, undef, undef, $sleep_interval);
-    }
-}
+if __name__ == '__main__':
+    try:
+        sys.exit( main() )
+    except KeyboardInterrupt:
+        sys.exit( (1<<7) | 2 )
 
-sub usage (@)
-{
-  print STDERR "$progname: @_\n\n" if @_;
-  print STDERR "Usage: $progname {options} {files}\n
-Options are:
--h, --help                   You're looking at it.
--b, --bps             BPS    Output BPS bits per second.
--i, --sleep-interval  USEC   Use USEC microseconds of granularity between
-                             writes.\n";
-  exit (1);
-}
 
-sub main ()
-{
-  Getopt::Long::config ('bundling', 'autoabbrev');
-  GetOptions ("h|help",             sub { usage () },
-              "b|bps=i",            \$bits_per_sec,
-              "i|sleep-interval=i", \$usec_interval);
-
-  # We need to be able to output at least 1 byte at a time.
-  $bits_per_sec = 8 if $bits_per_sec < 8;
-
-  unless (@ARGV)
-    {
-      slowcat (*STDIN{IO}, $bits_per_sec, $usec_interval);
-      exit (0);
-    }
-
-  my $fh = gensym;
-  while (@ARGV)
-    {
-      my $filename = shift @ARGV;
-      sysopen ($fh, $filename, 0) || die "$filename: $!";
-      slowcat ($fh, $bits_per_sec, $usec_interval);
-      close ($fh);
-    }
-  exit (0);
-}
-
-main ();
-
-# slowcat ends here
+# eof
