@@ -1,10 +1,8 @@
-#!/usr/bin/env perl
+#!/usr/bin/env python3
 # file-metadata -- collect file metadata
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2010-03-22
 # Public domain
-
-# $Id: file-metadata,v 1.2 2010/05/19 16:05:21 friedman Exp $
 
 # Commentary:
 
@@ -15,430 +13,453 @@
 
 # Code:
 
-$^W = 1; # enable warnings
+import argparse
+import fnmatch
+import grp
+import json
+import os
+import pwd
+import re
+import sys
 
-use strict;
-use Data::Dumper;
-use Fcntl         qw(:DEFAULT :mode);
-use File::ExtAttr qw(:all);
-use IO::Handle;
+from base64       import b64encode, b64decode
+from stat         import filemode, S_ISDIR, S_ISLNK, S_ISREG
+from time         import strftime, gmtime
 
-(my $progname = $0) =~ s|^.*/||;
-my %opt;
+from nfpprint     import attrs, pformat
+from nfscalesize  import scale_size
+from rowfmt       import mkrowfmt
 
-sub _error
-{
-  print STDERR join (": ", $progname, @_), "\n";
-  return undef;
-}
+err_total = 0
+option    = None
 
-sub _verbose
-{
-  return undef unless $opt{verbose};
-  print join (" ", $progname . ":", @_), "\n";
-  return undef;
-}
 
-
-# Mandatory args: file, statinfo
-# Optional args: actions
-#
-# actions is a bitmask: 1 = chmod
-#                       2 = set atime/mtime
-#                       4 = chown
-sub set_file_stats
-{
-  my $file = shift;
-  my $statinfo = shift;
-  my $actions = shift || 1;
+def debugpp( *objs ):
+    for obj in objs:
+        print( pformat( obj ), file=sys.stderr )
 
-  # Set file permissions
-  (chmod ($statinfo->[2], $file)
-   || return _error (sprintf ("chmod(0%o)", $statinfo->[2] & 07777), $file, $!))
-    if ($actions & 1);
 
-  # Set atime/mtime
-  utime ($statinfo->[8], $statinfo->[9], $file) if ($actions & 2);
-  # Set owner/group
-  chown ($statinfo->[4], $statinfo->[5], $file) if ($actions & 4);
+def errmsg( *args, level=0, **kwargs ):
+    _exc = False
+    for arg in args:
+        if isinstance( arg, Exception ):
+            _exc = arg
+            global err_total
+            err_total = min( 127, err_total + 1 )
+            break
 
-  return 1;
-}
+    if not ( option.verbose or level > 0 ):
+        return
 
-# Mandatory args: from, to
-# Optional args: preserve, returnstatp, clobberp
-sub copy_file
-{
-  my ($from, $to, $preserve, $returnstatp, $clobberp) = @_;
-  my $fh_from = IO::Handle->new;
-  my $fh_to   = IO::Handle->new;
+    prog = sys.argv[0].split( '/' )[-1]
+    level = 'error' if level > 1 else 'warning'
+    err_args = [prog, level]
+    if _exc:
+        frame = _exc.__traceback__
+        caller = frame.tb_frame.f_code.co_qualname
+        lineno = frame.tb_lineno
+        err_args.append( ':'.join( (caller, str( lineno )) ))
 
-  _verbose ("copying", $from, "->", $to);
+    kwargs.setdefault( 'sep',  ': ' )
+    kwargs.setdefault( 'file', sys.stderr )
+    print( *err_args, *args, **kwargs )
 
-  $clobberp = 1 unless (defined $clobberp);
-  my $oflag = $clobberp ? O_TRUNC : O_EXCL;
 
-  sysopen ($fh_from, $from, O_RDONLY) || return _error ("open", $from, $!);
-  if (!sysopen ($fh_to, $to, O_WRONLY | O_CREAT | $oflag, 0600))
-    {
-      close ($fh_from);
-      _error ("open", $to, $!);
-      return undef;
-    };
+def basename( name, extension=None ):
+    base = os.path.basename( name )
+    if base == '':
+        return '.'
+    if not extension:
+        return base
+    elif extension in ('.', '.*'):
+        if (pos := base.rindex( '.' )) >= 0:
+            return base[ :pos ]
+    else:
+        if extension[0] != '.':
+            extension = '.' + extension
+        if base.endswith( extension ):
+            return base[ : -len( extension ) ]
+    return base
 
-  my $data;
-  while (my $len = sysread ($fh_from, $data, 2**20)) # 1mb buffer
-    {
-      if (syswrite ($fh_to, $data, $len) != $len)
-        {
-          _error ("write", $to, $!);
-          close ($fh_from);
-          close ($fh_to);
-          return undef;
-        }
-    }
 
-  my @fromstat = stat ($fh_from);
-  my @tostat   = stat ($fh_to) if ($returnstatp);
-  close ($fh_from);
-  close ($fh_to);
-
-  return [ \@fromstat, \@tostat ] if ($returnstatp);
-
-  set_file_stats ($to, \@fromstat, ($preserve ? 1|2|4 : 1));
-  return 1;
-}
-
-# Mandatory arg: from
-# Optional arg: to
-sub backup_file
-{
-  my ($from, $to) = @_;
-  my $fromstat = xstat ($from);
-
-  $to = make_backup_file_name ($from, $ENV{VERSION_CONTROL})
-    unless defined $to;
-
-  # Backup by copying if file has multiple hard links
-  return copy_file ($from, $to, 1) if ($fromstat->[3] > 1);
-
-  # Backup by rename; new version will be in new file.
-  _verbose ("renaming", $from, "->", $to);
-  rename ($from, $to) || _error ("rename", join (" ", $from, "->", $to), $!);
-}
-
-# Mandatory args: file
-# Optional args: vc
-sub make_backup_file_name
-{
-  my $file = shift;
-  my $vc = lc (shift) || $ENV{VERSION_CONTROL} || '';
-
-  return $file . "~" if ($vc eq 'never' || $vc eq 'simple');
-
-  my $dir = ".";
-  my $base = $file;
-  if (index ($file, "/") >= $[)
-    {
-      $base =~ s|.*/||o;
-      $dir = $file;
-      $dir =~ s|/[^/]*$||o;
-    }
-
-  my $dfh = IO::Handle->new;
-  opendir ($dfh, $dir) || return _error ("opendir", $dir, "$!");
-  my $m = eval 'sub { m/^' . quotemeta ($base) . '\.~(\d+)~$/o && $1 }';
-  my $h = [sort { -($a <=> $b) } grep { $_ = &$m } readdir $dfh]->[0];
-  closedir ($dfh);
-
-  return join ("", $file, ".~", $h + 1, "~") if (defined $h);
-  join ("", $file, ($vc eq 'numbered' || $vc eq 't' ? ".~1~" : "~"));
-}
-
-sub xsysopen
-{
-  my ($filename, $mode, $perm) = @_;
-
-  $mode = O_RDONLY unless defined $mode;
-  if    ($mode eq 'r')  { $mode = O_RDONLY }
-  elsif ($mode eq 'w')  { $mode = O_WRONLY | O_CREAT | O_TRUNC }
-  elsif ($mode eq 'rw') { $mode = O_RDWR   | O_CREAT | O_TRUNC }
-  elsif ($mode eq 'a')  { $mode = O_WRONLY | O_CREAT | O_APPEND }
-  elsif ($mode eq 'a+') { $mode = O_RDWR   | O_CREAT | O_APPEND }
-
-  $perm = 0666 unless defined $perm;
-
-  my $fh = IO::Handle->new;
-  unless (sysopen ($fh, $filename, $mode, $perm))
-    {
-      return _error ("open", $filename, $!);
-    }
-  return $fh;
-}
-
-# read as much as possible up to size until eof; don't return partial reads
-sub xsysread
-{
-  my ($fh, $size, $offset) = @_[0,2,3];  # buffer $_[1] modified in-place
-
-  unless (defined $size)
-    {
-      my @st = stat ($fh);
-      $size = $st[7] if @st;
-      $size -= $offset if defined $size && defined $offset;
-    }
-  return 0 unless defined $size && $size > 0;
-  $offset = 0 unless defined $offset;
-
-  my $total = 0;
-  while ($total < $size)
-    {
-      my $rsz = sysread ($fh, $_[1], $size - $total, $offset + $total);
-      return $rsz if $rsz < 0; # error
-      last if $rsz == 0;       # eof
-      $total += $rsz;
-    }
-  return $total;
-}
-
-sub file_contents
-{
-  my $file = shift;
-
-  my $fh = xsysopen ($file, "r");
-  return unless $fh;
-  local $_;
-  xsysread ($fh, $_);
-  close ($fh);
-  return $_;
-}
+# Pad all numbers to a width of 5, so that '6.0'
+# will be less than '10.0' (00006 < 00010)
+def make_number_padded_sortkey( val ):
+    fn  = lambda mo: '{:05d}'.format( int( mo.group( 1 )))
+    return re.sub( r'([0-9]+)', fn, val )
 
 
-sub grind_over_tree
-{
-  my ($dir, $fn, $fn_on_dirs) = @_;
+def xstat( file, follow_symlinks=False, error_level=1 ):
+    if isinstance( file, os.stat_result ):
+        return file
+    elif hasattr( file, 'stat' ):
+        return file.stat( follow_symlinks=follow_symlinks )
+    else:
+        try:
+            return os.stat( file, follow_symlinks=follow_symlinks )
+        except OSError as diag:
+            errmsg ( diag, level=error_level )
+            return None
 
-  return &$fn ($dir) unless (! -l $dir && -d _);
 
-  # fn_on_dirs can be a simple boolean or it can be a separate function, in
-  # which case the procedure is called as a "pre-" hook.  This can be used
-  # e.g. to make sure the directory permissions are changed so the
-  # directory is readable/traversible before descending into it.
-  # Even if this is a code ref, $fn will be called on this entry too.
-  &$fn_on_dirs ($dir, $fn, $fn_on_dirs)
-    if ($fn_on_dirs && ref $fn_on_dirs eq 'CODE');
+def walk_fs_tree( root, callback, /, follow_symlinks=False, max_depth=None, xdev=None ):
+    st = xstat( root, follow_symlinks=follow_symlinks )
+    if st is None:
+        return ()
 
-  my $dfh = IO::Handle->new;
-  if (opendir ($dfh, $dir))
-    {
-      my @files = sort grep (!/^\.\.?$/o, readdir ($dfh));
-      closedir ($dfh);
+    if xdev is True:
+        root_fsid = st.st_dev
+    if follow_symlinks and S_ISDIR( st.st_mode ):
+        seen = set()
 
-      for my $ent (@files)
-        {
-          my $file = join ("/", $dir, $ent);
-          grind_over_tree ($file, $fn, $fn_on_dirs);
-        }
-    }
-  else
-    {
-      _error ("opendir", $dir, $!);
-    }
-  &$fn ($dir) if $fn_on_dirs;
-}
 
-sub get_file_xattrs
-{
-  my $file = shift;
+    def skip_node( st, depth ):
+        if not S_ISDIR( st.st_mode ):
+            return False
+        if isinstance( max_depth, int ) and depth >= max_depth:
+            return True
+        if follow_symlinks:
+            key = (st.st_dev, st.st_ino)
+            if key in seen:
+                debugpp( 'seen', {'st':st, 'depth':depth, 'key':key })
+                return True
+            else:
+                seen.add( key )
+        if xdev is True and st.st_dev != root_fsid:
+                return True
+        return False
 
-  my @ns = listfattrns ($file);
-  # This can happen if file is a symlink to a non-existent file
-  # or the operation is not supported on the filesystem.
-  return undef if (@ns == 1 && !defined $ns[0]);
 
-  my %attr;
-  map { my $ns = $_;
-        map { my $val = getfattr ($file, $_, { namespace => $ns });
-              $attr{join (".", $ns, $_)} = $val if defined $val;
-            } listfattr ($file, { namespace => $ns });
-      } @ns;
+    def walk( node, st=None, depth=0 ):
+        if not st:
+            st = xstat( node, follow_symlinks=follow_symlinks )
+            if not st:
+                return ()
 
-  return \%attr;
-}
+        try:
+            res = callback( node, st )
+        except Exception as err:
+            errmsg( err )
+            return ()
 
-sub get_file_perms
-{
-  my $file = shift;
+        if res is None:
+            return None
+        elif res is True:
+            result = []
+        else:
+            result = [res]
 
-  my @st = lstat ($file);
-  return unless @st;
+        if skip_node( st, depth ):
+            return result
+        elif S_ISDIR( st.st_mode ):
+            try:
+                dirlist = os.scandir( node )
+            except OSError as diag:
+                errmsg( diag )
+                return ()
 
-  my %stat = ( uid   => $st[4],
-               gid   => $st[5],
-               mode  => S_IMODE ($st[2]),
-               atime => $st[8],
-               mtime => $st[9],
-             );
+            for file in dirlist:
+                try:
+                    result.extend(
+                        elt for elt in walk( file, depth=depth+1 ) if elt )
+                except OSError as diag:
+                    errmsg( diag )
 
-  if    (-l _) { $stat{type} = 'l'; $stat{link} = readlink ($file) }
-  elsif (-d _) { $stat{type} = 'd' }
-  elsif (-p _) { $stat{type} = 'p' }
-  elsif (-S _) { $stat{type} = 'S' }
-  elsif (-c _) { $stat{type} = 'c'; $stat{dev} = $st[6] }
-  elsif (-b _) { $stat{type} = 'b'; $stat{dev} = $st[6] }
+        return result
 
-  my $user = getpwuid ($stat{uid});
-  $stat{user} = $user if defined $user;
+    return walk( root, st )
 
-  my $group = getgrgid ($stat{gid});
-  $stat{group} = $group if defined $group;
-
-  return \%stat;
-}
-
-sub get_file_metadata
-{
-  my $file = shift;
-  my $data = get_file_perms ($file);
-
-  # File::ExtAttr uses getxattr, not lgetxattr, so we can't get the xattrs
-  # of the symlink itself.
-  my $xattrs = get_file_xattrs ($file) unless -l $file;
-  $data->{xattrs} = $xattrs if defined $xattrs;
-  return $data;
-}
-
-sub get_tree_metadata
-{
-  my $files = shift;
-  my %file;
-  my $fn = sub { $file{$_[0]} = get_file_metadata ($_[0]) };
-  map { grind_over_tree ($_, $fn, 1) } @$files;
-  return \%file;
-}
 
 
-sub set_file_xattrs
-{
-  my ($file, $xattrs) = @_;
-}
+def format_size( size ):
+    scaled = scale_size( size )
+    if scaled.endswith( ' B' ):
+        return scaled[ :-2 ]
+    return scaled
 
-sub set_file_perms
-{
-  my ($file, $data) = @_;
-  my @stat;
 
-  $stat[2] = $data->{mode};
-  $stat[4] = $data->{uid};
-  $stat[5] = $data->{gid};
-  $stat[8] = $data->{atime};
-  $stat[9] = $data->{mtime};
+def format_time( time, fmt='%Y-%m-%d %H:%M:%SZ' ):
+    frac_sec = time - int( time )
+    if frac_sec:
+        frac_sec = '{:9.9f}'.format( round( frac_sec, 9 ))[1:]
+        fmt = fmt.replace( '%S', f'%S{frac_sec}' )
+    return strftime( fmt, gmtime( time ))
 
-  my $uid = getpwnam ($data->{user});
-  $stat[4] = $uid if defined $uid;
 
-  my $gid = getgrnam ($data->{group});
-  $stat[5] = $gid if defined $gid;
+def format_rdev( rdev: int ):
+    return '{:>3}, {:>3}'.format( os.major( rdev ), os.minor( rdev ))
 
-  my $actions = 1;              # always chmod
-  $actions   |= 2 if $opt{mtime}; # set atime/mtime
-  # chown/chgrp if euid is 0.  For ordinary users don't give away files
-  # even if filesystem or kernel policy permits it.
-  $actions   |= 4 if ($> == 0);
 
-  set_file_stats ($file, \@stat, $actions);
-}
+def format_gid( gid ):
+    try:
+        return grp.getgrgid( gid ).gr_name
+    except KeyError:
+        return str( gid )
 
-sub set_file_metadata
-{
-  my ($file, $data) = @_;
 
-  set_file_perms  ($file, $data);
-  set_file_xattrs ($file, $data->{xattrs});
-}
+def format_uid( uid ):
+    try:
+        return pwd.getpwuid( uid ).pw_name
+    except KeyError:
+        return str( uid )
 
 
-sub serialize
-{
-  my ($d) = Data::Dumper->new (\@_, ['$data']);
+def collect_exclude_p( md, exclude ):
+    path = md[ 'path' ]
+    base = basename( path )
+    for pat in exclude:
+        if isinstance( pat, re.Pattern ):
+            if pat.search( base ):
+                return True
+        elif '/' in pat:
+            if fnmatch.fnmatch( path, pat ):
+                return True
+        elif fnmatch.fnmatch( base, pat ):
+            return True
+    return False
 
-  $d->Quotekeys (0);  # slows module down moderately
-  $d->Useqq     (0);  # slows module *way* down
-  $d->Sortkeys  (0);  # not super slow, but not needed either.
-  $d->Indent    (1);  # attrs 1 per line; more compact deltas.
-  $d->Terse     (1);  # we don't need a variable name.
 
-  return $d->Dump;
-}
+def collect_stat_metadata( md, st ):
+    verbose = option.verbose
 
-sub deserialize
-{
-  eval $_[0];
-}
+    def add_attrs( *attrs ):
+        for attr in attrs:
+            try:
+                md[ attr ] = getattr( st, 'st_' + attr )
+            except AttributeError:
+                pass
+
+    add_attrs( 'mode', 'ino', 'nlink', 'uid', 'gid', 'size', 'atime', 'mtime', 'ctime' )
+    if verbose:
+        add_attrs( 'dev', 'rdev' )
+        if st.st_rdev != 0:
+            md[ 'rdev_string' ] = format_rdev( st.st_rdev )
+
+    for attr in ( 'atime', 'ctime', 'mtime' ):
+        if md[ attr ].is_integer():
+            md[ attr ] = int( md[ attr ] )
+
+    if verbose:
+        extra = { 'mode_string'  : lambda st: filemode( st.st_mode ),
+                  'mode_octal'   : lambda st: oct( st.st_mode ),
+                  'user'         : lambda st: format_uid( st.st_uid ),
+                  'group'        : lambda st: format_gid( st.st_gid ),
+                  'size_string'  : lambda st: format_size( st.st_size ),
+                  'atime_string' : lambda st: format_time( st.st_atime ),
+                  'ctime_string' : lambda st: format_time( st.st_ctime ),
+                  'mtime_string' : lambda st: format_time( st.st_mtime ),
+                }
+        for elt in extra:
+            xform = extra[ elt ]
+            try:
+                md[ elt ] = xform( st )
+            except KeyError:
+                pass
+    return md
+
+
+def collect_posix1e_acl_metadata( md, st ):
+    try:
+        from posix1e import ( ACL,
+                              has_extended,
+                              TEXT_ABBREVIATE,
+                              TEXT_NUMERIC_IDS, )
+    except (ModuleNotFoundError, ImportError):
+        return md
+
+    file = md[ 'path' ]
+    try:
+        if has_extended( file ):
+            flags = 0
+
+            acl     = ACL( file=file )
+            block   = acl.to_any_text( options=TEXT_ABBREVIATE|TEXT_NUMERIC_IDS )
+            entries = block.decode().split( '\n' )
+            md[ 'acl' ] = entries
+    except OSError as diag:
+        errmsg( diag )
+    return
+
+
+
+def collect_xattr_metadata( md, st ):
+    follow_symlinks = option.follow_symlinks
+    file = md[ 'path' ]
+    xattr = {}
+    try:
+        names = os.listxattr( file, follow_symlinks=follow_symlinks )
+        for name in names:
+            try:
+                value = os.getxattr( file, name )
+                if name in ('security.selinux',) and value[-1] == 0:
+                    value = value[ :-1 ]
+
+                try:
+                    if value.decode().isprintable():
+                        value = value.decode()
+                    else:
+                        value = 'base64:' + b64encode( value ).decode()
+                except UnicodeDecodeError:
+                    value = 'base64:' + b64encode( value ).decode()
+                xattr[ name ] = value
+            except OSError:
+                errmsg( diag )
+    except OSError as diag:
+        errmsg( diag )
+    if xattr:
+        md[ 'xattr' ] = xattr
+    return md
+
+
+def collect_file_metadata( file, st=None ):
+    verbose         = option.verbose
+    exclude         = option.exclude
+    follow_symlinks = option.follow_symlinks
+
+    md = {}
+    if not st:
+        st = xstat( file, follow_symlinks=follow_symlinks )
+        if not st:
+            return ()
+
+    if option.xd and S_ISDIR( st.st_mode ):
+        return True
+
+    try:
+        md[ 'path' ] = file.path
+        if file.is_symlink():
+            md[ 'symlink' ] = os.readlink( file.path )
+    except AttributeError:
+        md[ 'path' ] = file
+        if S_ISLNK( st.st_mode ):
+            md[ 'symlink' ] = os.readlink( file )
+
+    if exclude and collect_exclude_p( md, exclude ):
+        return ()
+
+    try:
+        collect_stat_metadata( md, st )
+    except Exception as diag:
+        errmsg( diag )
+
+    try:
+        collect_posix1e_acl_metadata( md, st )
+    except Exception as diag:
+        errmsg( diag )
+
+    try:
+        collect_xattr_metadata( md, st )
+    except Exception as diag:
+        errmsg( diag )
+
+    return md
+
 
 
-sub parse_options
-{
-  return unless @_ && ref $_[0] eq 'ARRAY';
+def pretty_print_metadata( metadata ):
+    fields = ( 'ino', 'mode_string', 'nlink', 'user', 'group', 'size_string', 'mtime_string', 'path' )
+    data = []
+    for elt in metadata:
+        row = [ elt.get( f, '' ) for f in fields ]
+        if rdevstr := elt.get( 'rdev_string', None ):
+            idx  = fields.index( 'size_string' )
+            row[ idx ] = rdevstr
+        if symlink := elt.get( 'symlink', None ):
+            idx  = fields.index( 'path' )
+            row[ idx ] = ' -> '.join( (elt[ 'path' ], symlink) )
+        data.append( row )
+    fmt, _ = mkrowfmt( data, fill={ 0:'>', 2:'>', 5:'>' })
+    for row in data:
+        print( fmt.format( *row ))
 
-  my $help = -1;
-  my $opt = $_[1] || {};
-  $opt->{file}    = '.file-metadata';
-  $opt->{verbose} = 1;
 
-  local *ARGV = \@{$_[0]}; # modify our local arglist, not real ARGV.
+def identify_hardlinks( metadata ):
+    hlinks = {}
+    for elt in metadata:
+        if not elt:
+            continue
+        if not S_ISREG( elt[ 'mode' ] ):
+            continue
+        ino = elt[ 'ino' ]
+        try:
+            hlinks[ ino ].append( elt )
+        except KeyError:
+            hlinks[ ino ] = [ elt ]
 
-  use Getopt::Long;
-  my $parser = Getopt::Long::Parser->new;
-  $parser->configure (qw(autoabbrev bundling));
-  $parser->getoptions
-    ("h|help|usage+" => \$help,
+    for ino in hlinks:
+        val = hlinks[ ino ]
+        if len( val ) < 2:
+            continue
+        names = sorted( elt[ 'path' ] for elt in val )
+        for elt in val:
+            elt[ 'hardlink' ] = names
+    return
 
-     "f|file=s"      => sub { $opt->{file}       = $_[1] },
-     "F|file-list=s" => sub { $opt->{file_list}  = $_[1] },
 
-     "c|compare!"    => sub { $opt->{compare}    = $_[1] },
-     "s|save!"       => sub { $opt->{save}       = $_[1] },
-     "a|apply!"      => sub { $opt->{apply}      = $_[1] },
-     "m|mtime!"      => sub { $opt->{mtime}      = $_[1] },
-     "e|empty-dirs!" => sub { $opt->{empty_dirs} = $_[1] },
+def parse_file_patterns( *args ):
+    patterns = []
+    for pat in args:
+        if len( pat ) > 2 and pat[0] == pat[-1] == '/':
+            patterns.append( re.compile( pat[1:-1] ))
+        else:
+            patterns.append( pat )
+    return patterns
 
-     "v|verbose"     => sub { $opt->{verbose}    = 1 },
-     "q|quiet"       => sub { $opt->{verbose}    = 0 },
-    );
 
-  pod2usage (-exitstatus => 0, -verbose => $help) if $help >= 0;
-  return $opt;
-}
+def get_args():
+    p = argparse.ArgumentParser()
+    p.add_argument( '-F', '--follow-symlinks', action='store_true',  default=False )
+    p.add_argument( '-J', '--json',            action='store_true',  default=False )
+    p.add_argument( '-D', '--xd', '--exclude-directories', action='store_true',  default=False )
+    p.add_argument( '-x', '--exclude',         action='append' )
+    p.add_argument( '-m', '--max-depth',       action='store',       default=None, type=int )
+    p.add_argument( '-v', '--verbose',         action='count',       default=0 )
+    p.add_argument( '--xdev', '--one-file-system', action=argparse.BooleanOptionalAction, default=None )
+    p.add_argument( 'files', nargs='+' )
+    return p.parse_args()
 
-sub read_file_list
-{
-  my $file = shift;
-  my $fh = *STDIN{IO} if $file eq '-';
 
-  unless (ref $fh)
-    {
-      $fh = xsysopen ($file);
-      return unless $fh;
-    }
+def main():
+    args = get_args()
+    if not args.json:
+        args.verbose = True
 
-  my @files = map { chomp; $_ } <$fh>;
-  return \@files;
-}
+    global option
+    option = args
 
-sub main
-{
-  parse_options (\@_, \%opt);
+    if args.exclude:
+        patterns = parse_file_patterns( *args.exclude )
+        option.exclude = patterns
 
-  my $file_list = (defined $opt{file_list}
-                   ? read_file_list ($opt{file_list})
-                   : \@_);
-  my $data = get_tree_metadata ($file_list);
+    walk_kwargs = dict( follow_symlinks = args.follow_symlinks,
+                        max_depth       = args.max_depth,
+                        xdev            = args.xdev, )
+    callback = collect_file_metadata
 
-  my $s = serialize ($data);
-  print $s, "\n";
-}
+    metadata = []
+    for file in args.files:
+        walked = walk_fs_tree( file, callback, **walk_kwargs )
+        #debugpp( walked )
+        if walked:
+            metadata.extend( elt for elt in walked if elt )
+    identify_hardlinks( metadata )
 
-main (@ARGV);
+    metadata.sort( key=lambda elt: make_number_padded_sortkey( elt['path'] ))
+    if args.json:
+        metadata_by_path = { elt[ 'path' ]: elt for elt in metadata }
+        serialized = json.dumps( metadata_by_path, indent=2, sort_keys=False )
+        print( serialized )
+    else:
+        pretty_print_metadata( metadata )
 
-__END__
+
+
+if __name__ == '__main__':
+    try:
+        main()
+        sys.exit( err_total )
+    except KeyboardInterrupt:
+        sys.exit( (1<<7) | 2 )
+
+
+# eof
