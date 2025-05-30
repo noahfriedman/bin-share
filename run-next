@@ -4,8 +4,6 @@
 # Created: 1995-09-07
 # Public domain.
 
-# $Id: run-next,v 1.11 2006/09/08 20:08:34 friedman Exp $
-
 # Commentary:
 
 # This script can be used by front-end wrapper scripts in a user's personal
@@ -16,120 +14,188 @@
 #
 #         #!/bin/sh
 #         export LD_PRELOAD=...
-#         exec run-next $0 ${1+"$@"}
+#         exec run-next "$0" "$@"
 #
 # This script looks at the full path of the specified argument and will
 # only search directories in PATH after that occurence.
 
 # Code:
 
-$^W = 1;  # enable warnings
-
 use strict;
+use warnings qw(all);
+
 use Getopt::Long;
+use Pod::Usage;
+use POSIX;
 
-(my $progname = $0) =~ s|.*/||;
+(my $progname = $0) =~ s=.*/==;
 
-my $opt_print = 0;
-my $opt_skip = 1;
+my %opt = ( print => 0,
+            skip  => 1,
+            debug => $ENV{RUN_NEXT_DEBUG},
+          );
 
-sub usage
+sub parse_options
 {
-  print "Usage: $progname {options} [program {program options}]\n
-Options are:
--h, --help                   You're looking at it.
--p, --print                  Just print full name of program to run,
-                             without running it.  Any program options are
-                             discarded.
--s, --skip           N       Run Nth instance of program in path.
-                             This is relative to absolute pathname
-                             specified in program name to run, if any.
-                             Default is 1.\n";
-  exit (1);
+  my $help = -1;
+  local *ARGV = $_[0]; # modify our local arglist, not real ARGV.
+
+  my $parser  = Getopt::Long::Parser->new;
+  $parser->configure( qw(bundling autoabbrev require_order) );
+
+  my $succ = $parser->getoptions
+    ( 'h|help|usage+'  => \$help,
+      'D|debug'        => \$opt{debug},
+      'p|print'        => \$opt{print},
+      's|skip=i'       => \$opt{skip},
+    );
+
+  pod2usage( -exitstatus => 1, -verbose => 0 )     unless $succ;
+  pod2usage( -exitstatus => 0, -verbose => $help ) if $help >= 0;
 }
 
 sub err
 {
   my $fatal = shift;
-  my $msg = join (": ", $progname, @_);
+  my $msg = join( ": ", $progname, @_ );
   print STDERR $msg, (substr ($msg, -1, 1) eq "\n"? "" : "\n");
   exit ($fatal) if $fatal;
-  return undef;
+  return; # void
 }
 
-# Use the `access' syscall if available; this is more reliable than just
-# checking the mode bits on the file since other ACLs might apply.
-# Some perl ports don't have the POSIX module, so we use an exception
-# handler to catch that error and examine mode bits as a last resort.
-sub executable_p
+sub DEBUG
 {
-  eval {
-    require POSIX; import POSIX; # runtime; 'use' would be compile-time
-    local $^W = 0;
-    return 1 if access ($_[0], &X_OK);
-    return 0;
-  };
-  return (-f $_[0] && -x _ && -s _); # _ reuses last stat struct
+  return unless $opt{debug};
+  return err( 0, @_ );
+}
+
+sub basename
+{
+  local $_ = shift;
+  s=(?<!/)/+$==;
+  s=.*/==;
+  return $_;
+}
+
+sub dirname
+{
+  local $_ = shift;
+  return undef unless m=/=;
+
+  s=(?<!/)/+$==;
+  s=/[^/]+$==;
+  $_ = "/" if $_ eq "";
+  return $_;
+}
+
+sub executable_file_p
+{
+  return 0 unless -f $_[0] && -x _ && -s _;
+  my $accp = access( $_[0], X_OK );
+  DEBUG("access( $_[0], X_OK ) == $accp");
+  return $accp && 1;
 }
 
 sub main
 {
-  Getopt::Long::config ('bundling', 'autoabbrev', 'require_order');
-  GetOptions ("h|help",   \&usage,
-              "p|print",  \$opt_print,
-              "s|skip=i", \$opt_skip);
+  parse_options( \@_ );
 
-  my $arg = shift @ARGV;
-  my ($progdir, $prog) = ($1, $2)
-    if ($arg =~ m|^(.*)/([^/]*)$|);
-  $progdir = "/" if (defined $progdir && $progdir eq "");
-  $prog = $arg unless (defined $prog);
+  my $progarg = shift;
+  my $progdir = dirname(  $progarg );
+  my $prognam = basename( $progarg );
+  my $found_progdir = defined( $progdir ) ? 0 : 1;
 
-  my $found_progdir = defined $progdir ? 0 : 1;
-  my %progdirs;
-  my $seen = 0;
+  DEBUG("progdir=$progdir, prognam=$prognam, found=$found_progdir\n\n");
+
+  my %seen_progdir_name;
+  my %seen_progdir_inode;
+  my $counter = 0;
   my $execdir;
-  my $dir;
-  for my $dir (split (/:/, $ENV{PATH}))
+  for my $dir (split( /:/, $ENV{PATH} ))
     {
-      $dir =~ s/\/$//g; # strip any trailing slashes (xemacs subprocesses)
-      $dir = "." if ($dir eq "");
-      $found_progdir = 1 if (!$found_progdir && $dir eq $progdir);
-      next unless ($found_progdir);
-      next if (exists $progdirs{$dir});
-      my $f = join ("/", $dir, $prog);
-      next unless executable_p ($f);
-      $progdirs{$dir} = $seen++;
-      next unless ($seen > $opt_skip);
+      DEBUG("counter=$counter, skip=$opt{skip}, found=$found_progdir, dir=$dir");
+
+      if ($dir eq "")
+        { $dir = "." }
+      else
+        { $dir =~ s=(?<!/)/+$== }
+
+      $found_progdir = 1 if !$found_progdir && $dir eq $progdir;
+      next unless $found_progdir;
+
+      next if exists $seen_progdir_name{$dir};
+
+      # If dir is a symlink to a previous dir in path (or vice-versa),
+      # don't count that as a separate directory.
+      my @st_dir = stat( $dir );
+      my $dir_key = join( ':', $st_dir[0], $st_dir[1] );  # dev:ino
+      next if exists $seen_progdir_inode{$dir_key};
+
+      my $file = $dir eq "/" ? $dir . $prognam : join( "/", $dir, $prognam );
+      my $efp = executable_file_p( $file );
+      DEBUG("executable_file_p( $file ) == $efp\n\n");
+      next unless $efp;
+
+      $seen_progdir_name{$dir} = $seen_progdir_inode{$dir_key} = $counter++;
+
+      DEBUG("counter=$counter, skip=$opt{skip}, found=$found_progdir");
+
+      next unless $counter > $opt{skip};
       $execdir = $dir;
       last;
     }
 
-  err (1, $progdir, "directory not in PATH") unless ($found_progdir);
-  err (1, $prog, "program not in PATH")
-    unless (defined $progdir || scalar keys %progdirs > 0);
-  err (1, $prog, "program not in any directories after \`$progdir' in PATH")
-    if (defined $progdir && scalar keys %progdirs == 0);
-  if ($seen <= $opt_skip)
+  if (! $found_progdir)
+    { err( 1, $progdir, "directory not in PATH" ) }
+  elsif (! (defined( $progdir ) || %seen_progdir_name))
+    { err( 1, $prognam, "program not in PATH" ) }
+  elsif (defined( $progdir ) && !%seen_progdir_name)
+    { err( 1, $prognam, "program not in any directories after \`$progdir' in PATH" ) }
+
+
+  if ($counter <= $opt{skip})
     {
-      err (0, $prog, sprintf ("only %d instances of program in path; "
-                              . "cannot skip more than %d:",
-                              $seen, $seen-1));
-      map { err (0, "  " . join ("/", $_, $prog)) }
-          sort { $progdirs{$a} <=> $progdirs{$b} } keys %progdirs;
-      exit (1);
+      err( 0, $prognam, sprintf( "only %d instances of program in path;"
+                                 . " cannot skip more than %d:",
+                                 $counter,
+                                 $counter-1 ));
+
+      map { err(0, "  " . join ("/", $_, $prognam))
+          } sort { $seen_progdir_name{$a} <=> $seen_progdir_name{$b}
+                 } keys %seen_progdir_name;
+      return 0;
     }
 
-  my $execprog = join ("/", $execdir, $prog);
-  if ($opt_print)
+  my $execprog = join( "/", $execdir, $prognam );
+  if ($opt{print})
     {
+      DEBUG("PRINT: $execprog\n\n");
       print $execprog, "\n";
-      exit (0);
+      return 1;
     }
-
-  exec ($execprog, @ARGV) || err (1, $execprog, "$!");
+  DEBUG("EXEC: $execprog\n\n");
+  exec( $execprog, @_ ) || err( 1, $execprog, "$!" );
 }
 
-main;
+exit( main( @ARGV ) == 0 );
 
-# run-next ends here
+__END__
+
+
+=head1 NAME
+
+run-next - run next program by name in path
+
+=head1 SYNOPSIS
+
+ Usage: run-next {options} [program {program options}]
+
+ Options:
+    -p, --print                  Just print full name of program to run,
+                                 without running it.
+
+    -s, --skip           N       Run Nth instance of program in path.
+                                 This is relative to absolute pathname
+                                 specified in program name to run, if any.
+                                 Default is 1.
+=cut
