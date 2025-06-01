@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+# pycmp -- compare two files byte by byte
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2025-05-31
+# Public domain
+
+# Commentary:
+
+# This is much slower than cmp(1) but outputs differences in more formats,
+# including showing bit-by-bit differences per byte.
+
+# Code:
+
+import os
+import re
+import sys
+
+from   argparse import ( Action,
+                         BooleanOptionalAction,
+                         ArgumentError,
+                         ArgumentParser,
+                         SUPPRESS )
+
+class CmpFile:
+    block_size = 4096
+
+    def __init__( self, filename, skip=0, limit=None ):
+        self.fh = open( filename, 'rb' )
+        self.file_size = os.stat( self.fh.fileno() ).st_size
+        self.total_len = 0
+        self.limit     = limit
+        if skip:
+            self.fh.seek( skip, os.SEEK_SET )
+            self.total_len += skip
+            if limit:
+                self.limit += skip
+        self.next() # get first block
+
+    def next( self ):
+        if self.limit:
+            amt = min( self.block_size,
+                       self.limit - self.total_len  )
+        else:
+            amt = self.block_size
+        self.current_block = self.fh.read( amt )
+        self.current_len   = len( self.current_block )
+        self.total_len    += self.current_len
+        return self.current_block
+
+    def __repr__( self ):
+        return self.current_block.__str__()
+
+    def __len__( self ):
+        return self.current_len
+
+    def __getitem__( self, i ):
+        return self.current_block[ i ]
+
+    def __eq__( self, other ):
+        if isinstance( other, type( self )):
+            return other.current_block == self.current_block
+        else:
+            return other == self.current_block
+
+    def cmp( self, other ):
+        p = self.current_block
+        offset = self.total_len - self.current_len
+        if isinstance( other, type( self )):
+            q = other.current_block
+        else:
+            q = other
+        if p == q:
+            return ()
+        diff = []
+        lp = len( p )
+        lq = len( q )
+        lm = min( lp, lq )
+        for i, l, r in zip( range( lm ), p, q ):
+            if l != r:
+                diff.append( (i + offset, l, r) )
+        if lp > lq:
+            diff.append( (lm + offset, p[lm:], None) )
+        elif lq > lp:
+            diff.append( (lm + offset, None, q[lm:]) )
+        return diff
+
+
+def progname():
+    name = sys.argv[0]
+    return name[ name.rfind( '/' )+1: ]
+
+
+def errmsg( *args, **kwargs ):
+    fatal = kwargs.pop( 'exit', False )
+    kwargs.setdefault( 'file', sys.stderr )
+    kwargs.setdefault( 'sep', ': ' )
+    print( progname(), 'error', *args, **kwargs )
+    if fatal:
+        sys.exit( fatal if isinstance( fatal, int ) else 1 )
+
+
+def eof_on( obj ):
+    prog = progname()
+    print( f'{prog}: EOF after byte {obj.total_len} on {obj.fh.name}' )
+
+
+def dispchar( c ):
+    if c & 128:    # 8-bit
+        if         c  < 0xa0 : return 'M-^' + chr( c ^ 0b11000000 )
+        if         c == 0xa0 : return 'M-SPC'
+        if         c  < 0xff : return 'M-'  + chr( c ^ 0b10000000 )
+        return 'M-^?'
+    else:          # 7-bit
+        if         c  < 0x20 : return '^'   + chr( c ^ 0b01000000 )
+        if         c == 0x20 : return 'SPC'
+        if         c == 0x7f : return '^?'
+        return chr( c )
+
+
+format_field = { 'char' : '{1:>5s} {2:>5s}',
+                 'bin'  : '{3:08b} {4:08b}',
+                 'oct'  : '{3:03o} {4:03o}',
+                 'dec'  : '{3:>3d} {4:>3d}',
+                 'hex'  : '{3:02x} {4:02x}',
+                 'xor'  : '{5:08b}',
+               }
+
+
+format_order = ( 'char', 'hex', 'dec', 'oct', 'bin', 'xor' )
+
+
+def make_format( args ):
+    f1_size = os.stat( args.file1[0] ).st_size
+    f2_size = os.stat( args.file2[0] ).st_size
+    maxlen = len( str( min( f1_size, f2_size )))
+
+    fmt = ['{{0:>{}d}}'.format( maxlen )]
+    for field in format_order:
+        if getattr( args, field ):
+            fmt.append( format_field[ field ] )
+    return '    '.join( fmt )
+
+
+unit_byte_count = {}
+
+def byte_count( str_val ):
+    unit = unit_byte_count
+    if not unit:
+        unit[ 'b' ] = 512
+        for e, p in enumerate( 'kmgtpezyrq', start=1 ):
+            unit[ p ]        = 1024 ** e
+            unit[ p + 'ib' ] = unit[ p ]
+            unit[ p +  'b' ] = 1000 ** e
+
+    regex = re.compile( r'^\s*([\d.]+)\s*([kmgtpezyrqib]+)\s*$', flags=re.I )
+    match = regex.search( str( str_val ) )
+    if match:
+        size, factor = match.groups()
+        return int( float( size ) * unit[ factor.lower() ])
+    else:
+        return int( float( str_val ))
+
+
+class StoreSkip( Action ):
+    def __call__( self, parser, namespace, values_list, option_string=None ):
+        try:
+            if ':' in values_list:
+                values = tuple( byte_count( x ) for x in values_list.split( ':' ) )
+            else:
+                x = byte_count( values_list )
+                values = ( x, x )
+            setattr( namespace, self.dest, values )
+            print(repr(values_list), '=', values, file=sys.stderr)
+        except ValueError as e:
+            raise ArgumentError( self, e.args[0] )
+
+
+class StoreDataSize( Action ):
+    def __call__( self, parser, namespace, values_list, option_string=None ):
+        try:
+            value = byte_count( values_list )
+            setattr( namespace, self.dest, value )
+
+            print(repr(values_list), '=', value, file=sys.stderr)
+
+        except ValueError as e:
+            raise ArgumentError( self, e.args[0] )
+
+
+def get_args():
+    p = ArgumentParser()
+    p.register( 'action', 'store_skip', StoreSkip )
+    p.register( 'action', 'store_size', StoreDataSize )
+
+    p.add_argument( '-c', '--char', action=BooleanOptionalAction, default=False, )
+    p.add_argument( '-b', '--bin',  action=BooleanOptionalAction, default=False, )
+    p.add_argument( '-d', '--dec',  action=BooleanOptionalAction, default=False, )
+    p.add_argument( '-o', '--oct',  action=BooleanOptionalAction, default=True,  )
+    p.add_argument( '-x', '--hex',  action=BooleanOptionalAction, default=False, )
+    p.add_argument( '-X', '--xor',  action=BooleanOptionalAction, default=False, )
+    p.add_argument( '-i', '--ignore-initial', dest='skip',  action='store_skip', )
+    p.add_argument( '-n', '--limit',          dest='limit', action='store_size', )
+    p.add_argument( '-l',           action='store_true', help=SUPPRESS ) # `/bin/cmp' compat
+    p.add_argument( 'file1', nargs=1 )
+    p.add_argument( 'file2', nargs=1 )
+
+    args = p.parse_args()
+    if args.xor:
+        args.bin = True
+    return args
+
+
+def main():
+    args = get_args()
+    fmt = make_format( args )
+
+    if args.skip:
+        l = CmpFile( args.file1[ 0 ], limit=args.limit, skip=args.skip[0] )
+        r = CmpFile( args.file2[ 0 ], limit=args.limit, skip=args.skip[1] )
+    else:
+        l = CmpFile( args.file1[ 0 ], limit=args.limit )
+        r = CmpFile( args.file2[ 0 ], limit=args.limit )
+
+    result = 0
+    while l and r:
+        diff = l.cmp( r )
+        for elt in diff:
+            result = 1
+            ld = elt[1]
+            rd = elt[2]
+
+            if ld is None:
+                eof_on( l )
+                break
+            elif rd is None:
+                eof_on( r )
+                break
+            else:
+                if args.char:
+                    lc = dispchar( ld )
+                    rc = dispchar( rd )
+                else:
+                    lc = rc = ''
+                print( fmt.format( elt[0]+1, lc, rc, ld, rd, ld^rd ))
+        l.next()
+        r.next()
+    return result
+
+
+if __name__ == '__main__':
+    sys.exit( main() )
+
+# eof
