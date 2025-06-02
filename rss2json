@@ -1,0 +1,94 @@
+#!/usr/bin/env python
+# rss2json --- convert rss xml text into python dictionary
+# Author: Noah Friedman <friedman@splode.com>
+# Created: 2025-02-28
+# Public domain
+
+# Commentary:
+# Code:
+
+import json
+import sys
+
+
+try:
+    from lxml      import etree      as ET
+except (ImportError, ModuleNotFoundError):
+    from xml.etree import ElementTree as ET
+
+
+def etree2dict( element ):
+    try:
+        revmap = { v:k for k,v in element.nsmap.items() }
+    except AttributeError:  # nsmap is an lxml extension
+        revmap = {}
+
+
+    def revns( tag ):
+        if revmap:
+            if (prefix := tag.find( '}' )) > 0:
+                if (ns := tag[ 1:prefix ]) in revmap:
+                    return ':'.join( (revmap[ ns ], tag[ prefix+1: ]))
+        return tag
+
+
+    def descend( element ):
+        if len( element ) == 0:
+            if element.attrib:
+                return dict( element.attrib )
+            else:
+                return element.text
+        res = {}
+        for child in element:
+            tag   = revns( child.tag )
+            nodes = descend( child )
+            if tag in res:
+                try:
+                    res[ tag ].append( nodes )
+                except AttributeError:
+                    res[ tag ] = [ res[ tag ], nodes ]
+            else:
+                res[ tag ] = nodes
+        return res
+    return { element.tag: descend( element ) }
+
+
+def rss2dict( rsstext ):
+    text = rsstext if isinstance( rsstext, bytes ) else rsstext.encode()
+    return etree2dict( ET.fromstring( text ))
+
+
+def rss2json( rsstext, **kwargs ):
+    data = rss2dict( rsstext )
+    return json.dumps( data, **kwargs )
+
+
+def dofile( fh ):
+    text = fh.read()
+    print( rss2json( text, indent=2 ))
+
+
+def progname():
+    prog = sys.argv[0]
+    return prog[ prog.rfind( '/' )+1: ]
+
+
+def main():
+    if len( sys.argv ) <= 1:
+        dofile( sys.stdin )
+    else:
+        for file in sys.argv[1:]:
+            try:
+                fh = open( file, 'r' )
+            except OSError as e:
+                print( progname(), file, e.args[1], sep=': ', file=sys.stderr )
+                continue
+            dofile( fh )
+
+
+
+if __name__ == '__main__':
+    sys.exit( main() )
+
+
+# eof
