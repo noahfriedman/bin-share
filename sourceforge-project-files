@@ -18,7 +18,7 @@ sub new
   my $class = ref ($type) || $type;
   my $self = bless {}, $class;
 
-  map { $self->{$_} = 0  } (qw(crawl verbose));
+  map { $self->{$_} = 0  } (qw(crawl limit verbose));
   map { $self->{$_} = {} } (qw(_file _dir _seen));
   while (@_) { my $k = shift; $self->{$k} = shift }
 
@@ -38,10 +38,11 @@ sub _crawl
   my $dir   = $self->{_dir};
   my $seen  = $self->{_seen};
   my $recur = $self->{crawl};
+  my $limit = $self->{limit};
 
   print STDERR "Crawling $path\n" if $self->{verbose};
 
-  my $feed = XML::FeedPP->new( "$rss?path=$path" );
+  my $feed = XML::FeedPP->new( "$rss?path=$path&limit=$limit" );
   for my $item ( $feed->get_item() )
     {
       my $p = $item->title();
@@ -88,6 +89,7 @@ use Pod::Usage;
 
 our %opt = ( crawl   => 0,
              verbose => 0,
+             limit   => 1000,
            );
 
 sub parse_options
@@ -100,6 +102,7 @@ sub parse_options
   my $succ = $parser->getoptions
     ("h|help+"                  => \$help,
      "usage"                    => sub { $help = 1 },
+     "l|limit=i"                => \$opt{limit},
      "v|verbose"                => \$opt{verbose},
      "c|crawl"                  => \$opt{crawl},
     );
@@ -137,7 +140,11 @@ sourceforge-project-files - list downloadable files for a project
 
 =head1 SYNOPSIS
 
-     {-h|--help|--usage} {-v|--verbose} {-c|--crawl} project1 project2 ...
+     sourceforge-project-files {-h|--help|--usage}
+                               {-v|--verbose}
+                               {-c|--crawl}
+                               {-l|--limit=LIMIT}
+                               project1 [project2 [...]]
 
  The -h option may be repeated up to 3 times for increased verbosity.
 
@@ -163,6 +170,11 @@ directories below them.
 
 It's been observed that the file list trees can be out of date or incomplete.
 Crawling every directory may return more files.
+
+=item B<-l>, B<--limit>=C<LIMIT>
+
+Request up to LIMIT results.  The default is 1000, which is probably too
+small most of the time to retrieve every entry for any sizable project.
 
 =back
 
