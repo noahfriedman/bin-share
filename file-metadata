@@ -178,7 +178,7 @@ def format_size( size ):
     return scaled
 
 
-def format_time( time, fmt='%Y-%m-%d %H:%M:%SZ' ):
+def format_time( time, fmt='%Y-%m-%d %H:%M:%S %z' ):
     frac_sec = time - int( time )
     if frac_sec:
         frac_sec = '{:9.9f}'.format( round( frac_sec, 9 ))[1:]
@@ -187,7 +187,7 @@ def format_time( time, fmt='%Y-%m-%d %H:%M:%SZ' ):
 
 
 def format_rdev( rdev: int ):
-    return '{:>3}, {:>3}'.format( os.major( rdev ), os.minor( rdev ))
+    return [ os.major( rdev ), os.minor( rdev ) ]
 
 
 def format_gid( gid ):
@@ -233,7 +233,7 @@ def collect_stat_metadata( md, st ):
     if verbose:
         add_attrs( 'dev', 'rdev' )
         if st.st_rdev != 0:
-            md[ 'rdev_string' ] = format_rdev( st.st_rdev )
+            md[ 'rdev_tuple' ] = format_rdev( st.st_rdev )
 
     for attr in ( 'atime', 'ctime', 'mtime' ):
         if md[ attr ].is_integer():
