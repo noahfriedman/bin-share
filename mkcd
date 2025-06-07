@@ -1,38 +1,82 @@
-#!/bin/sh
-# $Id: mkcd,v 1.3 2005/12/27 05:08:27 friedman Exp $
+#!/usr/bin/env bash
+# This script assumes options available from Joerg Schilling's mkisofs from schilytools
 
-if ! [ -f .mkisofsrc ] && ! [ -f "$HOME/.mkisofsrc" ] ; then
-  # If .mkisofsrc exists, don't override those settings on the command line.
-  # On the other hand if the file doesn't exist, don't use any internal
-  # defaults from mkisofs.
-  set fnord         \
-      -A         '' \
-      -abstract  '' \
-      -biblio    '' \
-      -copyright '' \
-      -p         '' \
-      -publisher '' \
-      -sysid     '' \
-      -V         '' \
-      -volset    '' \
-      ${1+"$@"}
-  shift
+unset ${!LC_*} LANG
+export LC_ALL=C.utf-8
+
+export TZ=UTC
+
+#now='1970-01-01 00:00:00 +0000'
+now=$(date +'%Y-%m-%d %H:%M:%S %z')
+
+: ${MKISOFS=mkisofs}
+
+rc_options=(
+    -abstract  ''	# ABST in .mkisofsrc
+    -appid     ''	# APPI
+    -biblio    ''	# BIBL
+    -copyright ''	# COPY
+    -preparer  ''	# PREP
+    -publisher ''	# PUBL
+    -sysid     ''	# SYSI
+    -V         ''	# VOLI
+    -volset    ''	# VOLS
+)
+
+options=(
+    # TRANS.TBL is functionally obsolete in 2025, and annoying to have
+    # littered all over the filesystem.
+    # Also, trying to hide them doesn't seem to work.
+    #-translation-table
+    #-table-name    TRANS.TBL
+    #-hide          TRANS.TBL
+    #-hide-joliet   TRANS.TBL
+
+    -rational-rock
+    -iso-level      3
+    #-dir-mode   0755
+    #-file-mode  0644
+    #-uid           0
+    #-gid           0
+
+    -J              # joliet
+    #-hide-joliet-trans-tbl
+    #-hide-rr-moved
+    -ucs-level      3
+
+    # disabling rr_moved violates specs, but nobody cares
+    # also unnecessary with schilytools after 2006
+    #-disable-deep-relocation
+    -cache-inodes   # for hard links
+    -duplicates-once
+
+    #-input-charset  ${MKISOFS_CHARSET-'utf-8'}  # iso8859-1
+    #-output-charset ${MKISOFS_CHARSET-'utf-8'}  # iso8859-1
+
+    -pad
+    #-no-bak        # enabled means skip .bak/~/# files
+
+    #-creation-date      date_spec
+    #-effective-date     date_spec
+    #-expiration-date    date_spec
+    #-modification-date  date_spec
+    #-reproducible-date  "$now"      # affects all dates above and sets -noatime
+    -noatime
+
+    #-verbose
+    #-verbose        # twice for extra verbosity
+    #-log-file "${MKISOFS##*/}.log"
+)
+
+
+# If .mkisofsrc exists, don't override those settings on the command line.
+# On the other hand if the file doesn't exist, don't use any internal
+# defaults from mkisofs.
+if ! ( [ -f .mkisofsrc ] || [ -f "$HOME/.mkisofsrc" ] )
+then
+    options+=( "${rc_options[@]}" )
 fi
 
-charset=${MKISOFS_CHARSET-'utf-8'}
+exec $MKISOFS "${options[@]}" "$@"
 
-exec mkisofs                         \
-    -v -v                            \
-    -r                               \
-    -J                               \
-    -T                               \
-    -table-name TRANS.TBL            \
-    -hide-joliet-trans-tbl           \
-    -hide-rr-moved                   \
-    -input-charset  $charset         \
-    -output-charset $charset         \
-    -pad                             \
-    -no-bak                          \
-    ${1+"$@"}
-
-# mkcd ends here
+# eof
