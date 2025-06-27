@@ -1,86 +1,300 @@
 #!/bin/sh
 
-LC_COLLATE=C
-export LC_COLLATE
+setup()
+{
+    PROGNAME=${0##*/}
 
-cmdp() { type "$@" > /dev/null 2>&1; }
-case ${FIND-nil} in nil ) if cmdp gfind; then FIND=gfind; fi ;; esac
-case ${TAR-nil}  in nil ) if cmdp gtar;  then  TAR=gtar;  fi ;; esac
-case ${SORT-nil} in nil ) if cmdp gsort; then SORT=gsort; fi ;; esac
+    LC_COLLATE=C
+    export LC_COLLATE
 
-: ${ZLEVEL:=9}
-: ${DIST_TAR_ZIP:=gzip}
-
-: ${FIND:=find}
-: ${FPRINT:=print}
-: ${RM:=rm}
-: ${SORT:=sort}
-: ${TAR:=tar}
-: ${TOUCH:=touch}
-
-
-while [ $# -gt 0 ]; do
-    case $1 in
-        -gz    ) DIST_TAR_ZIP=gzip  ;;
-        -bz2   ) DIST_TAR_ZIP=bzip2 ;;
-        -lz    ) DIST_TAR_ZIP=lzip  ;;
-        -gzip | -bzip2 | -lzma | -lzip | -xz ) DIST_TAR_ZIP=${1#-} ;;
-        -[0-9] ) ZLEVEL=${1#-} ;;
-        -u*    ) TAROPT="$TAROPT --owner=${1#-u}" ;;
-        -g*    ) TAROPT="$TAROPT --group=${1#-g}" ;;
-        -o*    ) TAROPT="$TAROPT --owner=${1#-o} --group=${1#-o}" ;;
-        -m*    ) TAROPT="$TAROPT --mode=${1#-m}"  ;;
-        -n     ) TAROPT="$TAROPT --numeric-owner" ;;
-        * ) break ;;
+    # Since there's no easy way to test if a non-GNU find supports -print0,
+    # just assume that it does, and this variable can be used as a manual
+    # override if it doesn't. Typically if it doesn't, neither does xargs
+    # and sort doesn't have a -z option either.
+    case ${USE0:=true} in
+        [1ty] | on | true | yes )
+            USE0=true  ;;
+        * ) USE0=false ;;
     esac
-    shift
-done
 
-gnup() { "$1" --version 2>&1 | grep "GNU" > /dev/null; }
-if gnup $TAR; then
-    gnutar=t
-    if gnup $FIND && gnup $SORT; then
-        FPRINT=print0
-        SORTOPT="$SORTOPT --zero-terminated -V"
+    case ${FIND-nil} in nil ) if cmdp gfind; then FIND=gfind; fi ;; esac
+    case ${GREP-nil} in nil ) if cmdp ggrep; then GREP=ggrep; fi ;; esac
+    case ${SORT-nil} in nil ) if cmdp gsort; then SORT=gsort; fi ;; esac
+    case ${TAR-nil}  in nil ) if cmdp gtar;  then  TAR=gtar;  fi ;; esac
+
+    : ${FIND:=find}
+    : ${GREP:=grep}
+    : ${SORT:=sort}
+    : ${TAR:=tar}
+    : ${DIST_TAR_ZIP:=gzip}
+    : ${ZEXT:=.gz}
+    : ${ZLEVEL:='9 '}  # trailing space indicates not user-set
+    : ${TOUCH:=touch}
+    : ${RM:=rm}
+    : ${REMOVEDIR:=false}
+    : ${VERBOSE:=true}
+    : ${PIPE:=false}
+
+    while [ $# -gt 0 ]; do
+        case $1 in
+            -gz   | -gzip  ) DIST_TAR_ZIP=gzip  ;;
+            -bz2  | -bzip2 ) DIST_TAR_ZIP=bzip2 ;;
+            -lz   | -lzip  ) DIST_TAR_ZIP=lzip  ;;
+            -lzo  | -lzop  ) DIST_TAR_ZIP=lzop  ;;
+            -lzma          ) DIST_TAR_ZIP=lzma  ;;
+            -lz4           ) DIST_TAR_ZIP=lz4   ;;
+            -xz            ) DIST_TAR_ZIP=xz    ;;
+            -zst  | -zstd  ) DIST_TAR_ZIP=zstd  ;;
+
+            -[0-9]  ) ZLEVEL=${1#-} ;;
+            -1[0-9] ) ZLEVEL=${1#-} ;;  # zstd, lz4
+            -2[0-2] ) ZLEVEL=${1#-} ;;  # zstd
+
+            -u*     ) TAROPT="$TAROPT --owner=${1#-u}" ;;
+            -g*     ) TAROPT="$TAROPT --group=${1#-g}" ;;
+            -o*     ) TAROPT="$TAROPT --owner=${1#-o} --group=${1#-o}" ;;
+            -m*     ) TAROPT="$TAROPT --mode=${1#-m}"  ;;
+            -n      ) TAROPT="$TAROPT --numeric-owner" ;;
+
+            -pipe   )      PIPE=true  ;;
+            -q      )   VERBOSE=false ;;
+            -rm     ) REMOVEDIR=true  ;;
+            * ) break ;;
+        esac
+        shift
+    done
+
+    if [ $ZLEVEL -eq 0 ]; then
+        ZPROG=${CAT:-cat}
+        ZOPT=
+        ZEXT=
+    else
+        ZPROG=$DIST_TAR_ZIP
+        ZOPT=-$ZLEVEL
+        case ${ZPROG##*/} in
+            gzip  ) ZEXT=.gz   ;;
+            bzip2 ) ZEXT=.bz2  ;;
+            lzip  ) ZEXT=.lz   ;;
+            lzop  ) ZEXT=.lzo  ;;
+
+            lz4 )
+                ZEXT=.lz4
+                case $ZLEVEL in '9 ' ) ZLEVEL=12 ZOPT=-12 ;; esac
+                if [ $ZLEVEL -gt  3 ]; then ZOPT="$ZOPT -T0"  ; fi
+                if ! $PIPE;            then ZOPT="$ZOPT --rm" ; fi
+                ;;
+
+            xz | lzma )
+                ZEXT=.${ZPROG##*/}
+                if [ $ZLEVEL -gt 3 ]; then
+                    # xz will limit to 4 cores if there are more when -T=0
+                    nthreads=0
+                    if cmdp nproc; then nthreads=`nproc`; fi
+                    ZOPT="$ZOPT --threads=$nthreads"
+                fi
+                ;;
+
+            zstd )
+                ZEXT=.zst
+                case $ZLEVEL in '9 ' ) ZLEVEL=22 ZOPT=-22 ;; esac
+                if   [ $ZLEVEL -gt 19 ]; then ZOPT="$ZOPT -T0 --ultra"
+                elif [ $ZLEVEL -gt  3 ]; then ZOPT="$ZOPT -T0"
+                fi
+                if ! $PIPE; then ZOPT="$ZOPT --rm" ; fi
+                ;;
+
+            * ) err "$DIST_TAR_ZIP: unknown compression method"
+                exit 1
+                ;;
+        esac
+    fi
+
+    if $PIPE; then
+        TAR_ERRFILE=${TMPDIR-/tmp}/$PROGNAME.err$$
+        trap '$RM -f "$TAR_ERRFILE"' 0 1 2 3 15
+    fi
+
+    if $USE0 ; then
         TAROPT="$TAROPT --null"
     fi
-fi
 
-zip=$DIST_TAR_ZIP
-z=${DIST_TAR_ZIP##*/}
-zargs=-$ZLEVEL
-case ${zip##*/} in
-    gzip  ) z=gz  ;;
-    bzip2 ) z=bz2 ;;
-    lzip  ) z=lz ;;
-    xz | lzma )
-        if [ $ZLEVEL -gt 3 ]; then
-            # xz will limit to 4 cores if there are more when -T=0
-            nthreads=0
-            if type nproc > /dev/null 2>&1; then nthreads=`nproc`; fi
-            zargs="$zargs --threads=$nthreads"
-        fi ;;
-    * ) echo "dist-tar: $DIST_TAR_ZIP: unknown compression method" 1>&2
-        exit 1 ;;
-esac
+    # HAVE_GNU_TAR can be preset from the environent.  This is appropriate
+    # if native tar supports -T and --null.  It does in FreeBSD 10, for
+    # example, but you can't use --help to verify.
+    if gnup $TAR
+        then : ${HAVE_GNU_TAR:=true}
+        else : ${HAVE_GNU_TAR:=false}
+    fi
 
-for dir in "$@" ; do
-    # Protect against accidental trailing slash, i.e. if someone does
-    # dist-tar foo/, don't create foo/.tar.gz only to delete foo after.
-    dir=${dir%/}
-    { case $gnutar in
-          t ) echo "dist-tar: (gnu) packing $dir.tar.$z"
-              $FIND "$dir" -$FPRINT \
-                  | $SORT $SORTOPT \
-                  | $TAR $TAROPT --no-recursion -T - -cvf - \
-                  | $zip $zargs > "$dir.tar.$z" ;;
+    if find_has_printf
+        then : ${HAVE_FIND_PRINTF:=true}
+        else : ${HAVE_FIND_PRINTF:=false}
+    fi
 
-          * ) echo "dist-tar: packing $dir.tar.$z"
-              $TAR $TAROPT -cvf - "$dir" \
-                  | $zip $zargs > "$dir.tar.$z" ;;
-      esac
-    } && $TOUCH -r "$dir" "$dir.tar.$z" \
-      && $RM -rf "$dir"
-done
+    return $#  # inform how many unprocessed args should be left
+}
+
+err() { echo "$PROGNAME: $*" 1>&2 ; }
+msg() { $VERBOSE && echo "$PROGNAME: $*" ; }
+
+find_has_printf()
+{
+    $FIND --help 2>&1 | $GREP ' -printf ' > /dev/null
+}
+
+cmdp() { type "$@" > /dev/null 2>&1 ; }
+gnup() { "$1" --version 2>&1 | $GREP "GNU" > /dev/null ; }
+
+xfind()
+{
+    # If this function is called at all we can assume gnu tar
+    if $HAVE_FIND_PRINTF; then
+        if $USE0
+            then PRINT_FMT="$BASENAME/%P\0"
+            else PRINT_FMT="$BASENAME/%P\n"
+        fi
+        $FIND "$DIR" -printf "$PRINT_FMT"
+    else
+        if $USE0
+            then FPRINT=print0
+            else FPRINT=print
+        fi
+        (cd "$PARENT" && $FIND "$BASENAME" -$FPRINT)
+    fi | xsort
+}
+
+xsort()
+{
+    if $USE0
+        then $SORT --zero-terminated -V "$@"
+        else $SORT "$@"
+    fi
+}
+
+xtar()
+{
+    TARFILE=${1--}
+    if $VERBOSE
+       then V=v
+       else V=
+    fi
+
+    if $HAVE_GNU_TAR; then
+        $TAR $TAROPT -C "$PARENT" --no-recursion -T - -c${V}f "$TARFILE"
+    else
+        $TAR $TAROPT -C "$PARENT" -c${V}f "$TARFILE" "$BASENAME"
+    fi
+    tar_xcode=$?
+
+    if $PIPE && [ $tar_xcode -ne 0 ]; then
+        echo $tar_xcode > $TAR_ERRFILE
+    fi
+
+    return $tar_xcode
+}
+
+xcompress()
+{
+    if ! $PIPE; then
+        msg "Compressing $OUTFILE to $OUTFILE$ZEXT"
+    fi
+    if $VERBOSE
+        then V=--verbose
+        else V=
+    fi
+    $ZPROG $V $ZOPT "$@"
+}
+
+mkdist()
+{
+    DIR=${1%/}  # strip any trailing /
+    BASENAME=${DIR##*/}
+    PARENT=${DIR%/*}
+    case $PARENT in
+        $DIR ) PARENT=. ;;
+    esac
+
+    if ! [ -e "$DIR" ]; then
+        err "$DIR; No such file or directory"
+        return 1
+    fi
+
+    if $PIPE; then
+        OUTFILE=$BASENAME.tar$ZEXT
+    else
+        OUTFILE=$BASENAME.tar
+        if [ -e "$OUTFILE$ZEXT" ]; then
+            err "$OUTFILE$ZEXT already exists; skipping"
+            return 1
+        fi
+    fi
+    if [ -e "$OUTFILE" ]; then
+        err "$OUTFILE already exists; skipping"
+        return 1
+    fi
+
+    if $HAVE_GNU_TAR; then
+        msg "(gnu) packing $OUTFILE"
+        if [ $ZLEVEL -gt 0 ]; then
+            if $PIPE; then
+                xfind | xtar | xcompress > "$OUTFILE"
+            else
+                xfind | xtar "$OUTFILE" && xcompress "$OUTFILE"
+            fi
+        else
+            xfind | xtar "$OUTFILE"
+        fi
+    else
+        msg "packing $OUTFILE"
+        if [ $ZLEVEL -gt 0 ]; then
+            if $PIPE; then
+                xtar | xcompress > "$OUTFILE"
+            else
+                xtar "$OUTFILE" && xcompress "$OUTFILE"
+            fi
+        else
+            xtar "$OUTFILE"
+        fi
+    fi
+    result=$?
+    if $PIPE && [ -f "$TAR_ERRFILE" ]; then
+        read result < "$TAR_ERRFILE"
+        $RM -f "$TAR_ERRFILE"
+        return $result
+    fi
+
+    if [ $result -eq 0 ]; then
+        if $PIPE
+           then $TOUCH -r "$DIR" "$OUTFILE"
+           else $TOUCH -r "$DIR" "$OUTFILE$ZEXT"
+        fi
+        if $REMOVEDIR; then
+           $VERBOSE && msg "Removing $DIR"
+           $RM -rf "$DIR"
+        fi
+    fi
+    return $result
+}
+
+main()
+{
+    setup "$@"
+    argsleft=$?
+    while [ $# -gt $argsleft ]; do
+        shift
+    done
+
+    overall_result=0
+    for dir in "$@"; do
+        mkdist "$dir"
+        if [ $? -ne 0 ]; then
+            overall_result=1
+        fi
+    done
+
+    return $overall_result
+}
+
+main "$@"
 
 # eof
